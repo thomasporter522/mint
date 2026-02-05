@@ -134,6 +134,8 @@ function buildForm(form: OpenForm): Term {
     return buildBlocks(closedForm.form, closedForm.items, null)
   }
 
+  console.log("incoming")
+
   console.log("BUILDER ERROR: ", form)
   return meta({type: "BUILDER ERROR"});
 }

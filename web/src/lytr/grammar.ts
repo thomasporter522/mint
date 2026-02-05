@@ -40,9 +40,9 @@ export function getPrecedence(token: PrimaryToken): [Precedence, Precedence] {
     // case 'TPostulate': return [{ type: 'Uninterested' }, { type: 'Precedence', value: 0.0 }];
     // case 'TChecker': return [{ type: 'Uninterested' }, { type: 'Precedence', value: 0.0 }];
     // case 'TConstruct': return [{ type: 'Uninterested' }, { type: 'Precedence', value: 0.0 }];
-    case 'TPostulate': return [{ type: 'Uninterested' }, { type: 'Uninterested' }];
-    case 'TChecker': return [{ type: 'Uninterested' }, { type: 'Uninterested' }];
-    case 'TConstruct': return [{ type: 'Uninterested' }, { type: 'Uninterested' }];
+    case 'TPostulate': return [{ type: 'Uninterested' }, { type: 'Interior' }];
+    case 'TChecker': return [{ type: 'Uninterested' }, { type: 'Interior' }];
+    case 'TConstruct': return [{ type: 'Uninterested' }, { type: 'Interior' }];
     case 'TEnd': return [{ type: 'Interior' }, { type: 'Uninterested' }];
     default: return [{ type: 'Uninterested' }, { type: 'Uninterested' }]; 
   }
