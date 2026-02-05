@@ -11,7 +11,7 @@ export type CTerm =
   | { type: 'Postulate', body: Term[], rest: Term | null }
   | { type: 'Checker', rest: Term | null }
   | { type: 'Construct', by: Term, body: Term[], rest: Term | null }
-  | {type: "BUILDER ERROR"}
+  | { type: "BUILDER ERROR" }
 
 export type Term = {value : CTerm, meta : TermMeta}
 
