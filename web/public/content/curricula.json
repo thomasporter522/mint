@@ -1,0 +1,14 @@
+{
+    "logic": {
+        "description": "A logic curriculum.",
+        "sequence": ["logic-ex1", "logic-ex2", "logic-ex3"]
+    },
+    "airith": {
+        "description": "An arithmetic curriculum.",
+        "sequence": ["arith-ex1"]
+    },
+    "scientist": {
+        "description": "A compount curriculum.",
+        "sequence": ["logic", "arith"]
+    }
+}

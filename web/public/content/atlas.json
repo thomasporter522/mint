@@ -1,0 +1,26 @@
+{
+    "language": {
+        "propositions": {
+            "tab": "P",
+            "entries": {
+                "props": "Propositions (metavariable P) represent statements, which can perhaps be proven."
+            }
+        },
+        "implication": {
+            "tab": "->",
+            "entries": {
+                "implication-former": "P -> P is the implication former",
+                "implication-intro": "x => p is the implication introduction form",
+                "implication-elim": "p(p) is the implication elimination form"
+            }
+        },
+        "conjunction": {
+            "tab": "&",
+            "entries": {
+                "conjunction-former": "P & P is the conjunction former",
+                "conjunction-intro": "(p, p) is the conjunction introduction form",
+                "conjunction-elim": "p.fst and p.snd are the conjunction elimination forms"
+            }
+        }
+    }
+}
