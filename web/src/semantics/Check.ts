@@ -1,3 +1,4 @@
+import { add, bind } from 'lodash';
 import { printTerm } from '../lytr/print';
 import type { Term } from '../lytr/term';
 import { meta } from '../lytr/term';
@@ -41,6 +42,10 @@ function combineInfos(infos : staticInfo[]) : staticInfo {
 
 function addErrors(info : staticInfo, errors : Error[]) : staticInfo {
     return {...info, errors: [...info.errors,...errors]}
+}
+
+function addBindings(info : staticInfo, bindings : Context) : staticInfo {
+    return {...info, bindings: combineBindings(info.bindings, bindings)}
 }
 
 type CheckingMode = 
@@ -178,8 +183,14 @@ function ensureMode(allowed : string[], mode:CheckingMode, from : number, to:num
 function checkTerm(ctx : Context, mode: CheckingMode, t: Term): staticInfo {
     switch (t.value.type) {
         case 'Postulate' : {
-            var lines = t.value.body;
-            var infos = combineInfos(lines.map(c => checkTerm(ctx, {type: "line"}, c)));
+            var infos = combineInfos([]);
+
+            for (const line of t.value.body) {
+                infos = combineInfos([infos, checkTerm(ctx, {type: "line"}, line)]);
+                ctx = combineBindings(ctx, infos.bindings);
+            }
+            infos = addBindings(infos, ctx)
+
             var errors = ensureMode(["program"], mode, t.meta.start, t.meta.end, [])
             return addErrors(infos, errors)
         }
@@ -204,9 +215,26 @@ function checkTerm(ctx : Context, mode: CheckingMode, t: Term): staticInfo {
             if (mode.type == "line") {
                 infos = checkTerm(ctx, {type: "spine"}, t.value.left)
                 infos = combineInfos([infos, checkTerm(combineBindings(ctx, infos.bindings), {type: "expression", expected: Hole}, t.value.right)]);
+                if (t.value.left.value.type == "Identifier") {
+                    var x : string = t.value.left.value.value;
+                    var y : FullType = [[], t.value.right];
+                    infos = addBindings(infos, new Map([[x, y]]))
+                }
+                else if (t.value.left.value.type == "Ap" && t.value.left.value.fun.value.type == "Identifier") {
+                    var x : string = t.value.left.value.fun.value.value;
+                    var y : FullType = [t.value.left.value.args, t.value.right];
+                    infos = addBindings(infos, new Map([[x, y]]))
+                }
                 return infos
             } else if (mode.type == "argument") {
-                infos = combineInfos([checkTerm(ctx, {type: "identifier"}, t.value.left), checkTerm(ctx, {type: "expression", expected: Hole}, t.value.right)]);
+                var leftInfo = checkTerm(ctx, {type: "identifier"}, t.value.left);
+                var rightInfo = checkTerm(ctx, {type: "expression", expected: Hole}, t.value.right);
+                infos = combineInfos([leftInfo, rightInfo]);
+                if (leftInfo.errors.length == 0 && t.value.left.value.type == "Identifier") {
+                    var x : string = t.value.left.value.value;
+                    var y : FullType = [[], t.value.right];
+                    infos = addBindings(infos, new Map([[x, y]]))
+                }
                 return infos
             }
             errors = ensureMode(["argument"], mode, t.meta.start, t.meta.end, [])
@@ -216,8 +244,12 @@ function checkTerm(ctx : Context, mode: CheckingMode, t: Term): staticInfo {
         case 'Ap' : {
             if (mode.type == "spine") {
                 infos = checkTerm(ctx, {type: "identifier"}, t.value.fun)
-                infos = combineInfos([infos,... t.value.args.map(c => checkTerm(ctx, {type: "argument"}, c))]);
-                return infos
+                var ctx = combineBindings(ctx, infos.bindings);
+                for (const arg of t.value.args) {
+                    infos = combineInfos([infos, checkTerm(ctx, {type: "argument"}, arg)]);
+                    ctx = combineBindings(ctx, infos.bindings);
+                }
+                return addBindings(infos, ctx)
             } else if (mode.type == "expression") {
                 infos = checkTerm(ctx, {type: "expression", expected:Hole}, t.value.fun)
                 infos = combineInfos([infos,... t.value.args.map(c => checkTerm(ctx, {type: "expression", expected:Hole}, c))]);
