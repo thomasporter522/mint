@@ -1,0 +1,1 @@
+You gotta go to http://localhost:????/?course=contents&item=item

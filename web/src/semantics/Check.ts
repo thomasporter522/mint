@@ -19,7 +19,7 @@ const Hole : Term = meta({type:"Hole", inserted:false})
 const FullHole : FullType = [[], Hole]
 
 function combineBindings(c1 : Context, c2 : Context) : Context {
-    var c : Context = c1; 
+    var c : Context = new Map(c1); 
     c2.forEach((v, k) => c.set(k, v));
     return c
 }
@@ -184,10 +184,10 @@ function checkTerm(ctx : Context, mode: CheckingMode, t: Term): staticInfo {
     switch (t.value.type) {
         case 'Postulate' : {
             var infos = combineInfos([]);
-
             for (const line of t.value.body) {
-                infos = combineInfos([infos, checkTerm(ctx, {type: "line"}, line)]);
-                ctx = combineBindings(ctx, infos.bindings);
+                const info = checkTerm(ctx, {type: "line"}, line)
+                infos = combineInfos([infos, info]);
+                ctx = combineBindings(ctx, info.bindings);
             }
             infos = addBindings(infos, ctx)
 
@@ -213,18 +213,20 @@ function checkTerm(ctx : Context, mode: CheckingMode, t: Term): staticInfo {
         }
         case 'Asc' : {
             if (mode.type == "line") {
+                // var original_ctx = new Map(ctx)
                 infos = checkTerm(ctx, {type: "spine"}, t.value.left)
                 infos = combineInfos([infos, checkTerm(combineBindings(ctx, infos.bindings), {type: "expression", expected: Hole}, t.value.right)]);
+                // infos.bindings = original_ctx
                 if (t.value.left.value.type == "Identifier") {
                     var x : string = t.value.left.value.value;
                     var y : FullType = [[], t.value.right];
-                    infos = addBindings(infos, new Map([[x, y]]))
+                    infos.bindings = new Map([[x, y]])
                 }
                 else if (t.value.left.value.type == "Ap" && t.value.left.value.fun.value.type == "Identifier") {
                     var x : string = t.value.left.value.fun.value.value;
                     var y : FullType = [t.value.left.value.args, t.value.right];
-                    infos = addBindings(infos, new Map([[x, y]]))
-                }
+                    infos.bindings = new Map([[x, y]])
+                } 
                 return infos
             } else if (mode.type == "argument") {
                 var leftInfo = checkTerm(ctx, {type: "identifier"}, t.value.left);
@@ -249,7 +251,7 @@ function checkTerm(ctx : Context, mode: CheckingMode, t: Term): staticInfo {
                     infos = combineInfos([infos, checkTerm(ctx, {type: "argument"}, arg)]);
                     ctx = combineBindings(ctx, infos.bindings);
                 }
-                return addBindings(infos, ctx)
+                return infos //addBindings(infos, ctx)
             } else if (mode.type == "expression") {
                 infos = checkTerm(ctx, {type: "expression", expected:Hole}, t.value.fun)
                 infos = combineInfos([infos,... t.value.args.map(c => checkTerm(ctx, {type: "expression", expected:Hole}, c))]);
