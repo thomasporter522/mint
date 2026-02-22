@@ -10,7 +10,8 @@ function combineTerms(ts : Term[]) : Term {
   } else if (ts.length === 1) {
     return ts[0]
   }
-  return meta({type : "Ap", fun:ts[0], args:ts.slice(1)})
+  const t = meta({type : "Ap", fun:ts[0], args:ts.slice(1)})
+  return {...t, meta:{...t.meta, start:ts[0].meta.start, end:ts[ts.length-1].meta.end}}
 }
 
 function buildTerms(fs: Sharded<OpenForm>[]): Term {

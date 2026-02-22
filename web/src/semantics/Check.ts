@@ -276,9 +276,17 @@ function checkTerm(ctx : Context, mode: CheckingMode, t: Term): staticInfo {
                 infos = checkTerm(ctx, {type: "expression", expected:null}, t.value.fun)
                 var funtype = infos.inferred
                 if (funtype){
-                    errors = countArgs(funtype[0].length, t.value.args.length, t.value.fun.meta.start, t.value.fun.meta.end, errors)
-                }
-                infos = combineInfos([infos,... t.value.args.map(c => checkTerm(ctx, {type: "expression", expected:Hole}, c))]);
+                    const argTypes = funtype[0]
+                    const args =  t.value.args
+                    errors = countArgs(argTypes.length, args.length, t.value.fun.meta.start, t.value.fun.meta.end, errors)
+                    for (var i = 0; i < Math.min(argTypes.length, args.length); i++) {
+                        infos = combineInfos([infos, checkTerm(ctx, {type: "expression", expected:argTypes[i]}, args[i])]);
+                    }
+                    const inferred = argTypes.length == args.length ? funtype[1] : Hole
+                    // TODO: apply substitution to inferred based on argument values
+                    infos.inferred = [[], inferred]
+                    errors = subsume(mode, t.meta.start, t.meta.end, infos.inferred, errors)
+                } 
                 infos = addErrors(infos, errors)
                 return infos
             }
