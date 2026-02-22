@@ -271,16 +271,13 @@ function checkTerm(ctx : Context, mode: CheckingMode, t: Term): staticInfo {
                     infos = combineInfos([infos, checkTerm(ctx, {type: "argument"}, arg)]);
                     ctx = combineBindings(ctx, infos.bindings);
                 }
-                return infos //addBindings(infos, ctx)
+                return infos
             } else if (mode.type == "expression") {
                 infos = checkTerm(ctx, {type: "expression", expected:null}, t.value.fun)
                 var funtype = infos.inferred
                 if (funtype){
-                    // console.log("sus?", funtype[0].length, t.value.args.length, t.value.fun.meta.start, t.value.fun.meta.end)
                     errors = countArgs(funtype[0].length, t.value.args.length, t.value.fun.meta.start, t.value.fun.meta.end, errors)
-                    console.log(errors)
                 }
-                // console.log("Fun type", funtype)
                 infos = combineInfos([infos,... t.value.args.map(c => checkTerm(ctx, {type: "expression", expected:Hole}, c))]);
                 infos = addErrors(infos, errors)
                 return infos
