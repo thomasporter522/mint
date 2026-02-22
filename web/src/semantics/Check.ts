@@ -127,8 +127,10 @@ function inCtx(ctx: Context, x : string) : {valid:boolean, inferred:FullType|nul
 
 function subsume(mode:CheckingMode, from : number, to:number, inferred:FullType|null, errors:Error[]) : Error[] {
     if(mode.type === "expression") {
-        if (inferred && inferred[0].length == 0) {
-            var error = {type: "mark", message: "Not fully applied", from, to }
+        // console.log("sus exp", mode.expected)
+        if (inferred && inferred[0].length > 0 && mode.expected) {
+            var error = {type: "mark", message: "Too few arguments", from, to }
+            return [error]
         }
         var inferred_out = inferred ? inferred[1] : null;
         var consitent = combine(mode.expected, inferred_out).valid
@@ -139,6 +141,19 @@ function subsume(mode:CheckingMode, from : number, to:number, inferred:FullType|
     }
     return errors
 }
+
+function countArgs(argsExpected : number, argsFound : number, from : number, to:number, errors:Error[]) : Error[] {
+    if (argsExpected == argsFound) { return errors }
+    var error = {type: "mark", message: (argsExpected > argsFound ? "Too few arguments" : "Too many arguments"), from, to }
+    errors = [error, ...errors]
+    return errors
+}
+
+// function partiallyApplied(x:String, from : number, to:number, errors:Error[]) : Error[] {
+//     var error = {type: "mark", message: "Not fully applied", from, to }
+//     errors = [error, ...errors]
+//     return errors
+// }
 
 // function ensureArg(mode:CheckingMode, from : number, to:number, errors:Error[]) : Error[] {
 //     if (mode.type !== "argument") {
@@ -205,9 +220,13 @@ function checkTerm(ctx : Context, mode: CheckingMode, t: Term): staticInfo {
                     errors = [error, ...errors]
                 }
                 var inferred : FullType | null = inctx.inferred
+                console.log(t.value.value, inferred)
                 if(inferred) {
                     errors = subsume(mode, t.meta.start, t.meta.end, inferred, errors)
                 }
+                // if(inferred && inferred[0].length > 0) {
+                //     errors = partiallyApplied(t.value.value, t.meta.start, t.meta.end, errors)
+                // }
             }
             return  {errors, holes:[], inferred, bindings:new Map()} 
         }
@@ -244,6 +263,7 @@ function checkTerm(ctx : Context, mode: CheckingMode, t: Term): staticInfo {
             return addErrors(infos, errors)
         }
         case 'Ap' : {
+            errors = []
             if (mode.type == "spine") {
                 infos = checkTerm(ctx, {type: "identifier"}, t.value.fun)
                 var ctx = combineBindings(ctx, infos.bindings);
@@ -253,11 +273,19 @@ function checkTerm(ctx : Context, mode: CheckingMode, t: Term): staticInfo {
                 }
                 return infos //addBindings(infos, ctx)
             } else if (mode.type == "expression") {
-                infos = checkTerm(ctx, {type: "expression", expected:Hole}, t.value.fun)
+                infos = checkTerm(ctx, {type: "expression", expected:null}, t.value.fun)
+                var funtype = infos.inferred
+                if (funtype){
+                    // console.log("sus?", funtype[0].length, t.value.args.length, t.value.fun.meta.start, t.value.fun.meta.end)
+                    errors = countArgs(funtype[0].length, t.value.args.length, t.value.fun.meta.start, t.value.fun.meta.end, errors)
+                    console.log(errors)
+                }
+                // console.log("Fun type", funtype)
                 infos = combineInfos([infos,... t.value.args.map(c => checkTerm(ctx, {type: "expression", expected:Hole}, c))]);
+                infos = addErrors(infos, errors)
                 return infos
             }
-            errors = ensureMode(["spine"], mode, t.meta.start, t.meta.end, [])
+            errors = ensureMode(["spine"], mode, t.meta.start, t.meta.end, errors)
             infos = checkTerm(ctx, {type: "expression", expected:Hole}, t.value.fun)
             infos = combineInfos([infos,... t.value.args.map(c => checkTerm(ctx, {type: "expression", expected:Hole}, c))]);
             return addErrors(infos, errors)
