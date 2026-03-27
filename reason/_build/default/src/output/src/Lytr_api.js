@@ -6,14 +6,68 @@ import * as Melange__Check from "./Check.js";
 import * as Melange__Lexer from "./Lexer.js";
 import * as Melange__Parser from "./Parser.js";
 import * as Melange__Print from "./Print.js";
+import * as Melange__Term from "./Term.js";
 import * as Stdlib__Array from "melange/array.js";
 import * as Stdlib__List from "melange/list.js";
+
+function displayTerm(name, ft) {
+  const retType = ft[1];
+  const params = ft[0];
+  const nameTerm = Melange__Term.mk({
+    TAG: /* Identifier */ 2,
+    _0: name
+  });
+  if (!params) {
+    return Melange__Term.mk({
+      TAG: /* Asc */ 3,
+      _0: nameTerm,
+      _1: retType
+    });
+  }
+  const paramTerms = Stdlib__List.map((function (param) {
+    const pname = param[0];
+    const n = pname !== undefined ? Melange__Term.mk({
+        TAG: /* Identifier */ 2,
+        _0: pname
+      }) : Melange__Term.mk({
+        TAG: /* Hole */ 1,
+        _0: true
+      });
+    const asc = Melange__Term.mk({
+      TAG: /* Asc */ 3,
+      _0: n,
+      _1: param[1]
+    });
+    const init = asc.meta;
+    return {
+      value: asc.value,
+      meta: {
+        parens: true,
+        start: init.start,
+        end_: init.end_
+      }
+    };
+  }), params);
+  const spine = paramTerms ? Melange__Term.mk({
+      TAG: /* Ap */ 4,
+      _0: nameTerm,
+      _1: {
+        hd: paramTerms.hd,
+        tl: paramTerms.tl
+      }
+    }) : nameTerm;
+  return Melange__Term.mk({
+    TAG: /* Asc */ 3,
+    _0: spine,
+    _1: retType
+  });
+}
 
 function contextToJsMap(ctx) {
   const m = new Map();
   Curry._2(Melange__Check.StringMap.iter, (function (k, v) {
     if (v !== undefined) {
-      m.set(k, v[1]);
+      m.set(k, displayTerm(k, v));
       return;
     }
     
@@ -50,6 +104,7 @@ function processCode(code) {
 const printTerm = Melange__Print.printTerm;
 
 export {
+  displayTerm,
   contextToJsMap,
   processCode,
   printTerm,

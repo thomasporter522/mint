@@ -4,7 +4,7 @@ open Error;
 
 module StringMap = Map.Make(String);
 
-type fullType = (list(term), term);
+type fullType = (list((option(string), term)), term);
 type context = StringMap.t(option(fullType));
 
 type holeInfo = {
@@ -36,6 +36,35 @@ let mergeInfos = (i1: staticInfo, i2: staticInfo): staticInfo => {
 
 let withErrors = (info, errs) => {...info, errors: info.errors @ errs};
 let withBindings = (info, ctx) => {...info, bindings: mergeBindings(info.bindings, ctx)};
+
+/* --- Term resolution against an environment --- */
+
+type env = StringMap.t(term);
+let emptyEnv: env = StringMap.empty;
+
+let rec resolve = (env: env, t: term): term =>
+  if (StringMap.is_empty(env)) {
+    t;
+  } else {
+    switch (t.value) {
+    | Identifier(v) =>
+      switch (StringMap.find_opt(v, env)) {
+      | Some(replacement) => replacement
+      | None => t
+      }
+    | Asc(l, r) =>
+      {...t, value: Asc(resolve(env, l), resolve(env, r))}
+    | Ap(f, args) =>
+      {...t, value: Ap(resolve(env, f), List.map(resolve(env), args))}
+    | Postulate(body, rest) =>
+      {...t, value: Postulate(List.map(resolve(env), body), Option.map(resolve(env), rest))}
+    | Checker(rest) =>
+      {...t, value: Checker(Option.map(resolve(env), rest))}
+    | Construct(by, body, rest) =>
+      {...t, value: Construct(resolve(env, by), List.map(resolve(env), body), Option.map(resolve(env), rest))}
+    | Hole(_) | Shard(_) | BuilderError => t
+    };
+  };
 
 /* --- Checking modes --- */
 
@@ -75,9 +104,11 @@ type lookupResult =
   | Found(option(fullType))
   | NotFound;
 
+let sortTerm = mk(Identifier("Sort"));
+
 let lookupCtx = (ctx: context, x: string): lookupResult =>
-  if (x == "U") {
-    Found(None);
+  if (x == "Sort") {
+    Found(Some(([], sortTerm)));
   } else {
     switch (StringMap.find_opt(x, ctx)) {
     | Some(ft) => Found(ft)
@@ -92,7 +123,7 @@ let subsume =
     : list(error) => {
   let tooFewArgs =
     switch (inferred) {
-    | Some((args, _)) when List.length(args) > 0 && expected != None =>
+    | Some((params, _)) when List.length(params) > 0 && expected != None =>
       [mark("Too few arguments", from, to_)]
     | _ => []
     };
@@ -144,14 +175,20 @@ let ensureMode = (allowed, mode, from, to_) =>
      )];
   };
 
-/* --- Extracting the top-level binding from a line --- */
+/* --- Extracting params (name + type) from a function signature --- */
 
-let extractArgTypes = (args: list(term)): list(term) =>
+let extractParams = (args: list(term)): list((option(string), term)) =>
   List.map(
     (arg: term) =>
       switch (arg.value) {
-      | Asc(_, ty) => ty
-      | _ => arg
+      | Asc(name, ty) =>
+        let paramName =
+          switch (name.value) {
+          | Identifier(v) => Some(v)
+          | _ => None
+          };
+        (paramName, ty);
+      | _ => (None, arg)
       },
     args,
   );
@@ -163,7 +200,7 @@ let lineBinding = (left: term, right: term): context =>
   | Ap(f, args) =>
     switch (f.value) {
     | Identifier(x) =>
-      StringMap.singleton(x, Some((extractArgTypes(args), right)))
+      StringMap.singleton(x, Some((extractParams(args), right)))
     | _ => StringMap.empty
     }
   | _ => StringMap.empty
@@ -216,8 +253,32 @@ let rec checkTerm = (ctx: context, mode: checkingMode, t: term): staticInfo =>
       let bodyCtx = mergeBindings(ctx, spineInfo.bindings);
       let rightInfo = checkTerm(bodyCtx, Expression(Some(hole)), right);
       let info = mergeInfos(spineInfo, rightInfo);
-      {errors: info.errors, holes: info.holes, inferred: None,
-       bindings: lineBinding(left, right)};
+      let bindings =
+        switch (left.value) {
+        | Identifier(x) =>
+          /* For applications on the RHS, use the inferred return type
+             so that e.g. (f Sort) is stored as Sort, not the raw syntax.
+             For everything else (identifiers, holes), keep the raw term. */
+          let ty =
+            switch (right.value) {
+            | Ap(_, _) =>
+              switch (rightInfo.inferred) {
+              | Some((_, t)) => t
+              | None => right
+              }
+            | _ => right
+            };
+          StringMap.singleton(x, Some(([], ty)));
+        | Ap(f, args) =>
+          /* Function declaration: keep raw return type for substitution */
+          switch (f.value) {
+          | Identifier(x) =>
+            StringMap.singleton(x, Some((extractParams(args), right)))
+          | _ => StringMap.empty
+          }
+        | _ => StringMap.empty
+        };
+      {errors: info.errors, holes: info.holes, inferred: None, bindings};
 
     | Argument =>
       let leftInfo = checkTerm(ctx, IdentifierMode, left);
@@ -263,18 +324,30 @@ let rec checkTerm = (ctx: context, mode: checkingMode, t: term): staticInfo =>
     | Expression(expected) =>
       let funInfo = checkTerm(ctx, Expression(None), f);
       switch (funInfo.inferred) {
-      | Some((argTypes, retType)) =>
+      | Some((params, retType)) =>
         let arityErrors =
-          checkArity(List.length(argTypes), List.length(args), f.meta.start, f.meta.end_);
-        let minLen = min(List.length(argTypes), List.length(args));
-        let argInfos =
-          List.mapi(
-            (i, arg) => checkTerm(ctx, Expression(Some(List.nth(argTypes, i))), arg),
-            List.filteri((i, _) => i < minLen, args),
+          checkArity(List.length(params), List.length(args), f.meta.start, f.meta.end_);
+        let minLen = min(List.length(params), List.length(args));
+        let (argInfos, finalEnv) =
+          List.fold_left(
+            ((accInfos, env), i) => {
+              let (paramName, paramTy) = List.nth(params, i);
+              let expectedTy = resolve(env, paramTy);
+              let argInfo = checkTerm(ctx, Expression(Some(expectedTy)), List.nth(args, i));
+              let env =
+                switch (paramName) {
+                | Some(name) => StringMap.add(name, List.nth(args, i), env)
+                | None => env
+                };
+              (accInfos @ [argInfo], env);
+            },
+            ([], emptyEnv),
+            List.init(minLen, i => i),
           );
         let info = List.fold_left(mergeInfos, funInfo, argInfos);
+        let retType = resolve(finalEnv, retType);
         let inferred =
-          List.length(argTypes) == List.length(args)
+          List.length(params) == List.length(args)
             ? Some(([], retType)) : Some(([], hole));
         let subErrors = subsume(expected, inferred, t.meta.start, t.meta.end_);
         withErrors({...info, inferred}, arityErrors @ subErrors);

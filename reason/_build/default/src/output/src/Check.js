@@ -10,6 +10,7 @@ import * as Melange__Term from "./Term.js";
 import * as Stdlib from "melange/stdlib.js";
 import * as Stdlib__List from "melange/list.js";
 import * as Stdlib__Map from "melange/map.js";
+import * as Stdlib__Option from "melange/option.js";
 import * as Stdlib__String from "melange/string.js";
 
 const StringMap = Stdlib__Map.Make({
@@ -66,6 +67,86 @@ function withBindings(info, ctx) {
     inferred: info.inferred,
     bindings: mergeBindings(info.bindings, ctx)
   };
+}
+
+const emptyEnv = StringMap.empty;
+
+function resolve(env, t) {
+  if (Curry._1(StringMap.is_empty, env)) {
+    return t;
+  }
+  const v = t.value;
+  if (/* tag */ typeof v === "number" || typeof v === "string") {
+    return t;
+  }
+  switch (v.TAG) {
+    case /* Identifier */ 2 :
+      const replacement = Curry._2(StringMap.find_opt, v._0, env);
+      if (replacement !== undefined) {
+        return replacement;
+      } else {
+        return t;
+      }
+    case /* Asc */ 3 :
+      return {
+        value: {
+          TAG: /* Asc */ 3,
+          _0: resolve(env, v._0),
+          _1: resolve(env, v._1)
+        },
+        meta: t.meta
+      };
+    case /* Ap */ 4 :
+      return {
+        value: {
+          TAG: /* Ap */ 4,
+          _0: resolve(env, v._0),
+          _1: Stdlib__List.map((function (param) {
+            return resolve(env, param);
+          }), v._1)
+        },
+        meta: t.meta
+      };
+    case /* Postulate */ 5 :
+      return {
+        value: {
+          TAG: /* Postulate */ 5,
+          _0: Stdlib__List.map((function (param) {
+            return resolve(env, param);
+          }), v._0),
+          _1: Stdlib__Option.map((function (param) {
+            return resolve(env, param);
+          }), v._1)
+        },
+        meta: t.meta
+      };
+    case /* Checker */ 6 :
+      return {
+        value: {
+          TAG: /* Checker */ 6,
+          _0: Stdlib__Option.map((function (param) {
+            return resolve(env, param);
+          }), v._0)
+        },
+        meta: t.meta
+      };
+    case /* Construct */ 7 :
+      return {
+        value: {
+          TAG: /* Construct */ 7,
+          _0: resolve(env, v._0),
+          _1: Stdlib__List.map((function (param) {
+            return resolve(env, param);
+          }), v._1),
+          _2: Stdlib__Option.map((function (param) {
+            return resolve(env, param);
+          }), v._2)
+        },
+        meta: t.meta
+      };
+    default:
+      return t;
+  }
 }
 
 function stringOfMode(param) {
@@ -128,11 +209,19 @@ function consistent(t1, t2) {
   
 }
 
+const sortTerm = Melange__Term.mk({
+  TAG: /* Identifier */ 2,
+  _0: "Sort"
+});
+
 function lookupCtx(ctx, x) {
-  if (x === "U") {
+  if (x === "Sort") {
     return {
       TAG: /* Found */ 0,
-      _0: undefined
+      _0: [
+        /* [] */ 0,
+        sortTerm
+      ]
     };
   }
   const ft = Curry._2(StringMap.find_opt, x, ctx);
@@ -181,14 +270,28 @@ function ensureMode(allowed, mode, from, to_) {
   };
 }
 
-function extractArgTypes(args) {
+function extractParams(args) {
   return Stdlib__List.map((function (arg) {
     const match = arg.value;
-    if (/* tag */ typeof match === "number" || typeof match === "string" || match.TAG !== /* Asc */ 3) {
-      return arg;
-    } else {
-      return match._1;
+    if (/* tag */ typeof match === "number" || typeof match === "string") {
+      return [
+        undefined,
+        arg
+      ];
     }
+    if (match.TAG !== /* Asc */ 3) {
+      return [
+        undefined,
+        arg
+      ];
+    }
+    const v = match._0.value;
+    let paramName;
+    paramName = /* tag */ typeof v === "number" || typeof v === "string" || v.TAG !== /* Identifier */ 2 ? undefined : v._0;
+    return [
+      paramName,
+      match._1
+    ];
   }), args);
 }
 
@@ -209,7 +312,7 @@ function lineBinding(left, right) {
         return StringMap.empty;
       } else {
         return Curry._2(StringMap.singleton, x$1._0, [
-          extractArgTypes(x._1),
+          extractParams(x._1),
           right
         ]);
       }
@@ -308,11 +411,42 @@ function checkTerm(ctx, mode, t) {
               _0: hole
             }, right);
             const info = mergeInfos(spineInfo, rightInfo);
+            const x = left.value;
+            let bindings;
+            if (/* tag */ typeof x === "number" || typeof x === "string") {
+              bindings = StringMap.empty;
+            } else {
+              switch (x.TAG) {
+                case /* Identifier */ 2 :
+                  const match = right.value;
+                  let ty;
+                  if (/* tag */ typeof match === "number" || typeof match === "string" || match.TAG !== /* Ap */ 4) {
+                    ty = right;
+                  } else {
+                    const match$1 = rightInfo.inferred;
+                    ty = match$1 !== undefined ? match$1[1] : right;
+                  }
+                  bindings = Curry._2(StringMap.singleton, x._0, [
+                    /* [] */ 0,
+                    ty
+                  ]);
+                  break;
+                case /* Ap */ 4 :
+                  const x$1 = x._0.value;
+                  bindings = /* tag */ typeof x$1 === "number" || typeof x$1 === "string" || x$1.TAG !== /* Identifier */ 2 ? StringMap.empty : Curry._2(StringMap.singleton, x$1._0, [
+                      extractParams(x._1),
+                      right
+                    ]);
+                  break;
+                default:
+                  bindings = StringMap.empty;
+              }
+            }
             return {
               errors: info.errors,
               holes: info.holes,
               inferred: undefined,
-              bindings: lineBinding(left, right)
+              bindings: bindings
             };
           case /* Argument */ 3 :
             const leftInfo = checkTerm(ctx, /* IdentifierMode */ 4, left);
@@ -324,11 +458,11 @@ function checkTerm(ctx, mode, t) {
             if (Stdlib__List.length(leftInfo.errors) !== 0) {
               return info$1;
             }
-            const x = left.value;
-            if (/* tag */ typeof x === "number" || typeof x === "string" || x.TAG !== /* Identifier */ 2) {
+            const x$2 = left.value;
+            if (/* tag */ typeof x$2 === "number" || typeof x$2 === "string" || x$2.TAG !== /* Identifier */ 2) {
               return info$1;
             } else {
-              return withBindings(info$1, Curry._2(StringMap.singleton, x._0, [
+              return withBindings(info$1, Curry._2(StringMap.singleton, x$2._0, [
                 /* [] */ 0,
                 right
               ]));
@@ -389,25 +523,44 @@ function checkTerm(ctx, mode, t) {
           TAG: /* Expression */ 0,
           _0: undefined
         }, f);
-        const match = funInfo$2.inferred;
-        if (match === undefined) {
+        const match$2 = funInfo$2.inferred;
+        if (match$2 === undefined) {
           return funInfo$2;
         }
-        const argTypes = match[0];
-        const arityErrors = checkArity(Stdlib__List.length(argTypes), Stdlib__List.length(args), f.meta.start, f.meta.end_);
-        const minLen = Caml.caml_int_min(Stdlib__List.length(argTypes), Stdlib__List.length(args));
-        const argInfos$1 = Stdlib__List.mapi((function (i, arg) {
-          return checkTerm(ctx, {
-            TAG: /* Expression */ 0,
-            _0: Stdlib__List.nth(argTypes, i)
-          }, arg);
-        }), Stdlib__List.filteri((function (i, param) {
-          return i < minLen;
-        }), args));
-        const info$3 = Stdlib__List.fold_left(mergeInfos, funInfo$2, argInfos$1);
-        const inferred$2 = Stdlib__List.length(argTypes) === Stdlib__List.length(args) ? [
+        const params = match$2[0];
+        const arityErrors = checkArity(Stdlib__List.length(params), Stdlib__List.length(args), f.meta.start, f.meta.end_);
+        const minLen = Caml.caml_int_min(Stdlib__List.length(params), Stdlib__List.length(args));
+        const match$3 = Stdlib__List.fold_left((function (param) {
+          const env = param[1];
+          const accInfos = param[0];
+          return function (i) {
+            const match = Stdlib__List.nth(params, i);
+            const paramName = match[0];
+            const expectedTy = resolve(env, match[1]);
+            const argInfo = checkTerm(ctx, {
+              TAG: /* Expression */ 0,
+              _0: expectedTy
+            }, Stdlib__List.nth(args, i));
+            const env$1 = paramName !== undefined ? Curry._3(StringMap.add, paramName, Stdlib__List.nth(args, i), env) : env;
+            return [
+              Stdlib.$at(accInfos, {
+                hd: argInfo,
+                tl: /* [] */ 0
+              }),
+              env$1
+            ];
+          };
+        }), [
+          /* [] */ 0,
+          emptyEnv
+        ], Stdlib__List.init(minLen, (function (i) {
+          return i;
+        })));
+        const info$3 = Stdlib__List.fold_left(mergeInfos, funInfo$2, match$3[0]);
+        const retType = resolve(match$3[1], match$2[1]);
+        const inferred$2 = Stdlib__List.length(params) === Stdlib__List.length(args) ? [
             /* [] */ 0,
-            match[1]
+            retType
           ] : [
             /* [] */ 0,
             hole
@@ -421,7 +574,7 @@ function checkTerm(ctx, mode, t) {
         }, Stdlib.$at(arityErrors, subErrors$1));
       }
     case /* Postulate */ 5 :
-      const match$1 = Stdlib__List.fold_left((function (param) {
+      const match$4 = Stdlib__List.fold_left((function (param) {
         const accCtx = param[1];
         const accInfo = param[0];
         return function (line) {
@@ -436,7 +589,7 @@ function checkTerm(ctx, mode, t) {
         emptyInfo,
         ctx
       ], v._0);
-      const info$4 = withBindings(match$1[0], match$1[1]);
+      const info$4 = withBindings(match$4[0], match$4[1]);
       return withErrors(info$4, ensureMode({
         hd: "program",
         tl: /* [] */ 0
@@ -459,13 +612,16 @@ export {
   mergeInfos,
   withErrors,
   withBindings,
+  emptyEnv,
+  resolve,
   stringOfMode,
   consistent,
+  sortTerm,
   lookupCtx,
   subsume,
   checkArity,
   ensureMode,
-  extractArgTypes,
+  extractParams,
   lineBinding,
   checkTerm,
   getStatics,

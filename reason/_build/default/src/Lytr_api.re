@@ -11,12 +11,40 @@ type jsMap;
 [@mel.new] external createJsMap: unit => jsMap = "Map";
 [@mel.send] external jsMapSet: (jsMap, string, term) => unit = "set";
 
+let displayTerm = (name: string, ft: fullType): term => {
+  let (params, retType) = ft;
+  let nameTerm = mk(Identifier(name));
+  switch (params) {
+  | [] => mk(Asc(nameTerm, retType))
+  | _ =>
+    let paramTerms =
+      List.map(
+        ((pname, ty)) => {
+          let n =
+            switch (pname) {
+            | Some(s) => mk(Identifier(s))
+            | None => mk(Hole(true))
+            };
+          let asc = mk(Asc(n, ty));
+          {...asc, meta: {...asc.meta, parens: true}};
+        },
+        params,
+      );
+    let spine =
+      switch (paramTerms) {
+      | [] => nameTerm
+      | [first, ...rest] => mk(Ap(nameTerm, [first, ...rest]))
+      };
+    mk(Asc(spine, retType));
+  };
+};
+
 let contextToJsMap = (ctx: context): jsMap => {
   let m = createJsMap();
   StringMap.iter(
     (k, v) =>
       switch (v) {
-      | Some((_, retType)) => jsMapSet(m, k, retType)
+      | Some(ft) => jsMapSet(m, k, displayTerm(k, ft))
       | None => ()
       },
     ctx,

@@ -201,7 +201,7 @@ function App() {
                 <div className="context-entry" style={{ padding: '0px 0px 3px 0px'}}>
                   {/* {entry[0]} : {prettyProposition(entry[1])} */}
                   {/* {entry[0]} : <DisplayCodeBlock code={prettyProposition(entry[1])} /> */}
-                  <DisplayCodeBlock code={entry[0] + " : " + printTerm(entry[1])} /> 
+                  <DisplayCodeBlock code={printTerm(entry[1])} />
                 </div>
               </div>
             ))}</>
@@ -336,15 +336,13 @@ function App() {
 
                 <CodeMirror
                   value={page.data.type}
-                  height="400px"
+                  height="100%"
                   theme={mintTheme}
                   extensions={[
                     // mintlang(),
                     EditorView.theme({
                       '.cm-editor': {
-                        // width: '100%',
-                        width: '600px',
-                        maxWidth: '600px'
+                        width: '100%',
                       },
                       '.cm-scroller': {
                         overflow: 'false'  // Enable horizontal scrolling
