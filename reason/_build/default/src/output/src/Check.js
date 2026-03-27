@@ -370,9 +370,17 @@ function checkTerm(ctx, mode, t) {
                   ]);
                   break;
                 case /* Ap */ 4 :
+                  const argTypes = Stdlib__List.map((function (arg) {
+                    const match = arg.value;
+                    if (/* tag */ typeof match === "number" || typeof match === "string" || match.TAG !== /* Asc */ 3) {
+                      return arg;
+                    } else {
+                      return match._1;
+                    }
+                  }), x._1);
                   const x$1 = x._0.value;
                   bindings = /* tag */ typeof x$1 === "number" || typeof x$1 === "string" || x$1.TAG !== /* Identifier */ 2 ? StringMap.empty : Curry._2(StringMap.singleton, x$1._0, [
-                      x._1,
+                      argTypes,
                       right
                     ]);
                   break;
@@ -380,10 +388,12 @@ function checkTerm(ctx, mode, t) {
                   bindings = StringMap.empty;
               }
             }
+            const errors$3 = infos$1.errors;
+            const holes$1 = infos$1.holes;
             return {
-              errors: infos$1.errors,
-              holes: infos$1.holes,
-              inferred: infos$1.inferred,
+              errors: errors$3,
+              holes: holes$1,
+              inferred: undefined,
               bindings: bindings
             };
           case /* Argument */ 3 :
@@ -413,7 +423,7 @@ function checkTerm(ctx, mode, t) {
             }
         }
       }
-      const errors$3 = ensureMode({
+      const errors$4 = ensureMode({
         hd: "argument",
         tl: /* [] */ 0
       }, mode, t.meta.start, t.meta.end_, /* [] */ 0);
@@ -430,7 +440,7 @@ function checkTerm(ctx, mode, t) {
           tl: /* [] */ 0
         }
       });
-      return addErrors(infos$3, errors$3);
+      return addErrors(infos$3, errors$4);
     case /* Ap */ 4 :
       const args = v._1;
       const f = v._0;
@@ -455,7 +465,7 @@ function checkTerm(ctx, mode, t) {
           }), args);
           return infos$5.contents;
         }
-        const errors$4 = ensureMode({
+        const errors$5 = ensureMode({
           hd: "spine",
           tl: /* [] */ 0
         }, mode, t.meta.start, t.meta.end_, /* [] */ 0);
@@ -472,21 +482,21 @@ function checkTerm(ctx, mode, t) {
         return addErrors(combineInfos({
           hd: infos$6,
           tl: argInfos
-        }), errors$4);
+        }), errors$5);
       } else {
         const infos$7 = checkTerm(ctx, {
           TAG: /* Expression */ 0,
           _0: undefined
         }, f);
         const funtype = infos$7.inferred;
-        let errors$5 = /* [] */ 0;
+        let errors$6 = /* [] */ 0;
         let infos$8 = infos$7;
         if (funtype !== undefined) {
-          const argTypes = funtype[0];
-          errors$5 = countArgs(Stdlib__List.length(argTypes), Stdlib__List.length(args), f.meta.start, f.meta.end_, errors$5);
-          const minLen = Caml.caml_int_min(Stdlib__List.length(argTypes), Stdlib__List.length(args));
+          const argTypes$1 = funtype[0];
+          errors$6 = countArgs(Stdlib__List.length(argTypes$1), Stdlib__List.length(args), f.meta.start, f.meta.end_, errors$6);
+          const minLen = Caml.caml_int_min(Stdlib__List.length(argTypes$1), Stdlib__List.length(args));
           for (let i = 0; i < minLen; ++i) {
-            const argType = Stdlib__List.nth(argTypes, i);
+            const argType = Stdlib__List.nth(argTypes$1, i);
             const arg = Stdlib__List.nth(args, i);
             infos$8 = combineInfos({
               hd: infos$8,
@@ -499,7 +509,7 @@ function checkTerm(ctx, mode, t) {
               }
             });
           }
-          const inferred$1 = Stdlib__List.length(argTypes) === Stdlib__List.length(args) ? funtype[1] : hole;
+          const inferred$1 = Stdlib__List.length(argTypes$1) === Stdlib__List.length(args) ? funtype[1] : hole;
           const init = infos$8;
           infos$8 = {
             errors: init.errors,
@@ -510,9 +520,9 @@ function checkTerm(ctx, mode, t) {
             ],
             bindings: init.bindings
           };
-          errors$5 = subsume(mode, t.meta.start, t.meta.end_, infos$8.inferred, errors$5);
+          errors$6 = subsume(mode, t.meta.start, t.meta.end_, infos$8.inferred, errors$6);
         }
-        return addErrors(infos$8, errors$5);
+        return addErrors(infos$8, errors$6);
       }
     case /* Postulate */ 5 :
       const match$1 = Stdlib__List.fold_left((function (param) {
@@ -538,11 +548,11 @@ function checkTerm(ctx, mode, t) {
         ctx
       ], v._0);
       const infos$9 = addBindings(match$1[0], match$1[1]);
-      const errors$6 = ensureMode({
+      const errors$7 = ensureMode({
         hd: "program",
         tl: /* [] */ 0
       }, mode, t.meta.start, t.meta.end_, /* [] */ 0);
-      return addErrors(infos$9, errors$6);
+      return addErrors(infos$9, errors$7);
     default:
       return combineInfos(/* [] */ 0);
   }

@@ -261,14 +261,25 @@ let rec checkTerm =
         | Identifier(x) =>
           StringMap.singleton(x, Some(([], right)))
         | Ap(f, args) =>
+          let argTypes =
+            List.map(
+              (arg: term) =>
+                switch (arg.value) {
+                | Asc(_, ty) => ty
+                | _ => arg
+                },
+              args,
+            );
           switch (f.value) {
           | Identifier(x) =>
-            StringMap.singleton(x, Some((args, right)))
+            StringMap.singleton(x, Some((argTypes, right)))
           | _ => StringMap.empty
           }
         | _ => StringMap.empty
         };
-      {...infos, bindings};
+      let errors = infos.errors;
+      let holes = infos.holes;
+      {errors, holes, inferred: None, bindings};
     | Argument =>
       let leftInfo = checkTerm(ctx, IdentifierMode, left);
       let rightInfo = checkTerm(ctx, Expression(Some(hole)), right);
