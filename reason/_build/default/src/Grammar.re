@@ -31,30 +31,30 @@ type precedence =
 
 let getPrecedence = (token: primaryToken): (precedence, precedence) =>
   switch (token) {
-  | BOF => (Uninterested, Interior)
-  | EOF => (Interior, Uninterested)
-  | TOP => (Uninterested, Interior)
-  | TCP => (Interior, Uninterested)
-  | TAtom(_) => (Uninterested, Uninterested)
-  | TColon => (Precedence(1.0), Precedence(1.1))
+  | BOF        => (Uninterested, Interior)
+  | EOF        => (Interior,     Uninterested)
+  | TOP        => (Uninterested, Interior)
+  | TCP        => (Interior,     Uninterested)
+  | TAtom(_)   => (Uninterested, Uninterested)
+  | TColon     => (Precedence(1.0), Precedence(1.1))
   | TPostulate => (Uninterested, Interior)
-  | TChecker => (Uninterested, Interior)
+  | TChecker   => (Uninterested, Interior)
   | TConstruct => (Uninterested, Interior)
-  | TEnd => (Interior, Uninterested)
+  | TEnd       => (Interior,     Uninterested)
   };
+
+let leftPrec  = t => fst(getPrecedence(t));
+let rightPrec = t => snd(getPrecedence(t));
 
 type matchTokenResult =
   | Match
   | MatchMorph(primaryToken)
   | NoMatch;
 
-let isBlockToken = (t: primaryToken): bool =>
-  switch (t) {
-  | TPostulate
-  | TChecker
-  | TConstruct => true
-  | _ => false
-  };
+let isBlockToken =
+  fun
+  | TPostulate | TChecker | TConstruct => true
+  | _ => false;
 
 let matchToken = (t1: primaryToken, t2: primaryToken): matchTokenResult =>
   switch (t1, t2) {
@@ -65,12 +65,6 @@ let matchToken = (t1: primaryToken, t2: primaryToken): matchTokenResult =>
   | _ => NoMatch
   };
 
-let isValidStart = (token: primaryToken): bool => {
-  let (leftPrec, _) = getPrecedence(token);
-  leftPrec != Interior;
-};
+let isValidStart = t => leftPrec(t) != Interior;
 
-let isValidEnd = (token: ranged(primaryToken)): bool => {
-  let (_, rightPrec) = getPrecedence(token.value);
-  rightPrec != Interior;
-};
+let isValidEnd = (t: ranged(primaryToken)) => rightPrec(t.value) != Interior;

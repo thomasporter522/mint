@@ -2,15 +2,24 @@
 
 import * as Curry from "melange.js/curry.js";
 
-function mapRanged(f, a) {
+function mapRanged(f, r) {
   return {
-    value: Curry._1(f, a.value),
-    start: a.start,
-    end_: a.end_
+    value: Curry._1(f, r.value),
+    start: r.start,
+    end_: r.end_
+  };
+}
+
+function noRange(v) {
+  return {
+    value: v,
+    start: -1,
+    end_: -1
   };
 }
 
 export {
   mapRanged,
+  noRange,
 }
 /* No side effect */

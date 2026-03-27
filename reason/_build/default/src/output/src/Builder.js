@@ -6,7 +6,7 @@ import * as Stdlib__List from "melange/list.js";
 
 function combineTerms(ts) {
   if (!ts) {
-    return Melange__Term.meta({
+    return Melange__Term.mk({
       TAG: /* Hole */ 1,
       _0: true
     });
@@ -15,12 +15,12 @@ function combineTerms(ts) {
   if (!ts.tl) {
     return t;
   }
-  const t$1 = Melange__Term.meta({
+  const last = Stdlib__List.nth(ts, Stdlib__List.length(ts) - 1 | 0);
+  const t$1 = Melange__Term.mk({
     TAG: /* Ap */ 4,
     _0: t,
-    _1: ts.tl
+    _1: Stdlib__List.tl(ts)
   });
-  const last = Stdlib__List.nth(ts, Stdlib__List.length(ts) - 1 | 0);
   const init = t$1.meta;
   return {
     value: t$1.value,
@@ -30,186 +30,6 @@ function combineTerms(ts) {
       end_: last.meta.end_
     }
   };
-}
-
-function buildForm(form) {
-  const right = form.right;
-  const rightUnforms = form.rightUnforms;
-  const cf = form.closedForm;
-  const leftUnforms = form.leftUnforms;
-  const left = form.left;
-  const match = Stdlib__List.length(leftUnforms) === 0;
-  const match$1 = Stdlib__List.length(rightUnforms) === 0;
-  if (left === undefined && match) {
-    if (cf.TAG === /* CHead */ 0) {
-      const token = cf._0;
-      const atom = token.value;
-      if (/* tag */ typeof atom === "number" || typeof atom === "string") {
-        if (atom !== /* TColon */ 4) {
-          return Melange__Term.meta(/* BuilderError */ 0);
-        }
-        
-      } else {
-        if (!match$1) {
-          return Melange__Term.meta(/* BuilderError */ 0);
-        }
-        if (right !== undefined) {
-          return Melange__Term.meta(/* BuilderError */ 0);
-        }
-        const atom$1 = atom._0;
-        if (/* tag */ typeof atom$1 === "number" || typeof atom$1 === "string") {
-          const t = Melange__Term.meta({
-            TAG: /* Hole */ 1,
-            _0: false
-          });
-          return localize(t, token);
-        }
-        const t$1 = Melange__Term.meta({
-          TAG: /* Identifier */ 2,
-          _0: atom$1._0
-        });
-        return localize(t$1, token);
-      }
-    } else {
-      const match$2 = cf._0;
-      if (match$2.TAG === /* CHead */ 0) {
-        let tmp = match$2._0.value;
-        if (/* tag */ (typeof tmp === "number" || typeof tmp === "string") && tmp === /* TOP */ 2) {
-          let tmp$1 = cf._2.value;
-          if (!/* tag */ (typeof tmp$1 === "number" || typeof tmp$1 === "string")) {
-            return Melange__Term.meta(/* BuilderError */ 0);
-          }
-          switch (tmp$1) {
-            case /* TCP */ 3 :
-              if (!match$1) {
-                return Melange__Term.meta(/* BuilderError */ 0);
-              }
-              if (right !== undefined) {
-                return Melange__Term.meta(/* BuilderError */ 0);
-              }
-              const t$2 = combineTerms(Stdlib__List.concat_map(buildSharded, cf._1));
-              const init = t$2.meta;
-              return {
-                value: t$2.value,
-                meta: {
-                  parens: true,
-                  start: init.start,
-                  end_: init.end_
-                }
-              };
-            case /* TEnd */ 8 :
-              break;
-            default:
-              return Melange__Term.meta(/* BuilderError */ 0);
-          }
-        }
-        
-      }
-      
-    }
-  }
-  if (cf.TAG === /* CHead */ 0) {
-    const token$1 = cf._0;
-    let tmp$2 = token$1.value;
-    if (!/* tag */ (typeof tmp$2 === "number" || typeof tmp$2 === "string")) {
-      return Melange__Term.meta(/* BuilderError */ 0);
-    }
-    if (tmp$2 !== /* TColon */ 4) {
-      return Melange__Term.meta(/* BuilderError */ 0);
-    }
-    const t$3 = Melange__Term.meta({
-      TAG: /* Asc */ 3,
-      _0: buildLeftChild(left, leftUnforms),
-      _1: buildRightChild(rightUnforms, right)
-    });
-    return localize(t$3, token$1);
-  } else {
-    let tmp$3 = cf._2.value;
-    if (/* tag */ (typeof tmp$3 === "number" || typeof tmp$3 === "string") && tmp$3 === /* TEnd */ 8 && match$1 && right === undefined) {
-      return buildBlocks(cf._0, cf._1, undefined);
-    } else {
-      return Melange__Term.meta(/* BuilderError */ 0);
-    }
-  }
-}
-
-function buildUnform(u) {
-  if (u.TAG === /* USecondary */ 0) {
-    return /* [] */ 0;
-  } else {
-    return {
-      hd: Melange__Term.meta({
-        TAG: /* Shard */ 0,
-        _0: u._0.value
-      }),
-      tl: /* [] */ 0
-    };
-  }
-}
-
-function buildBlocks(_form, _contents, _rest) {
-  while (true) {
-    const rest = _rest;
-    const contents = _contents;
-    const form = _form;
-    if (form.TAG === /* CHead */ 0) {
-      let tmp = form._0.value;
-      if (!/* tag */ (typeof tmp === "number" || typeof tmp === "string")) {
-        return Melange__Term.meta(/* BuilderError */ 0);
-      }
-      if (tmp !== /* TPostulate */ 5) {
-        return Melange__Term.meta(/* BuilderError */ 0);
-      }
-      
-    } else {
-      let tmp$1 = form._2.value;
-      if (!/* tag */ (typeof tmp$1 === "number" || typeof tmp$1 === "string")) {
-        return Melange__Term.meta(/* BuilderError */ 0);
-      }
-      if (tmp$1 !== /* TPostulate */ 5) {
-        return Melange__Term.meta(/* BuilderError */ 0);
-      }
-      
-    }
-    const body = Stdlib__List.filter_map(buildItem, contents);
-    if (form.TAG === /* CHead */ 0) {
-      return Melange__Term.meta({
-        TAG: /* Postulate */ 5,
-        _0: body,
-        _1: rest
-      });
-    }
-    _rest = Melange__Term.meta({
-      TAG: /* Postulate */ 5,
-      _0: body,
-      _1: rest
-    });
-    _contents = form._1;
-    _form = form._0;
-    continue;
-  };
-}
-
-function buildItem(item) {
-  if (item.TAG === /* Unform */ 0) {
-    return;
-  } else {
-    return buildForm(item._0);
-  }
-}
-
-function buildLeftChild(form, unforms) {
-  return combineTerms(form !== undefined ? ({
-      hd: buildForm(form),
-      tl: Stdlib__List.concat_map(buildUnform, unforms)
-    }) : Stdlib__List.concat_map(buildUnform, unforms));
-}
-
-function buildRightChild(unforms, form) {
-  return combineTerms(form !== undefined ? Stdlib.$at(Stdlib__List.concat_map(buildUnform, unforms), {
-      hd: buildForm(form),
-      tl: /* [] */ 0
-    }) : Stdlib__List.concat_map(buildUnform, unforms));
 }
 
 function localize(t, token) {
@@ -224,23 +44,194 @@ function localize(t, token) {
   };
 }
 
-function buildSharded(sof) {
-  if (sof.TAG === /* Unform */ 0) {
-    return buildUnform(sof._0);
+function buildForm(form) {
+  const right = form.right;
+  const rightUf = form.rightUf;
+  const closed = form.closed;
+  const leftUf = form.leftUf;
+  const left = form.left;
+  if (left === undefined && !leftUf) {
+    if (closed.TAG === /* CHead */ 0) {
+      const tok = closed._0;
+      const match = tok.value;
+      if (/* tag */ typeof match === "number" || typeof match === "string") {
+        if (match !== /* TColon */ 4) {
+          return Melange__Term.mk(/* BuilderError */ 0);
+        }
+        
+      } else {
+        const v = match._0;
+        if (/* tag */ typeof v === "number" || typeof v === "string") {
+          if (rightUf || right !== undefined) {
+            return Melange__Term.mk(/* BuilderError */ 0);
+          } else {
+            return localize(Melange__Term.mk({
+              TAG: /* Hole */ 1,
+              _0: false
+            }), tok);
+          }
+        } else if (rightUf || right !== undefined) {
+          return Melange__Term.mk(/* BuilderError */ 0);
+        } else {
+          return localize(Melange__Term.mk({
+            TAG: /* Identifier */ 2,
+            _0: v._0
+          }), tok);
+        }
+      }
+    } else {
+      const match$1 = closed._0;
+      if (match$1.TAG === /* CHead */ 0) {
+        let tmp = match$1._0.value;
+        if (/* tag */ (typeof tmp === "number" || typeof tmp === "string") && tmp === /* TOP */ 2) {
+          let tmp$1 = closed._2.value;
+          if (!/* tag */ (typeof tmp$1 === "number" || typeof tmp$1 === "string")) {
+            return Melange__Term.mk(/* BuilderError */ 0);
+          }
+          switch (tmp$1) {
+            case /* TCP */ 3 :
+              if (rightUf) {
+                return Melange__Term.mk(/* BuilderError */ 0);
+              }
+              if (right !== undefined) {
+                return Melange__Term.mk(/* BuilderError */ 0);
+              }
+              const t = combineTerms(Stdlib__List.concat_map(buildSharded, closed._1));
+              const init = t.meta;
+              return {
+                value: t.value,
+                meta: {
+                  parens: true,
+                  start: init.start,
+                  end_: init.end_
+                }
+              };
+            case /* TEnd */ 8 :
+              break;
+            default:
+              return Melange__Term.mk(/* BuilderError */ 0);
+          }
+        }
+        
+      }
+      
+    }
+  }
+  if (closed.TAG === /* CHead */ 0) {
+    const tok$1 = closed._0;
+    let tmp$2 = tok$1.value;
+    if (!/* tag */ (typeof tmp$2 === "number" || typeof tmp$2 === "string")) {
+      return Melange__Term.mk(/* BuilderError */ 0);
+    }
+    if (tmp$2 !== /* TColon */ 4) {
+      return Melange__Term.mk(/* BuilderError */ 0);
+    }
+    const l = combineTerms(left !== undefined ? ({
+        hd: buildForm(left),
+        tl: Stdlib__List.concat_map(buildUnform, leftUf)
+      }) : Stdlib__List.concat_map(buildUnform, leftUf));
+    return localize(Melange__Term.mk({
+      TAG: /* Asc */ 3,
+      _0: l,
+      _1: buildChild(rightUf, right)
+    }), tok$1);
+  } else {
+    let tmp$3 = closed._2.value;
+    if (/* tag */ (typeof tmp$3 === "number" || typeof tmp$3 === "string") && tmp$3 === /* TEnd */ 8 && !(rightUf || right !== undefined)) {
+      return buildBlocks(closed._0, closed._1, undefined);
+    } else {
+      return Melange__Term.mk(/* BuilderError */ 0);
+    }
+  }
+}
+
+function buildSharded(u) {
+  if (u.TAG === /* Unform */ 0) {
+    return buildUnform(u._0);
   } else {
     return {
-      hd: buildForm(sof._0),
+      hd: buildForm(u._0),
       tl: /* [] */ 0
     };
   }
 }
 
-function buildTerms(fs) {
-  return combineTerms(Stdlib__List.concat_map(buildSharded, fs));
+function buildUnform(token) {
+  if (token.TAG === /* USecondary */ 0) {
+    return /* [] */ 0;
+  } else {
+    return {
+      hd: Melange__Term.mk({
+        TAG: /* Shard */ 0,
+        _0: token._0.value
+      }),
+      tl: /* [] */ 0
+    };
+  }
+}
+
+function buildBlocks(_form, _contents, _rest) {
+  while (true) {
+    const rest = _rest;
+    const contents = _contents;
+    const form = _form;
+    if (form.TAG === /* CHead */ 0) {
+      let tmp = form._0.value;
+      if (!/* tag */ (typeof tmp === "number" || typeof tmp === "string")) {
+        return Melange__Term.mk(/* BuilderError */ 0);
+      }
+      if (tmp !== /* TPostulate */ 5) {
+        return Melange__Term.mk(/* BuilderError */ 0);
+      }
+      
+    } else {
+      let tmp$1 = form._2.value;
+      if (!/* tag */ (typeof tmp$1 === "number" || typeof tmp$1 === "string")) {
+        return Melange__Term.mk(/* BuilderError */ 0);
+      }
+      if (tmp$1 !== /* TPostulate */ 5) {
+        return Melange__Term.mk(/* BuilderError */ 0);
+      }
+      
+    }
+    const body = buildItems(contents);
+    if (form.TAG === /* CHead */ 0) {
+      return Melange__Term.mk({
+        TAG: /* Postulate */ 5,
+        _0: body,
+        _1: rest
+      });
+    }
+    _rest = Melange__Term.mk({
+      TAG: /* Postulate */ 5,
+      _0: body,
+      _1: rest
+    });
+    _contents = form._1;
+    _form = form._0;
+    continue;
+  };
 }
 
 function buildItems(items) {
-  return Stdlib__List.filter_map(buildItem, items);
+  return Stdlib__List.filter_map((function (f) {
+    if (f.TAG === /* Unform */ 0) {
+      return;
+    } else {
+      return buildForm(f._0);
+    }
+  }), items);
+}
+
+function buildChild(unforms, form) {
+  return combineTerms(form !== undefined ? Stdlib.$at(Stdlib__List.concat_map(buildUnform, unforms), {
+      hd: buildForm(form),
+      tl: /* [] */ 0
+    }) : Stdlib__List.concat_map(buildUnform, unforms));
+}
+
+function buildTerms(fs) {
+  return combineTerms(Stdlib__List.concat_map(buildSharded, fs));
 }
 
 function buildUnforms(unforms) {
@@ -253,13 +244,11 @@ function build(forms) {
 
 export {
   combineTerms,
+  localize,
   buildTerms,
-  buildLeftChild,
-  buildRightChild,
-  buildItem,
+  buildChild,
   buildItems,
   buildBlocks,
-  localize,
   buildForm,
   buildUnform,
   buildUnforms,

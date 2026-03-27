@@ -36,11 +36,19 @@ function getPrecedence(token) {
   }
 }
 
-function isBlockToken(t) {
-  if (!/* tag */ (typeof t === "number" || typeof t === "string")) {
+function leftPrec(t) {
+  return getPrecedence(t)[0];
+}
+
+function rightPrec(t) {
+  return getPrecedence(t)[1];
+}
+
+function isBlockToken(param) {
+  if (!/* tag */ (typeof param === "number" || typeof param === "string")) {
     return false;
   }
-  switch (t) {
+  switch (param) {
     case /* TPostulate */ 5 :
     case /* TChecker */ 6 :
     case /* TConstruct */ 7 :
@@ -72,18 +80,18 @@ function matchToken(t1, t2) {
   }
 }
 
-function isValidStart(token) {
-  const match = getPrecedence(token);
-  return Caml_obj.caml_notequal(match[0], /* Interior */ 0);
+function isValidStart(t) {
+  return Caml_obj.caml_notequal(getPrecedence(t)[0], /* Interior */ 0);
 }
 
-function isValidEnd(token) {
-  const match = getPrecedence(token.value);
-  return Caml_obj.caml_notequal(match[1], /* Interior */ 0);
+function isValidEnd(t) {
+  return Caml_obj.caml_notequal(getPrecedence(t.value)[1], /* Interior */ 0);
 }
 
 export {
   getPrecedence,
+  leftPrec,
+  rightPrec,
   isBlockToken,
   matchToken,
   isValidStart,

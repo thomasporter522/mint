@@ -1,5 +1,3 @@
-/* Main API module - exports functions for TypeScript consumption */
-
 open Term;
 open Lexer;
 open Parser;
@@ -26,7 +24,7 @@ let contextToJsMap = (ctx: context): jsMap => {
   m;
 };
 
-/* === Error type for JS output === */
+/* === JS-facing types via mel.obj === */
 
 type jsError;
 
@@ -36,22 +34,15 @@ external makeJsError:
     ~type_: [@mel.as "type"] string,
     ~message: string,
     ~from: int,
-    ~to_: [@mel.as "to"] int
+    ~to_: [@mel.as "to"] int,
   ) =>
   jsError =
   "";
-
-let errorToJs = (e: Error.error): jsError =>
-  makeJsError(~type_=e.type_, ~message=e.message, ~from=e.from, ~to_=e.to_);
-
-/* === Hole info === */
 
 type jsHoleInfo;
 
 [@mel.obj]
 external makeJsHoleInfo: (~goal: term, ~context: jsMap) => jsHoleInfo = "";
-
-/* === Result type === */
 
 type jsResult;
 
@@ -60,26 +51,30 @@ external makeJsResult:
   (~errors: array(jsError), ~holes: array(array(Obj.t))) => jsResult =
   "";
 
-/* The combined pipeline: code string -> {errors, holes} */
-let processCode = (code: string): jsResult => {
-  let tokens = lex(code);
-  let parsed = parse(tokens);
-  let ast = build(parsed);
-  let statics = getStatics(ast);
+/* === Pipeline === */
 
-  let errors = Array.of_list(List.map(errorToJs, statics.errors));
+let processCode = (code: string): jsResult => {
+  let statics = getStatics(build(parse(lex(code))));
+
+  let errors =
+    Array.of_list(
+      List.map(
+        (e: Error.error) =>
+          makeJsError(~type_=e.type_, ~message=e.message, ~from=e.from, ~to_=e.to_),
+        statics.errors,
+      ),
+    );
 
   let holes =
     Array.of_list(
       List.map(
-        ((pos, info): (int, holeInfo)) => {
-          let holeInfo =
-            makeJsHoleInfo(
-              ~goal=info.goal,
-              ~context=contextToJsMap(info.context),
-            );
-          [|Obj.repr(pos), Obj.repr(holeInfo)|];
-        },
+        ((pos, info): (int, holeInfo)) =>
+          [|
+            Obj.repr(pos),
+            Obj.repr(
+              makeJsHoleInfo(~goal=info.goal, ~context=contextToJsMap(info.context)),
+            ),
+          |],
         statics.holes,
       ),
     );
@@ -87,5 +82,4 @@ let processCode = (code: string): jsResult => {
   makeJsResult(~errors, ~holes);
 };
 
-/* printTerm operates on opaque ML terms */
 let printTerm = (t: term): string => Print.printTerm(t);

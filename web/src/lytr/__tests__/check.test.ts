@@ -133,6 +133,15 @@ describe('type consistency', () => {
     )).toEqual([]);
   });
 
+  it('application with dependent return type checked against varied arguments', () => {
+    // f : (a : U) -> a, so f returns whatever type its argument has.
+    // (f U) : U, and g : (f U) means g : U.
+    // (f g) : g = (f U) = U, so a : (f g) should be fine.
+    expect(errors(
+      'postulate\nx : U\n(f (a : U)) : a\ng : (f U)\na : (f g)\nend'
+    )).toEqual([]);
+  });
+
   it('reports inconsistency for genuinely wrong types', () => {
     // f returns U, but g expects something that should be x (which is declared as U).
     // Actually let's make a clear mismatch:

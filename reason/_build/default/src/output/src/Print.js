@@ -3,19 +3,19 @@
 import * as Stdlib__List from "melange/list.js";
 import * as Stdlib__String from "melange/string.js";
 
-function printAtom(atom) {
-  if (/* tag */ typeof atom === "number" || typeof atom === "string") {
+function printAtom(v) {
+  if (/* tag */ typeof v === "number" || typeof v === "string") {
     return "?";
   } else {
-    return atom._0;
+    return v._0;
   }
 }
 
-function printPrimaryToken(token) {
-  if (!/* tag */ (typeof token === "number" || typeof token === "string")) {
-    return printAtom(token._0);
+function printPrimaryToken(a) {
+  if (!/* tag */ (typeof a === "number" || typeof a === "string")) {
+    return printAtom(a._0);
   }
-  switch (token) {
+  switch (a) {
     case /* BOF */ 0 :
     case /* EOF */ 1 :
       return "";
@@ -36,46 +36,47 @@ function printPrimaryToken(token) {
   }
 }
 
-function innerPrintTerm(t) {
-  const token = t.value;
-  if (/* tag */ typeof token === "number" || typeof token === "string") {
-    return "<BUILDER ERROR>";
-  }
-  switch (token.TAG) {
-    case /* Shard */ 0 :
-      return printPrimaryToken(token._0);
-    case /* Hole */ 1 :
-      if (token._0) {
-        return "";
-      } else {
-        return "?";
-      }
-    case /* Identifier */ 2 :
-      return token._0;
-    case /* Asc */ 3 :
-      return printTerm(token._0) + (" : " + printTerm(token._1));
-    case /* Ap */ 4 :
-      return printTerm(token._0) + (" " + Stdlib__String.concat(" ", Stdlib__List.map(printTerm, token._1)));
-    case /* Postulate */ 5 :
-      const rest = token._1;
-      return "postulate " + (Stdlib__String.concat("\n", Stdlib__List.map(printTerm, token._0)) + (" end" + (
-        rest !== undefined ? " " + printTerm(rest) : ""
-      )));
-    case /* Checker */ 6 :
-      const rest$1 = token._0;
-      return "checker end" + (
-        rest$1 !== undefined ? " " + printTerm(rest$1) : ""
-      );
-    case /* Construct */ 7 :
-      const rest$2 = token._2;
-      return "construct " + (printTerm(token._0) + (" " + (Stdlib__String.concat("\n", Stdlib__List.map(printTerm, token._1)) + (" end" + (
-        rest$2 !== undefined ? " " + printTerm(rest$2) : ""
-      )))));
+function printRest(r) {
+  if (r !== undefined) {
+    return " " + printTerm(r);
+  } else {
+    return "";
   }
 }
 
 function printTerm(t) {
-  const inner = innerPrintTerm(t);
+  const token = t.value;
+  let inner;
+  if (/* tag */ typeof token === "number" || typeof token === "string") {
+    inner = "<BUILDER ERROR>";
+  } else {
+    switch (token.TAG) {
+      case /* Shard */ 0 :
+        inner = printPrimaryToken(token._0);
+        break;
+      case /* Hole */ 1 :
+        inner = token._0 ? "" : "?";
+        break;
+      case /* Identifier */ 2 :
+        inner = token._0;
+        break;
+      case /* Asc */ 3 :
+        inner = printTerm(token._0) + (" : " + printTerm(token._1));
+        break;
+      case /* Ap */ 4 :
+        inner = printTerm(token._0) + (" " + Stdlib__String.concat(" ", Stdlib__List.map(printTerm, token._1)));
+        break;
+      case /* Postulate */ 5 :
+        inner = "postulate " + (Stdlib__String.concat("\n", Stdlib__List.map(printTerm, token._0)) + (" end" + printRest(token._1)));
+        break;
+      case /* Checker */ 6 :
+        inner = "checker end" + printRest(token._0);
+        break;
+      case /* Construct */ 7 :
+        inner = "construct " + (printTerm(token._0) + (" " + (Stdlib__String.concat("\n", Stdlib__List.map(printTerm, token._1)) + (" end" + printRest(token._2)))));
+        break;
+    }
+  }
   if (t.meta.parens) {
     return "(" + (inner + ")");
   } else {
@@ -86,7 +87,7 @@ function printTerm(t) {
 export {
   printAtom,
   printPrimaryToken,
-  innerPrintTerm,
+  printRest,
   printTerm,
 }
 /* No side effect */

@@ -8,7 +8,7 @@ type termMeta = {
 
 type cTerm =
   | Shard(primaryToken)
-  | Hole(bool) /* inserted */
+  | Hole(bool)
   | Identifier(string)
   | Asc(term, term)
   | Ap(term, list(term))
@@ -21,6 +21,6 @@ and term = {
   meta: termMeta,
 };
 
-let meta = (t: cTerm): term => {
-  {value: t, meta: {parens: false, start: (-1), end_: (-1)}};
-};
+let defaultMeta = {parens: false, start: (-1), end_: (-1)};
+
+let mk = (t: cTerm): term => {value: t, meta: defaultMeta};

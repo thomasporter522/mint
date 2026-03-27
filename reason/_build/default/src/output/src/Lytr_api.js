@@ -21,30 +21,24 @@ function contextToJsMap(ctx) {
   return m;
 }
 
-function errorToJs(e) {
-  return {
-    type: e.type_,
-    message: e.message,
-    from: e.from,
-    to: e.to_
-  };
-}
-
 function processCode(code) {
-  const tokens = Melange__Lexer.lex(code);
-  const parsed = Melange__Parser.parse(tokens);
-  const ast = Melange__Builder.build(parsed);
-  const statics = Melange__Check.getStatics(ast);
-  const errors = Stdlib__Array.of_list(Stdlib__List.map(errorToJs, statics.errors));
+  const statics = Melange__Check.getStatics(Melange__Builder.build(Melange__Parser.parse(Melange__Lexer.lex(code))));
+  const errors = Stdlib__Array.of_list(Stdlib__List.map((function (e) {
+    return {
+      type: e.type_,
+      message: e.message,
+      from: e.from,
+      to: e.to_
+    };
+  }), statics.errors));
   const holes = Stdlib__Array.of_list(Stdlib__List.map((function (param) {
     const info = param[1];
-    const holeInfo = {
-      goal: info.goal,
-      context: contextToJsMap(info.context)
-    };
     return [
       param[0],
-      holeInfo
+      {
+        goal: info.goal,
+        context: contextToJsMap(info.context)
+      }
     ];
   }), statics.holes));
   return {
@@ -57,7 +51,6 @@ const printTerm = Melange__Print.printTerm;
 
 export {
   contextToJsMap,
-  errorToJs,
   processCode,
   printTerm,
 }

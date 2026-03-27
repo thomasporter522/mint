@@ -38,125 +38,119 @@ function isAlphanum(c) {
   }
 }
 
+function keywordOrIdent(s) {
+  switch (s) {
+    case "checker" :
+      return /* TChecker */ 6;
+    case "construct" :
+      return /* TConstruct */ 7;
+    case "end" :
+      return /* TEnd */ 8;
+    case "postulate" :
+      return /* TPostulate */ 5;
+    default:
+      return {
+        TAG: /* TAtom */ 0,
+        _0: {
+          TAG: /* Identifier */ 0,
+          _0: s
+        }
+      };
+  }
+}
+
+function singleCharToken(param) {
+  if (param >= 58) {
+    if (param !== 63) {
+      if (param >= 59) {
+        return;
+      } else {
+        return {
+          TAG: /* Primary */ 0,
+          _0: /* TColon */ 4
+        };
+      }
+    } else {
+      return {
+        TAG: /* Primary */ 0,
+        _0: {
+          TAG: /* TAtom */ 0,
+          _0: /* Hole */ 0
+        }
+      };
+    }
+  } else if (param !== 40) {
+    if (param !== 41) {
+      return;
+    } else {
+      return {
+        TAG: /* Primary */ 0,
+        _0: /* TCP */ 3
+      };
+    }
+  } else {
+    return {
+      TAG: /* Primary */ 0,
+      _0: /* TOP */ 2
+    };
+  }
+}
+
 function lex(s) {
   const len = s.length;
-  let tokens = /* [] */ 0;
+  const acc = {
+    contents: /* [] */ 0
+  };
+  const emit = function (tok, start, end_) {
+    acc.contents = {
+      hd: {
+        value: tok,
+        start: start,
+        end_: end_
+      },
+      tl: acc.contents
+    };
+  };
   let i = 0;
   while (i < len) {
     const start = i;
     const c = Caml_string.get(s, i);
     if (isWhitespace(c)) {
-      tokens = {
-        hd: {
-          value: {
-            TAG: /* Secondary */ 1,
-            _0: {
-              TAG: /* Whitespace */ 0,
-              _0: Stdlib__String.make(1, c)
-            }
-          },
-          start: start,
-          end_: i + 1 | 0
-        },
-        tl: tokens
-      };
+      emit({
+        TAG: /* Secondary */ 1,
+        _0: {
+          TAG: /* Whitespace */ 0,
+          _0: Stdlib__String.make(1, c)
+        }
+      }, start, start + 1 | 0);
       i = i + 1 | 0;
     } else if (isLetter(c)) {
       let j = i;
       while (j < len && isAlphanum(Caml_string.get(s, j))) {
         j = j + 1 | 0;
       };
-      const idStr = Stdlib__String.sub(s, i, j - i | 0);
-      let primaryToken;
-      switch (idStr) {
-        case "checker" :
-          primaryToken = /* TChecker */ 6;
-          break;
-        case "construct" :
-          primaryToken = /* TConstruct */ 7;
-          break;
-        case "end" :
-          primaryToken = /* TEnd */ 8;
-          break;
-        case "postulate" :
-          primaryToken = /* TPostulate */ 5;
-          break;
-        default:
-          primaryToken = {
-            TAG: /* TAtom */ 0,
-            _0: {
-              TAG: /* Identifier */ 0,
-              _0: idStr
-            }
-          };
-      }
-      tokens = {
-        hd: {
-          value: {
-            TAG: /* Primary */ 0,
-            _0: primaryToken
-          },
-          start: i,
-          end_: j
-        },
-        tl: tokens
-      };
+      emit({
+        TAG: /* Primary */ 0,
+        _0: keywordOrIdent(Stdlib__String.sub(s, i, j - i | 0))
+      }, i, j);
       i = j;
     } else {
-      const singleCharToken = c >= 58 ? (
-          c !== 63 ? (
-              c >= 59 ? undefined : ({
-                  TAG: /* Primary */ 0,
-                  _0: /* TColon */ 4
-                })
-            ) : ({
-              TAG: /* Primary */ 0,
-              _0: {
-                TAG: /* TAtom */ 0,
-                _0: /* Hole */ 0
-              }
-            })
-        ) : (
-          c !== 40 ? (
-              c !== 41 ? undefined : ({
-                  TAG: /* Primary */ 0,
-                  _0: /* TCP */ 3
-                })
-            ) : ({
-              TAG: /* Primary */ 0,
-              _0: /* TOP */ 2
-            })
-        );
-      if (singleCharToken !== undefined) {
-        tokens = {
-          hd: {
-            value: singleCharToken,
-            start: start,
-            end_: i + 1 | 0
-          },
-          tl: tokens
-        };
-        i = i + 1 | 0;
+      const tok = singleCharToken(c);
+      if (tok !== undefined) {
+        emit(tok, start, start + 1 | 0);
       } else {
-        tokens = {
-          hd: {
-            value: {
-              TAG: /* Secondary */ 1,
-              _0: {
-                TAG: /* Unlexed */ 1,
-                _0: Stdlib__String.make(1, c)
-              }
-            },
-            start: start,
-            end_: i + 1 | 0
-          },
-          tl: tokens
-        };
-        i = i + 1 | 0;
+        emit({
+          TAG: /* Secondary */ 1,
+          _0: {
+            TAG: /* Unlexed */ 1,
+            _0: Stdlib__String.make(1, c)
+          }
+        }, start, start + 1 | 0);
       }
+      i = i + 1 | 0;
     }
   };
-  return Stdlib__List.rev(tokens);
+  return Stdlib__List.rev(acc.contents);
 }
 
 export {
@@ -164,6 +158,8 @@ export {
   isDigit,
   isLetter,
   isAlphanum,
+  keywordOrIdent,
+  singleCharToken,
   lex,
 }
 /* No side effect */

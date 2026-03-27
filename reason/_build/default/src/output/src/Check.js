@@ -4,6 +4,7 @@ import * as Caml from "melange.js/caml.js";
 import * as Caml_obj from "melange.js/caml_obj.js";
 import * as Caml_option from "melange.js/caml_option.js";
 import * as Curry from "melange.js/curry.js";
+import * as Melange__Error from "./Error.js";
 import * as Melange__Print from "./Print.js";
 import * as Melange__Term from "./Term.js";
 import * as Stdlib from "melange/stdlib.js";
@@ -15,7 +16,7 @@ const StringMap = Stdlib__Map.Make({
   compare: Stdlib__String.compare
 });
 
-const hole = Melange__Term.meta({
+const hole = Melange__Term.mk({
   TAG: /* Hole */ 1,
   _0: false
 });
@@ -25,258 +26,209 @@ const fullHole = [
   hole
 ];
 
-function combineBindings(c1, c2) {
+const emptyInfo_bindings = StringMap.empty;
+
+const emptyInfo = {
+  errors: /* [] */ 0,
+  holes: /* [] */ 0,
+  inferred: undefined,
+  bindings: emptyInfo_bindings
+};
+
+function mergeBindings(c1, c2) {
   return Curry._3(StringMap.union, (function (_key, _v1, v2) {
     return Caml_option.some(v2);
   }), c1, c2);
 }
 
-function combineInfos(_infos) {
-  while (true) {
-    const infos = _infos;
-    if (!infos) {
-      return {
-        errors: /* [] */ 0,
-        holes: /* [] */ 0,
-        inferred: undefined,
-        bindings: StringMap.empty
-      };
-    }
-    const match = infos.tl;
-    const info = infos.hd;
-    if (!match) {
-      return info;
-    }
-    const info2 = match.hd;
-    const combined_errors = Stdlib.$at(info.errors, info2.errors);
-    const combined_holes = Stdlib.$at(info.holes, info2.holes);
-    const combined_bindings = combineBindings(info.bindings, info2.bindings);
-    const combined = {
-      errors: combined_errors,
-      holes: combined_holes,
-      inferred: undefined,
-      bindings: combined_bindings
-    };
-    _infos = {
-      hd: combined,
-      tl: match.tl
-    };
-    continue;
+function mergeInfos(i1, i2) {
+  return {
+    errors: Stdlib.$at(i1.errors, i2.errors),
+    holes: Stdlib.$at(i1.holes, i2.holes),
+    inferred: undefined,
+    bindings: mergeBindings(i1.bindings, i2.bindings)
   };
 }
 
-function addErrors(info, errors) {
+function withErrors(info, errs) {
   return {
-    errors: Stdlib.$at(info.errors, errors),
+    errors: Stdlib.$at(info.errors, errs),
     holes: info.holes,
     inferred: info.inferred,
     bindings: info.bindings
   };
 }
 
-function addBindings(info, bindings) {
+function withBindings(info, ctx) {
   return {
     errors: info.errors,
     holes: info.holes,
     inferred: info.inferred,
-    bindings: combineBindings(info.bindings, bindings)
+    bindings: mergeBindings(info.bindings, ctx)
   };
 }
 
-function combine(ts1, ts2) {
-  if (ts1 === undefined) {
-    return [
-      true,
-      undefined
-    ];
+function stringOfMode(param) {
+  if (!/* tag */ (typeof param === "number" || typeof param === "string")) {
+    return "expression";
   }
-  if (ts2 === undefined) {
-    return [
-      true,
-      undefined
-    ];
+  switch (param) {
+    case /* Program */ 0 :
+      return "program";
+    case /* Line */ 1 :
+      return "line";
+    case /* Spine */ 2 :
+      return "spine";
+    case /* Argument */ 3 :
+      return "argument";
+    case /* IdentifierMode */ 4 :
+      return "identifier";
   }
-  const match = ts1.value;
-  const match$1 = ts2.value;
-  let exit = 0;
-  if (/* tag */ typeof match === "number" || typeof match === "string") {
-    exit = 2;
-  } else {
-    switch (match.TAG) {
-      case /* Hole */ 1 :
-        return [
-          true,
-          hole
-        ];
-      case /* Identifier */ 2 :
-        if (!/* tag */ (typeof match$1 === "number" || typeof match$1 === "string")) {
-          switch (match$1.TAG) {
-            case /* Hole */ 1 :
-              exit = 2;
-              break;
-            case /* Identifier */ 2 :
-              if (match._0 === match$1._0) {
-                return [
-                  true,
-                  ts1
-                ];
-              }
-              break;
-          }
-        }
-        break;
-      default:
-        exit = 2;
-    }
-  }
-  if (exit === 2 && !/* tag */ (typeof match$1 === "number" || typeof match$1 === "string") && match$1.TAG === /* Hole */ 1) {
-    return [
-      true,
-      hole
-    ];
-  }
-  Caml_obj.caml_notequal(ts1.value, ts2.value);
-  return [
-    false,
-    hole
-  ];
 }
 
-function inCtx(ctx, x) {
+function consistent(t1, t2) {
+  let exit = 0;
+  if (t1 === undefined) {
+    return true;
+  }
+  if (t2 === undefined) {
+    return true;
+  }
+  let tmp = t2.value;
+  if (/* tag */ typeof tmp === "number" || typeof tmp === "string") {
+    exit = 1;
+  } else {
+    if (tmp.TAG === /* Hole */ 1) {
+      return true;
+    }
+    exit = 1;
+  }
+  if (exit === 1) {
+    let exit$1 = 0;
+    let tmp$1 = t1.value;
+    if (/* tag */ typeof tmp$1 === "number" || typeof tmp$1 === "string") {
+      exit$1 = 2;
+    } else {
+      if (tmp$1.TAG === /* Hole */ 1) {
+        return true;
+      }
+      exit$1 = 2;
+    }
+    if (exit$1 === 2) {
+      const match = t1.value;
+      const match$1 = t2.value;
+      if (/* tag */ typeof match === "number" || typeof match === "string" || !(match.TAG === /* Identifier */ 2 && !(/* tag */ typeof match$1 === "number" || typeof match$1 === "string" || match$1.TAG !== /* Identifier */ 2))) {
+        return false;
+      } else {
+        return match._0 === match$1._0;
+      }
+    }
+    
+  }
+  
+}
+
+function lookupCtx(ctx, x) {
   if (x === "U") {
-    return [
-      true,
-      undefined
-    ];
+    return {
+      TAG: /* Found */ 0,
+      _0: undefined
+    };
   }
   const ft = Curry._2(StringMap.find_opt, x, ctx);
   if (ft !== undefined) {
-    return [
-      true,
-      Caml_option.valFromOption(ft)
-    ];
+    return {
+      TAG: /* Found */ 0,
+      _0: Caml_option.valFromOption(ft)
+    };
   } else {
-    return [
-      false,
-      [
-        /* [] */ 0,
-        hole
-      ]
-    ];
+    return /* NotFound */ 0;
   }
 }
 
-function subsume(mode, from, to_, inferred, errors) {
-  if (/* tag */ typeof mode === "number" || typeof mode === "string") {
-    return errors;
-  }
-  const expected = mode._0;
-  const errors$1 = inferred !== undefined && Stdlib__List.length(inferred[0]) > 0 && expected !== undefined ? ({
-      hd: {
-        type_: "mark",
-        message: "Too few arguments",
-        from: from,
-        to_: to_
-      },
-      tl: errors
-    }) : errors;
+function subsume(expected, inferred, from, to_) {
+  const tooFewArgs = inferred !== undefined && Stdlib__List.length(inferred[0]) > 0 && expected !== undefined ? ({
+      hd: Melange__Error.mark("Too few arguments", from, to_),
+      tl: /* [] */ 0
+    }) : /* [] */ 0;
   const inferredOut = inferred !== undefined ? inferred[1] : undefined;
-  const match = combine(expected, inferredOut);
-  if (match[0]) {
-    return errors$1;
+  const inconsistency = !consistent(expected, inferredOut) && expected !== undefined && inferredOut !== undefined ? ({
+      hd: Melange__Error.mark("Inconsitency (expected " + (Melange__Print.printTerm(expected) + (", got " + (Melange__Print.printTerm(inferredOut) + ")"))), from, to_),
+      tl: /* [] */ 0
+    }) : /* [] */ 0;
+  return Stdlib.$at(tooFewArgs, inconsistency);
+}
+
+function checkArity(expected, found, from, to_) {
+  if (Caml_obj.caml_equal(expected, found)) {
+    return /* [] */ 0;
   }
-  if (expected === undefined) {
-    return errors$1;
-  }
-  if (inferredOut === undefined) {
-    return errors$1;
-  }
-  const err_message = "Inconsitency (expected " + (Melange__Print.printTerm(expected) + (", got " + (Melange__Print.printTerm(inferredOut) + ")")));
-  const err = {
-    type_: "mark",
-    message: err_message,
-    from: from,
-    to_: to_
-  };
+  const msg = Caml_obj.caml_greaterthan(expected, found) ? "Too few arguments" : "Too many arguments";
   return {
-    hd: err,
-    tl: errors$1
+    hd: Melange__Error.mark(msg, from, to_),
+    tl: /* [] */ 0
   };
 }
 
-function countArgs(argsExpected, argsFound, from, to_, errors) {
-  if (argsExpected === argsFound) {
-    return errors;
-  }
-  const msg = argsExpected > argsFound ? "Too few arguments" : "Too many arguments";
-  return {
-    hd: {
-      type_: "mark",
-      message: msg,
-      from: from,
-      to_: to_
-    },
-    tl: errors
-  };
-}
-
-function ensureMode(allowed, mode, from, to_, errors) {
-  let modeStr;
-  if (/* tag */ typeof mode === "number" || typeof mode === "string") {
-    switch (mode) {
-      case /* Program */ 0 :
-        modeStr = "program";
-        break;
-      case /* Line */ 1 :
-        modeStr = "line";
-        break;
-      case /* Spine */ 2 :
-        modeStr = "spine";
-        break;
-      case /* Argument */ 3 :
-        modeStr = "argument";
-        break;
-      case /* IdentifierMode */ 4 :
-        modeStr = "identifier";
-        break;
-    }
-  } else {
-    modeStr = "expression";
-  }
-  if (Stdlib__List.mem(modeStr, allowed)) {
-    return errors;
+function ensureMode(allowed, mode, from, to_) {
+  if (Stdlib__List.mem(stringOfMode(mode), allowed)) {
+    return /* [] */ 0;
   }
   const allowedStr = Stdlib__String.concat(",", allowed);
   return {
-    hd: {
-      type_: "mark",
-      message: "Sort error (expected " + (modeStr + (", found " + (allowedStr + ")"))),
-      from: from,
-      to_: to_
-    },
-    tl: errors
+    hd: Melange__Error.mark("Sort error (expected " + (stringOfMode(mode) + (", found " + (allowedStr + ")"))), from, to_),
+    tl: /* [] */ 0
   };
+}
+
+function extractArgTypes(args) {
+  return Stdlib__List.map((function (arg) {
+    const match = arg.value;
+    if (/* tag */ typeof match === "number" || typeof match === "string" || match.TAG !== /* Asc */ 3) {
+      return arg;
+    } else {
+      return match._1;
+    }
+  }), args);
+}
+
+function lineBinding(left, right) {
+  const x = left.value;
+  if (/* tag */ typeof x === "number" || typeof x === "string") {
+    return StringMap.empty;
+  }
+  switch (x.TAG) {
+    case /* Identifier */ 2 :
+      return Curry._2(StringMap.singleton, x._0, [
+        /* [] */ 0,
+        right
+      ]);
+    case /* Ap */ 4 :
+      const x$1 = x._0.value;
+      if (/* tag */ typeof x$1 === "number" || typeof x$1 === "string" || x$1.TAG !== /* Identifier */ 2) {
+        return StringMap.empty;
+      } else {
+        return Curry._2(StringMap.singleton, x$1._0, [
+          extractArgTypes(x._1),
+          right
+        ]);
+      }
+    default:
+      return StringMap.empty;
+  }
 }
 
 function checkTerm(ctx, mode, t) {
   const v = t.value;
   if (/* tag */ typeof v === "number" || typeof v === "string") {
-    return combineInfos(/* [] */ 0);
+    return emptyInfo;
   }
   switch (v.TAG) {
     case /* Hole */ 1 :
       if (/* tag */ typeof mode === "number" || typeof mode === "string") {
-        const err_from = t.meta.start;
-        const err_to_ = t.meta.end_;
-        const err = {
-          type_: "mark",
-          message: "Hole in non-expression",
-          from: err_from,
-          to_: err_to_
-        };
         return {
           errors: {
-            hd: err,
+            hd: Melange__Error.mark("Hole in non-expression", t.meta.start, t.meta.end_),
             tl: /* [] */ 0
           },
           holes: /* [] */ 0,
@@ -285,28 +237,25 @@ function checkTerm(ctx, mode, t) {
         };
       }
       const expected = mode._0;
-      const expected$1 = expected !== undefined ? expected : hole;
-      const holes_0 = [
-        t.meta.start,
-        {
-          goal: expected$1,
-          context: ctx
-        }
-      ];
-      const holes = {
-        hd: holes_0,
-        tl: /* [] */ 0
-      };
+      const goal = expected !== undefined ? expected : hole;
       return {
         errors: /* [] */ 0,
-        holes: holes,
+        holes: {
+          hd: [
+            t.meta.start,
+            {
+              goal: goal,
+              context: ctx
+            }
+          ],
+          tl: /* [] */ 0
+        },
         inferred: fullHole,
         bindings: StringMap.empty
       };
     case /* Identifier */ 2 :
       const v$1 = v._0;
-      let inferred;
-      const errors = ensureMode({
+      const modeErrors = ensureMode({
         hd: "expression",
         tl: {
           hd: "spine",
@@ -315,29 +264,35 @@ function checkTerm(ctx, mode, t) {
             tl: /* [] */ 0
           }
         }
-      }, mode, t.meta.start, t.meta.end_, /* [] */ 0);
-      let errors$1;
+      }, mode, t.meta.start, t.meta.end_);
       if (/* tag */ typeof mode === "number" || typeof mode === "string") {
-        errors$1 = errors;
-      } else {
-        const match = inCtx(ctx, v$1);
-        const inf = match[1];
-        inferred = inf;
-        const errors$2 = match[0] ? errors : ({
-            hd: {
-              type_: "mark",
-              message: "Unbound variable " + v$1,
-              from: t.meta.start,
-              to_: t.meta.end_
-            },
-            tl: errors
-          });
-        errors$1 = inf !== undefined ? subsume(mode, t.meta.start, t.meta.end_, inf, errors$2) : errors$2;
+        return {
+          errors: modeErrors,
+          holes: /* [] */ 0,
+          inferred: undefined,
+          bindings: StringMap.empty
+        };
       }
+      const inferred = lookupCtx(ctx, v$1);
+      if (/* tag */ typeof inferred === "number" || typeof inferred === "string") {
+        const err = Melange__Error.mark("Unbound variable " + v$1, t.meta.start, t.meta.end_);
+        return {
+          errors: {
+            hd: err,
+            tl: modeErrors
+          },
+          holes: /* [] */ 0,
+          inferred: undefined,
+          bindings: StringMap.empty
+        };
+      }
+      const inferred$1 = inferred._0;
+      let subErrors;
+      subErrors = /* tag */ typeof mode === "number" || typeof mode === "string" ? /* [] */ 0 : subsume(mode._0, inferred$1, t.meta.start, t.meta.end_);
       return {
-        errors: errors$1,
+        errors: Stdlib.$at(modeErrors, subErrors),
         holes: /* [] */ 0,
-        inferred: inferred,
+        inferred: inferred$1,
         bindings: StringMap.empty
       };
     case /* Asc */ 3 :
@@ -346,215 +301,148 @@ function checkTerm(ctx, mode, t) {
       if (/* tag */ typeof mode === "number" || typeof mode === "string") {
         switch (mode) {
           case /* Line */ 1 :
-            const infos = checkTerm(ctx, /* Spine */ 2, left);
-            const infos$1 = combineInfos({
-              hd: infos,
-              tl: {
-                hd: checkTerm(combineBindings(ctx, infos.bindings), {
-                  TAG: /* Expression */ 0,
-                  _0: hole
-                }, right),
-                tl: /* [] */ 0
-              }
-            });
-            const x = left.value;
-            let bindings;
-            if (/* tag */ typeof x === "number" || typeof x === "string") {
-              bindings = StringMap.empty;
-            } else {
-              switch (x.TAG) {
-                case /* Identifier */ 2 :
-                  bindings = Curry._2(StringMap.singleton, x._0, [
-                    /* [] */ 0,
-                    right
-                  ]);
-                  break;
-                case /* Ap */ 4 :
-                  const argTypes = Stdlib__List.map((function (arg) {
-                    const match = arg.value;
-                    if (/* tag */ typeof match === "number" || typeof match === "string" || match.TAG !== /* Asc */ 3) {
-                      return arg;
-                    } else {
-                      return match._1;
-                    }
-                  }), x._1);
-                  const x$1 = x._0.value;
-                  bindings = /* tag */ typeof x$1 === "number" || typeof x$1 === "string" || x$1.TAG !== /* Identifier */ 2 ? StringMap.empty : Curry._2(StringMap.singleton, x$1._0, [
-                      argTypes,
-                      right
-                    ]);
-                  break;
-                default:
-                  bindings = StringMap.empty;
-              }
-            }
-            const errors$3 = infos$1.errors;
-            const holes$1 = infos$1.holes;
-            return {
-              errors: errors$3,
-              holes: holes$1,
-              inferred: undefined,
-              bindings: bindings
-            };
-          case /* Argument */ 3 :
-            const leftInfo = checkTerm(ctx, /* IdentifierMode */ 4, left);
-            const rightInfo = checkTerm(ctx, {
+            const spineInfo = checkTerm(ctx, /* Spine */ 2, left);
+            const bodyCtx = mergeBindings(ctx, spineInfo.bindings);
+            const rightInfo = checkTerm(bodyCtx, {
               TAG: /* Expression */ 0,
               _0: hole
             }, right);
-            const infos$2 = combineInfos({
-              hd: leftInfo,
-              tl: {
-                hd: rightInfo,
-                tl: /* [] */ 0
-              }
-            });
+            const info = mergeInfos(spineInfo, rightInfo);
+            return {
+              errors: info.errors,
+              holes: info.holes,
+              inferred: undefined,
+              bindings: lineBinding(left, right)
+            };
+          case /* Argument */ 3 :
+            const leftInfo = checkTerm(ctx, /* IdentifierMode */ 4, left);
+            const rightInfo$1 = checkTerm(ctx, {
+              TAG: /* Expression */ 0,
+              _0: hole
+            }, right);
+            const info$1 = mergeInfos(leftInfo, rightInfo$1);
             if (Stdlib__List.length(leftInfo.errors) !== 0) {
-              return infos$2;
+              return info$1;
             }
-            const x$2 = left.value;
-            if (/* tag */ typeof x$2 === "number" || typeof x$2 === "string" || x$2.TAG !== /* Identifier */ 2) {
-              return infos$2;
+            const x = left.value;
+            if (/* tag */ typeof x === "number" || typeof x === "string" || x.TAG !== /* Identifier */ 2) {
+              return info$1;
             } else {
-              return addBindings(infos$2, Curry._2(StringMap.singleton, x$2._0, [
+              return withBindings(info$1, Curry._2(StringMap.singleton, x._0, [
                 /* [] */ 0,
                 right
               ]));
             }
         }
       }
-      const errors$4 = ensureMode({
+      const modeErrors$1 = ensureMode({
         hd: "argument",
         tl: /* [] */ 0
-      }, mode, t.meta.start, t.meta.end_, /* [] */ 0);
-      const infos$3 = combineInfos({
-        hd: checkTerm(ctx, {
-          TAG: /* Expression */ 0,
-          _0: hole
-        }, left),
-        tl: {
-          hd: checkTerm(ctx, {
-            TAG: /* Expression */ 0,
-            _0: hole
-          }, right),
-          tl: /* [] */ 0
-        }
-      });
-      return addErrors(infos$3, errors$4);
+      }, mode, t.meta.start, t.meta.end_);
+      const info$2 = mergeInfos(checkTerm(ctx, {
+        TAG: /* Expression */ 0,
+        _0: hole
+      }, left), checkTerm(ctx, {
+        TAG: /* Expression */ 0,
+        _0: hole
+      }, right));
+      return withErrors(info$2, modeErrors$1);
     case /* Ap */ 4 :
       const args = v._1;
       const f = v._0;
       if (/* tag */ typeof mode === "number" || typeof mode === "string") {
         if (mode === /* Spine */ 2) {
-          const infos$4 = checkTerm(ctx, /* IdentifierMode */ 4, f);
-          const currentCtx = {
-            contents: combineBindings(ctx, infos$4.bindings)
-          };
-          const infos$5 = {
-            contents: infos$4
-          };
-          Stdlib__List.iter((function (arg) {
-            infos$5.contents = combineInfos({
-              hd: infos$5.contents,
-              tl: {
-                hd: checkTerm(currentCtx.contents, /* Argument */ 3, arg),
-                tl: /* [] */ 0
-              }
-            });
-            currentCtx.contents = combineBindings(currentCtx.contents, infos$5.contents.bindings);
-          }), args);
-          return infos$5.contents;
+          const funInfo = checkTerm(ctx, /* IdentifierMode */ 4, f);
+          return Stdlib__List.fold_left((function (param) {
+            const accCtx = param[1];
+            const accInfo = param[0];
+            return function (arg) {
+              const argInfo = checkTerm(accCtx, /* Argument */ 3, arg);
+              const combined = mergeInfos(accInfo, argInfo);
+              return [
+                combined,
+                mergeBindings(accCtx, combined.bindings)
+              ];
+            };
+          }), [
+            funInfo,
+            mergeBindings(ctx, funInfo.bindings)
+          ], args)[0];
         }
-        const errors$5 = ensureMode({
+        const modeErrors$2 = ensureMode({
           hd: "spine",
           tl: /* [] */ 0
-        }, mode, t.meta.start, t.meta.end_, /* [] */ 0);
-        const infos$6 = checkTerm(ctx, {
+        }, mode, t.meta.start, t.meta.end_);
+        const funInfo$1 = checkTerm(ctx, {
           TAG: /* Expression */ 0,
           _0: hole
         }, f);
-        const argInfos = Stdlib__List.map((function (c) {
+        const argInfos = Stdlib__List.map((function (a) {
           return checkTerm(ctx, {
             TAG: /* Expression */ 0,
             _0: hole
-          }, c);
+          }, a);
         }), args);
-        return addErrors(combineInfos({
-          hd: infos$6,
-          tl: argInfos
-        }), errors$5);
+        return withErrors(Stdlib__List.fold_left(mergeInfos, funInfo$1, argInfos), modeErrors$2);
       } else {
-        const infos$7 = checkTerm(ctx, {
+        const funInfo$2 = checkTerm(ctx, {
           TAG: /* Expression */ 0,
           _0: undefined
         }, f);
-        const funtype = infos$7.inferred;
-        let errors$6 = /* [] */ 0;
-        let infos$8 = infos$7;
-        if (funtype !== undefined) {
-          const argTypes$1 = funtype[0];
-          errors$6 = countArgs(Stdlib__List.length(argTypes$1), Stdlib__List.length(args), f.meta.start, f.meta.end_, errors$6);
-          const minLen = Caml.caml_int_min(Stdlib__List.length(argTypes$1), Stdlib__List.length(args));
-          for (let i = 0; i < minLen; ++i) {
-            const argType = Stdlib__List.nth(argTypes$1, i);
-            const arg = Stdlib__List.nth(args, i);
-            infos$8 = combineInfos({
-              hd: infos$8,
-              tl: {
-                hd: checkTerm(ctx, {
-                  TAG: /* Expression */ 0,
-                  _0: argType
-                }, arg),
-                tl: /* [] */ 0
-              }
-            });
-          }
-          const inferred$1 = Stdlib__List.length(argTypes$1) === Stdlib__List.length(args) ? funtype[1] : hole;
-          const init = infos$8;
-          infos$8 = {
-            errors: init.errors,
-            holes: init.holes,
-            inferred: [
-              /* [] */ 0,
-              inferred$1
-            ],
-            bindings: init.bindings
-          };
-          errors$6 = subsume(mode, t.meta.start, t.meta.end_, infos$8.inferred, errors$6);
+        const match = funInfo$2.inferred;
+        if (match === undefined) {
+          return funInfo$2;
         }
-        return addErrors(infos$8, errors$6);
+        const argTypes = match[0];
+        const arityErrors = checkArity(Stdlib__List.length(argTypes), Stdlib__List.length(args), f.meta.start, f.meta.end_);
+        const minLen = Caml.caml_int_min(Stdlib__List.length(argTypes), Stdlib__List.length(args));
+        const argInfos$1 = Stdlib__List.mapi((function (i, arg) {
+          return checkTerm(ctx, {
+            TAG: /* Expression */ 0,
+            _0: Stdlib__List.nth(argTypes, i)
+          }, arg);
+        }), Stdlib__List.filteri((function (i, param) {
+          return i < minLen;
+        }), args));
+        const info$3 = Stdlib__List.fold_left(mergeInfos, funInfo$2, argInfos$1);
+        const inferred$2 = Stdlib__List.length(argTypes) === Stdlib__List.length(args) ? [
+            /* [] */ 0,
+            match[1]
+          ] : [
+            /* [] */ 0,
+            hole
+          ];
+        const subErrors$1 = subsume(mode._0, inferred$2, t.meta.start, t.meta.end_);
+        return withErrors({
+          errors: info$3.errors,
+          holes: info$3.holes,
+          inferred: inferred$2,
+          bindings: info$3.bindings
+        }, Stdlib.$at(arityErrors, subErrors$1));
       }
     case /* Postulate */ 5 :
       const match$1 = Stdlib__List.fold_left((function (param) {
         const accCtx = param[1];
         const accInfo = param[0];
         return function (line) {
-          const info = checkTerm(accCtx, /* Line */ 1, line);
-          const combined = combineInfos({
-            hd: accInfo,
-            tl: {
-              hd: info,
-              tl: /* [] */ 0
-            }
-          });
-          const newCtx = combineBindings(accCtx, info.bindings);
+          const lineInfo = checkTerm(accCtx, /* Line */ 1, line);
+          const newCtx = mergeBindings(accCtx, lineInfo.bindings);
           return [
-            combined,
+            mergeInfos(accInfo, lineInfo),
             newCtx
           ];
         };
       }), [
-        combineInfos(/* [] */ 0),
+        emptyInfo,
         ctx
       ], v._0);
-      const infos$9 = addBindings(match$1[0], match$1[1]);
-      const errors$7 = ensureMode({
+      const info$4 = withBindings(match$1[0], match$1[1]);
+      return withErrors(info$4, ensureMode({
         hd: "program",
         tl: /* [] */ 0
-      }, mode, t.meta.start, t.meta.end_, /* [] */ 0);
-      return addErrors(infos$9, errors$7);
+      }, mode, t.meta.start, t.meta.end_));
     default:
-      return combineInfos(/* [] */ 0);
+      return emptyInfo;
   }
 }
 
@@ -566,15 +454,19 @@ export {
   StringMap,
   hole,
   fullHole,
-  combineBindings,
-  combineInfos,
-  addErrors,
-  addBindings,
-  combine,
-  inCtx,
+  emptyInfo,
+  mergeBindings,
+  mergeInfos,
+  withErrors,
+  withBindings,
+  stringOfMode,
+  consistent,
+  lookupCtx,
   subsume,
-  countArgs,
+  checkArity,
   ensureMode,
+  extractArgTypes,
+  lineBinding,
   checkTerm,
   getStatics,
 }

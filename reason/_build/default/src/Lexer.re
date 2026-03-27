@@ -1,20 +1,31 @@
 open Utils;
 open Grammar;
 
-let isWhitespace = (c: char): bool =>
-  c == ' ' || c == '\t' || c == '\n' || c == '\r';
+let isWhitespace = c => c == ' ' || c == '\t' || c == '\n' || c == '\r';
+let isDigit      = c => c >= '0' && c <= '9';
+let isLetter     = c => (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
+let isAlphanum   = c => isLetter(c) || isDigit(c) || c == '_' || c == '-';
 
-let isDigit = (c: char): bool => c >= '0' && c <= '9';
+let keywordOrIdent =
+  fun
+  | "postulate" => TPostulate
+  | "checker"   => TChecker
+  | "construct" => TConstruct
+  | "end"       => TEnd
+  | s           => TAtom(Identifier(s));
 
-let isLetter = (c: char): bool =>
-  (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
-
-let isAlphanum = (c: char): bool =>
-  isLetter(c) || isDigit(c) || c == '_' || c == '-';
+let singleCharToken =
+  fun
+  | '(' => Some(Primary(TOP))
+  | ')' => Some(Primary(TCP))
+  | '?' => Some(Primary(TAtom(Hole)))
+  | ':' => Some(Primary(TColon))
+  | _   => None;
 
 let lex = (s: string): list(ranged(token)) => {
   let len = String.length(s);
-  let tokens = ref([]);
+  let acc = ref([]);
+  let emit = (tok, start, end_) => acc := [{value: tok, start, end_}, ...acc^];
   let i = ref(0);
 
   while (i^ < len) {
@@ -22,63 +33,23 @@ let lex = (s: string): list(ranged(token)) => {
     let c = s.[i^];
 
     if (isWhitespace(c)) {
-      tokens := [
-        {
-          value: Secondary(Whitespace(String.make(1, c))),
-          start,
-          end_: i^ + 1,
-        },
-        ...tokens^,
-      ];
+      emit(Secondary(Whitespace(String.make(1, c))), start, start + 1);
       i := i^ + 1;
     } else if (isLetter(c)) {
       let j = ref(i^);
       while (j^ < len && isAlphanum(s.[j^])) {
         j := j^ + 1;
       };
-      let idStr = String.sub(s, i^, j^ - i^);
-      let primaryToken =
-        switch (idStr) {
-        | "postulate" => TPostulate
-        | "checker" => TChecker
-        | "construct" => TConstruct
-        | "end" => TEnd
-        | _ => TAtom(Identifier(idStr))
-        };
-      tokens := [
-        {value: Primary(primaryToken), start: i^, end_: j^},
-        ...tokens^,
-      ];
+      emit(Primary(keywordOrIdent(String.sub(s, i^, j^ - i^))), i^, j^);
       i := j^;
     } else {
-      let singleCharToken =
-        switch (c) {
-        | '(' => Some(Primary(TOP))
-        | ')' => Some(Primary(TCP))
-        | '?' => Some(Primary(TAtom(Hole)))
-        | ':' => Some(Primary(TColon))
-        | _ => None
-        };
-      switch (singleCharToken) {
-      | Some(tok) =>
-        tokens := [
-          {value: tok, start, end_: i^ + 1},
-          ...tokens^,
-        ];
-        i := i^ + 1;
-      | None =>
-        tokens := [
-          {
-            value: Secondary(Unlexed(String.make(1, c))),
-            start,
-            end_: i^ + 1,
-          },
-          ...tokens^,
-        ];
-        i := i^ + 1;
+      switch (singleCharToken(c)) {
+      | Some(tok) => emit(tok, start, start + 1)
+      | None => emit(Secondary(Unlexed(String.make(1, c))), start, start + 1)
       };
+      i := i^ + 1;
     };
   };
 
-  List.rev(tokens^);
+  List.rev(acc^);
 };

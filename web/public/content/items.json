@@ -2,7 +2,7 @@
     "item": {
         "title": "ASK",
         "text": "",
-        "type": "postulate\nx : U\n(f (a : U)) : a\ng : x\nend",
+        "type": "postulate\nx : U\n(f (a : U)) : a\ng : (f U)\na : (f g)\nend",
         "tags" : ["logic"]
     }
 }

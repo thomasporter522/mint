@@ -1,6 +1,8 @@
 open Utils;
 open Grammar;
 
+/* ---------- Types shared across both phases ---------- */
+
 type unform =
   | USecondary(ranged(secondaryToken))
   | UShard(ranged(primaryToken));
@@ -9,432 +11,271 @@ type sharded('t) =
   | Unform(unform)
   | Form('t);
 
+/* ====================================================
+   PHASE 1: MATCHING
+   Establishes bracket/delimiter matching relationships.
+   Precedence is not considered yet.
+   ==================================================== */
+
 type partialForm =
   | Head(ranged(primaryToken))
   | PMatch(partialForm, list(sharded(partialForm)), ranged(primaryToken));
 
-let faceOfPartialForm = (pf: partialForm): ranged(primaryToken) =>
-  switch (pf) {
-  | Head(token) => token
-  | PMatch(_, _, token) => token
-  };
+let faceOf =
+  fun
+  | Head(token) | PMatch(_, _, token) => token;
 
-/* MATCHING PHASE */
-
-let rec shatterPartialForm =
-        (pf: partialForm): list(sharded(partialForm)) =>
-  switch (pf) {
+let rec shatter =
+  fun
   | Head(token) => [Unform(UShard(token))]
   | PMatch(form, items, token) =>
-    shatterPartialForm(form) @ items @ [Unform(UShard(token))]
-  };
+    shatter(form) @ items @ [Unform(UShard(token))];
 
-let flattenPartialForm =
-    (f: partialForm): list(sharded(partialForm)) =>
-  if (isValidEnd(faceOfPartialForm(f))) {
-    [Form(f)];
-  } else {
-    shatterPartialForm(f);
-  };
+let finalize = (f: partialForm): list(sharded(partialForm)) =>
+  isValidEnd(faceOf(f)) ? [Form(f)] : shatter(f);
 
-let flatten =
-    (spfs: list(sharded(partialForm))): list(sharded(partialForm)) =>
+let flattenStack =
   List.concat_map(
-    spf =>
-      switch (spf) {
-      | Unform(_) => [spf]
-      | Form(f) => flattenPartialForm(f)
-      },
-    spfs,
+    fun
+    | Unform(_) as u => [u]
+    | Form(f) => finalize(f),
   );
 
-type matchStackResult =
-  | MSNoMatch
-  | MSMatch(list(sharded(partialForm)));
-
-let rec matchStack =
+let rec findMatch =
         (
-          s: list(sharded(partialForm)),
+          stack: list(sharded(partialForm)),
           t: ranged(primaryToken),
-          sSkipped: list(sharded(partialForm)),
+          skipped: list(sharded(partialForm)),
         )
-        : matchStackResult =>
-  switch (s) {
-  | [] => MSNoMatch
-  | [last, ...rest] =>
-    switch (last) {
-    | Unform(_) => matchStack(rest, t, [last, ...sSkipped])
-    | Form(form) =>
-      let matchResult =
-        matchToken(faceOfPartialForm(form).value, t.value);
-      switch (matchResult) {
-      | NoMatch => matchStack(rest, t, [last, ...sSkipped])
-      | MatchMorph(morphed) =>
-        let newForm =
-          PMatch(
-            form,
-            flatten(sSkipped),
-            {value: morphed, start: t.start, end_: t.end_},
-          );
-        MSMatch(List.rev(rest) @ [Form(newForm)]);
-      | Match =>
-        let newForm = PMatch(form, flatten(sSkipped), t);
-        MSMatch(List.rev(rest) @ [Form(newForm)]);
-      };
+        : option(list(sharded(partialForm))) =>
+  switch (stack) {
+  | [] => None
+  | [Unform(_) as u, ...rest] => findMatch(rest, t, [u, ...skipped])
+  | [Form(form), ...rest] =>
+    switch (matchToken(faceOf(form).value, t.value)) {
+    | NoMatch => findMatch(rest, t, [Form(form), ...skipped])
+    | MatchMorph(morphed) =>
+      let t' = {value: morphed, start: t.start, end_: t.end_};
+      Some(List.rev(rest) @ [Form(PMatch(form, flattenStack(skipped), t'))])
+    | Match =>
+      Some(List.rev(rest) @ [Form(PMatch(form, flattenStack(skipped), t))])
     }
   };
 
-/* Process from right: reverse list, process, reverse back */
-let matchStackRightToLeft =
-    (
-      s: list(sharded(partialForm)),
-      t: ranged(primaryToken),
-    )
-    : matchStackResult => {
-  let reversed = List.rev(s);
-  switch (matchStack(reversed, t, [])) {
-  | MSNoMatch => MSNoMatch
-  | MSMatch(result) => MSMatch(result)
-  };
-};
-
-let getPrimaryToken = (t: ranged(token)): ranged(primaryToken) =>
+let asPrimary = (t: ranged(token)): ranged(primaryToken) =>
   mapRanged(
-    tok =>
-      switch (tok) {
-      | Primary(p) => p
-      | Secondary(_) => BOF /* should never happen */
-      },
+    fun
+    | Primary(p) => p
+    | Secondary(_) => failwith("asPrimary called on secondary token"),
     t,
   );
 
-let getSecondaryToken = (t: ranged(token)): ranged(secondaryToken) =>
+let asSecondary = (t: ranged(token)): ranged(secondaryToken) =>
   mapRanged(
-    tok =>
-      switch (tok) {
-      | Primary(_) => Whitespace("") /* should never happen */
-      | Secondary(s) => s
-      },
+    fun
+    | Secondary(s) => s
+    | Primary(_) => failwith("asSecondary called on primary token"),
     t,
   );
 
-let matchPush =
-    (s: list(sharded(partialForm)), t: ranged(token))
-    : list(sharded(partialForm)) =>
+let matchPush = (stack, t: ranged(token)) =>
   switch (t.value) {
-  | Secondary(_) => s @ [Unform(USecondary(getSecondaryToken(t)))]
-  | Primary(primaryTok) =>
-    let pt = getPrimaryToken(t);
-    switch (matchStackRightToLeft(s, pt)) {
-    | MSMatch(result) => result
-    | MSNoMatch =>
-      if (isValidStart(primaryTok)) {
-        s @ [Form(Head(pt))];
-      } else {
-        s @ [Unform(UShard(pt))];
-      }
-    };
+  | Secondary(_) => stack @ [Unform(USecondary(asSecondary(t)))]
+  | Primary(pt) =>
+    switch (findMatch(List.rev(stack), asPrimary(t), [])) {
+    | Some(result) => result
+    | None =>
+      let item =
+        isValidStart(pt) ? Form(Head(asPrimary(t))) : Unform(UShard(asPrimary(t)));
+      stack @ [item];
+    }
   };
 
-let matchPushes =
-    (s: list(sharded(partialForm)), ts: list(ranged(token)))
-    : list(sharded(partialForm)) =>
-  List.fold_left(matchPush, s, ts);
+let matchParse = (ts: list(ranged(token))): list(sharded(partialForm)) => {
+  let bof = {value: Primary(BOF), start: (-1), end_: (-1)};
+  let eof = {value: Primary(EOF), start: (-1), end_: (-1)};
+  let result = List.fold_left(matchPush, [], [bof, ...ts] @ [eof]);
 
-let matchParse =
-    (ts: list(ranged(token))): list(sharded(partialForm)) => {
-  let tokens = [
-    {value: Primary(BOF), start: (-1), end_: (-1)},
-    ...ts,
-  ] @ [{value: Primary(EOF), start: (-1), end_: (-1)}];
-  let result = matchPushes([], tokens);
   switch (result) {
   | [Form(PMatch(Head({value: BOF, _}), items, {value: EOF, _}))] => items
-  | _ =>
-    failwith(
-      "Impossible matching - parser failed to create expected BOF...EOF structure",
-    )
+  | _ => failwith("Parser invariant violated: expected BOF...EOF wrapper")
   };
 };
 
-/* OPERATORIZE PHASE */
-
-type unforms = list(unform);
+/* ====================================================
+   PHASE 2: OPERATORIZE
+   Uses operator precedence to assign left/right children
+   to matched forms. Shift-reduce-roll algorithm.
+   ==================================================== */
 
 type closedForm =
   | CHead(ranged(primaryToken))
   | CMatch(closedForm, list(sharded(openForm)), ranged(primaryToken))
 and openForm = {
   left: option(openForm),
-  leftUnforms: unforms,
-  closedForm,
-  rightUnforms: unforms,
+  leftUf: list(unform),
+  closed: closedForm,
+  rightUf: list(unform),
   right: option(openForm),
 };
 
 type halfOpenForm = {
-  hoLeft: option(openForm),
-  hoLeftUnforms: unforms,
-  hoClosedForm: closedForm,
-  hoRightUnforms: unforms,
+  hLeft: option(openForm),
+  hLeftUf: list(unform),
+  hClosed: closedForm,
+  hRightUf: list(unform),
 };
 
-let rec headOf = (cf: closedForm): ranged(primaryToken) =>
-  switch (cf) {
+let rec headOf =
+  fun
   | CHead(token) => token
-  | CMatch(form, _, _) => headOf(form)
-  };
+  | CMatch(form, _, _) => headOf(form);
 
-let faceOfForm = (cf: closedForm): ranged(primaryToken) =>
-  switch (cf) {
-  | CHead(token) => token
-  | CMatch(_, _, token) => token
-  };
+let faceOfClosed =
+  fun
+  | CHead(token) | CMatch(_, _, token) => token;
 
-let faceOfHalfOpenForm = (hof: halfOpenForm): ranged(primaryToken) =>
-  faceOfForm(hof.hoClosedForm);
-
-type compareTokensResult =
+type comparison =
   | Shift
   | Reduce
   | Roll;
 
-let compareTokens =
-    (t1: primaryToken, t2: primaryToken): compareTokensResult => {
-  let (_, rightPrec1) = getPrecedence(t1);
-  let (leftPrec2, _) = getPrecedence(t2);
-  switch (rightPrec1, leftPrec2) {
+let compare = (t1: primaryToken, t2: primaryToken): comparison =>
+  switch (rightPrec(t1), leftPrec(t2)) {
   | (Precedence(r), Precedence(l)) when r < l => Shift
   | (Precedence(r), Precedence(l)) when r > l => Reduce
-  | (Precedence(_), Precedence(_)) =>
-    failwith("Precedence collision")
-  | (Uninterested, Precedence(_)) => Reduce
-  | (Precedence(_), Uninterested) => Shift
-  | (Uninterested, Uninterested) => Roll
-  | _ => failwith("Precondition violated: Interior precedence found")
+  | (Precedence(_), Precedence(_))  => failwith("Precedence collision")
+  | (Uninterested,  Precedence(_))  => Reduce
+  | (Precedence(_), Uninterested)   => Shift
+  | (Uninterested,  Uninterested)   => Roll
+  | _ => failwith("Precondition violated: Interior precedence in compare")
   };
-};
 
-let wantsLeftChild = (t: primaryToken): bool => {
-  let (leftPrec, _) = getPrecedence(t);
-  switch (leftPrec) {
+let wantsLeftChild = t =>
+  switch (leftPrec(t)) {
   | Precedence(_) => true
   | _ => false
   };
-};
+
+let mkOpen = (~left=None, ~leftUf=[], ~rightUf=[], ~right=None, closed) =>
+  {left, leftUf, closed, rightUf, right};
+
+let mkHalf = (~left=None, ~leftUf=[], ~rightUf=[], closed) =>
+  {hLeft: left, hLeftUf: leftUf, hClosed: closed, hRightUf: rightUf};
+
+let closeHalf = (~right=None, ~rightUf=?, h: halfOpenForm) =>
+  mkOpen(
+    ~left=h.hLeft,
+    ~leftUf=h.hLeftUf,
+    ~rightUf=
+      switch (rightUf) {
+      | Some(uf) => uf
+      | None => h.hRightUf
+      },
+    ~right,
+    h.hClosed,
+  );
+
+/* --- Stack state for the operatorize phase --- */
 
 type opState = {
   completed: list(sharded(openForm)),
   halfOpen: list(halfOpenForm),
 };
 
-let rec opStateRoll =
-        (s: opState, acc: option(openForm)): list(sharded(openForm)) =>
-  switch (s.halfOpen, acc) {
-  | ([], None) => s.completed
-  | ([], Some(a)) => s.completed @ [Form(a)]
-  | ([lastHalf, ...restHalfs], None) =>
-    let se2Prime =
-      List.map(f => Unform(f), lastHalf.hoRightUnforms);
-    let accPrime = {
-      left: lastHalf.hoLeft,
-      leftUnforms: lastHalf.hoLeftUnforms,
-      closedForm: lastHalf.hoClosedForm,
-      rightUnforms: [],
-      right: None,
-    };
-    opStateRoll({completed: s.completed, halfOpen: restHalfs}, Some(accPrime))
-    @ se2Prime;
-  | ([lastHalf, ...restHalfs], Some(a)) =>
-    let newAcc = {
-      left: lastHalf.hoLeft,
-      leftUnforms: lastHalf.hoLeftUnforms,
-      closedForm: lastHalf.hoClosedForm,
-      rightUnforms: lastHalf.hoRightUnforms,
-      right: Some(a),
-    };
-    opStateRoll(
-      {completed: s.completed, halfOpen: restHalfs},
-      Some(newAcc),
-    );
-  }
-/* Process halfOpen from right: list is stored in reverse order (rightmost last) */
-and opStateRollFromRight =
-  (s: opState, acc: option(openForm)): list(sharded(openForm)) => {
-  let revState = {...s, halfOpen: List.rev(s.halfOpen)};
-  opStateRoll(revState, acc);
+/* Snoc-list helper: split off last element */
+let unsnoc = lst => {
+  let rev = List.rev(lst);
+  (List.rev(List.tl(rev)), List.hd(rev));
 };
 
-let rec opPushForm =
-        (
-          os: opState,
-          acc: option(openForm),
-          seAcc: unforms,
-          f: closedForm,
-        )
+/* Roll up the half-open stack, folding rightward into a single open form. */
+let rec roll =
+        (completed: list(sharded(openForm)), halfOpen: list(halfOpenForm), acc: option(openForm))
+        : list(sharded(openForm)) =>
+  switch (halfOpen, acc) {
+  | ([], None) => completed
+  | ([], Some(a)) => completed @ [Form(a)]
+  | ([h, ...rest], None) =>
+    let trailing = List.map(u => Unform(u), h.hRightUf);
+    roll(completed, rest, Some(closeHalf(~rightUf=[], h))) @ trailing;
+  | ([h, ...rest], Some(a)) =>
+    roll(completed, rest, Some(closeHalf(~right=Some(a), h)))
+  };
+
+let rollState = (s: opState, acc) =>
+  roll(s.completed, List.rev(s.halfOpen), acc);
+
+let rec pushForm =
+        (os: opState, acc: option(openForm), seAcc: list(unform), f: closedForm)
         : opState =>
   switch (os.halfOpen) {
   | [] =>
     switch (acc) {
-    | None => {
-        completed: os.completed,
-        halfOpen: [
-          {
-            hoLeft: None,
-            hoLeftUnforms: [],
-            hoClosedForm: f,
-            hoRightUnforms: [],
-          },
-        ],
-      }
-    | Some(_) when wantsLeftChild(headOf(f).value) => {
-        completed: os.completed,
-        halfOpen: [
-          {
-            hoLeft: acc,
-            hoLeftUnforms: seAcc,
-            hoClosedForm: f,
-            hoRightUnforms: [],
-          },
-        ],
-      }
-    | _ => failwith("I'm curious whether this is possible")
+    | None =>
+      {completed: os.completed, halfOpen: [mkHalf(f)]}
+    | Some(_) when wantsLeftChild(headOf(f).value) =>
+      {completed: os.completed, halfOpen: [mkHalf(~left=acc, ~leftUf=seAcc, f)]}
+    | _ =>
+      failwith("pushForm: unexpected accumulator without left-child demand")
     }
+
   | _ =>
-    /* Get last element (rightmost) */
-    let revHalfs = List.rev(os.halfOpen);
-    let face = List.hd(revHalfs);
-    let restHalfs = List.rev(List.tl(revHalfs));
-    let comparison =
-      compareTokens(
-        faceOfHalfOpenForm(face).value,
-        headOf(f).value,
-      );
-    switch (comparison) {
-    | Shift => {
-        completed: os.completed,
-        halfOpen:
-          os.halfOpen
-          @ [
-            {
-              hoLeft: acc,
-              hoLeftUnforms: seAcc,
-              hoClosedForm: f,
-              hoRightUnforms: [],
-            },
-          ],
-      }
+    let (rest, face) = unsnoc(os.halfOpen);
+    switch (compare(faceOfClosed(face.hClosed).value, headOf(f).value)) {
+    | Shift =>
+      let newHalf = mkHalf(~left=acc, ~leftUf=seAcc, f);
+      {completed: os.completed, halfOpen: os.halfOpen @ [newHalf]};
+
     | Reduce =>
-      switch (acc) {
-      | None =>
-        let accPrime = {
-          left: face.hoLeft,
-          leftUnforms: face.hoLeftUnforms,
-          closedForm: face.hoClosedForm,
-          rightUnforms: [],
-          right: None,
+      let (accPrime, seAccPrime) =
+        switch (acc) {
+        | None => (Some(closeHalf(~rightUf=[], face)), face.hRightUf @ seAcc)
+        | Some(a) => (Some(closeHalf(~right=Some(a), face)), seAcc)
         };
-        opPushForm(
-          {completed: os.completed, halfOpen: restHalfs},
-          Some(accPrime),
-          face.hoRightUnforms @ seAcc,
-          f,
-        );
-      | Some(a) =>
-        let accPrime = {
-          left: face.hoLeft,
-          leftUnforms: face.hoLeftUnforms,
-          closedForm: face.hoClosedForm,
-          rightUnforms: face.hoRightUnforms,
-          right: Some(a),
-        };
-        opPushForm(
-          {completed: os.completed, halfOpen: restHalfs},
-          Some(accPrime),
-          seAcc,
-          f,
-        );
-      }
+      pushForm({completed: os.completed, halfOpen: rest}, accPrime, seAccPrime, f);
+
     | Roll =>
-      let seAccPrime = List.map(f => Unform(f), seAcc);
-      let completedPrime =
-        opStateRollFromRight(os, acc) @ seAccPrime;
-      {
-        completed: completedPrime,
-        halfOpen: [
-          {
-            hoLeft: None,
-            hoLeftUnforms: [],
-            hoClosedForm: f,
-            hoRightUnforms: [],
-          },
-        ],
-      };
+      let trailing = List.map(u => Unform(u), seAcc);
+      let completed = rollState(os, acc) @ trailing;
+      {completed, halfOpen: [mkHalf(f)]};
     };
   };
 
-/* ShardsObstructive mode (the active mode in the TS code) */
-let opPush = (os: opState, f: sharded(closedForm)): opState =>
+let pushSharded = (os: opState, f: sharded(closedForm)): opState =>
   switch (f) {
-  | Unform(unform) =>
-    switch (unform) {
-    | USecondary(_) =>
-      switch (os.halfOpen) {
-      | [] => {
-          completed: os.completed @ [Unform(unform)],
-          halfOpen: [],
-        }
-      | _ =>
-        let revHalfs = List.rev(os.halfOpen);
-        let lastHalf = List.hd(revHalfs);
-        let restHalfs = List.rev(List.tl(revHalfs));
-        {
-          completed: os.completed,
-          halfOpen:
-            restHalfs
-            @ [
-              {
-                ...lastHalf,
-                hoRightUnforms:
-                  lastHalf.hoRightUnforms @ [unform],
-              },
-            ],
-        };
-      }
-    | UShard(_) => {
-        completed:
-          opStateRollFromRight(os, None) @ [Unform(unform)],
-        halfOpen: [],
-      }
+  | Unform(USecondary(_) as u) =>
+    switch (os.halfOpen) {
+    | [] =>
+      {completed: os.completed @ [Unform(u)], halfOpen: []}
+    | _ =>
+      let (rest, last) = unsnoc(os.halfOpen);
+      let last = {...last, hRightUf: last.hRightUf @ [u]};
+      {completed: os.completed, halfOpen: rest @ [last]};
     }
-  | Form(form) => opPushForm(os, None, [], form)
+  | Unform(UShard(_) as u) =>
+    {completed: rollState(os, None) @ [Unform(u)], halfOpen: []}
+  | Form(form) =>
+    pushForm(os, None, [], form)
   };
 
-let rec closePartialForm = (f: partialForm): closedForm =>
-  switch (f) {
+let rec closePartial =
+  fun
   | Head(token) => CHead(token)
   | PMatch(form, items, token) =>
-    CMatch(closePartialForm(form), operatorize(items), token)
-  }
-and closeShardePartialForm =
-    (f: sharded(partialForm)): sharded(closedForm) =>
-  switch (f) {
+    CMatch(closePartial(form), operatorize(items), token)
+and closeShardedPartial =
+  fun
   | Unform(u) => Unform(u)
-  | Form(form) => Form(closePartialForm(form))
-  }
-and opPushes =
-    (s: opState, fs: list(sharded(partialForm))): opState =>
-  List.fold_left(
-    (acc, f) => opPush(acc, closeShardePartialForm(f)),
-    s,
+  | Form(form) => Form(closePartial(form))
+and operatorize = (fs: list(sharded(partialForm))): list(sharded(openForm)) => {
+  let state = List.fold_left(
+    (s, f) => pushSharded(s, closeShardedPartial(f)),
+    {completed: [], halfOpen: []},
     fs,
-  )
-and operatorize =
-    (fs: list(sharded(partialForm))): list(sharded(openForm)) =>
-  opStateRollFromRight(
-    opPushes({completed: [], halfOpen: []}, fs),
-    None,
   );
+  rollState(state, None);
+};
 
 let parse = (tokens: list(ranged(token))): list(sharded(openForm)) =>
   operatorize(matchParse(tokens));
