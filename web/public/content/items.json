@@ -1,6 +1,6 @@
 {
     "item": {
-        "title": "Chiaroscuro",
+        "title": "ASK",
         "text": "",
         "type": "postulate\nx : U\n(f (a : U)) : a\ng : x\nend",
         "tags" : ["logic"]

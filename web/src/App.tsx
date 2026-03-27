@@ -7,13 +7,9 @@ import { EditorState } from "@codemirror/state";
 import './App.css'
 
 import { mintTheme } from "./CodeTheme"
-import { lex } from './lytr/lexer'
-import { parse } from './lytr/parser'
-import { printTerm } from './lytr/print'
-import { build } from './lytr/builder'
+import { getStaticsFromCode, printTerm } from './lytr/reason-bridge'
 // import { mintlang } from './CodeLanguage'
 
-import { getStatics } from './semantics/Check'
 import type { holeInfo } from './semantics/Check'
 import type { Term } from './lytr/term'
 import type { Error } from './semantics/Error'
@@ -54,9 +50,12 @@ function App() {
   const [holes, setHoles] = useState<[Number,holeInfo][]>([])
   const [currentHole, setCurrentHole] = useState<holeInfo | undefined>(undefined)
   
-  const urlParams = new URLSearchParams(window.location.search)
-  const itemId = urlParams.get('item')
-  const courseIds = urlParams.get('course')
+  // const urlParams = new URLSearchParams(window.location.search)
+  // const itemId = urlParams.get('item')
+  // const courseIds = urlParams.get('course')
+
+  const itemId = "item"
+  const courseIds = "contents"
    
   useEffect(() => {
     async function loadPage() {
@@ -278,9 +277,7 @@ function App() {
     var contents = <></>;
     if(holes.length + semanticErrors.length === 0) {
       contents = 
-        <div className='victory-sidebar'>
-          Solved!
-        </div>
+        <div className='victory-sidebar'></div>
     }
     else {
       contents = <div>
@@ -311,7 +308,7 @@ function App() {
             </span>
           </div>
           <div className='item'>
-            <div className='item-contents-sidebar'>
+            {/* <div className='item-contents-sidebar'>
               <div><a href={urlWithoutItem()}><ReactMarkdown>{page.course.title}</ReactMarkdown></a></div>
               <div className='item-contents-sidebar-contents'>
                 <ol>
@@ -329,7 +326,7 @@ function App() {
                   })}
                 </ol>
               </div>
-            </div>
+            </div> */}
             <div className='item-middle'>
               <div className='item-text'>
                 <ReactMarkdown>{page.data.text}</ReactMarkdown>
@@ -391,7 +388,7 @@ function App() {
                     // Check semantic errors when code changes
                     // console.log(printTerm(build(parse(lex(val)))))
                     if (viewUpdate?.view) {
-                      const statics = getStatics(build(parse(lex(val))))
+                      const statics = getStaticsFromCode(val)
                       setSemanticErrors(statics.errors)
                       updateHoles(statics.holes)
                     }
@@ -400,7 +397,7 @@ function App() {
                     // Check errors when editor is first created
                     setTimeout(() => {
                       // console.log(build(parse(lex(view.state.doc.toString()))))
-                      const statics = getStatics(build(parse(lex(view.state.doc.toString()))))
+                      const statics = getStaticsFromCode(view.state.doc.toString())
                       setSemanticErrors(statics.errors)
                       updateHoles(statics.holes)
                     }, 100)

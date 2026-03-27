@@ -1,0 +1,5 @@
+(melange.emit
+ (target output)
+ (alias reason)
+ (module_systems es6)
+ (preprocess (pps melange.ppx)))
