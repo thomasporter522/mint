@@ -1,5 +1,6 @@
-import { NodeSet, NodeType, Parser, Tree } from '@lezer/common'
+import { NodeProp, NodeSet, NodeType, Parser, Tree } from '@lezer/common'
 import type { TreeFragment, Input, PartialParse } from '@lezer/common'
+import { styleTags, tags as t } from '@lezer/highlight'
 import { Language, defineLanguageFacet } from '@codemirror/language'
 // @ts-ignore
 import { lexToTokens } from '@reason/Lytr_api.js'
@@ -14,12 +15,22 @@ const nodeTypes = [
   /* 2 */ NodeType.define({ id: 2, name: "Identifier" }),
   /* 3 */ NodeType.define({ id: 3, name: "Hole" }),
   /* 4 */ NodeType.define({ id: 4, name: "Colon" }),
-  /* 5 */ NodeType.define({ id: 5, name: "OpenParen" }),
-  /* 6 */ NodeType.define({ id: 6, name: "CloseParen" }),
+  /* 5 */ NodeType.define({ id: 5, name: "OpenParen", props: [[NodeProp.closedBy, ["CloseParen"]]] }),
+  /* 6 */ NodeType.define({ id: 6, name: "CloseParen", props: [[NodeProp.openedBy, ["OpenParen"]]] }),
   /* 7 */ NodeType.define({ id: 7, name: "Invalid" }),
 ]
 
-const nodeSet = new NodeSet(nodeTypes)
+const nodeSet = new NodeSet(nodeTypes).extend(
+  styleTags({
+    Keyword: t.keyword,
+    Identifier: t.variableName,
+    Hole: t.punctuation,
+    Colon: t.separator,
+    OpenParen: t.paren,
+    CloseParen: t.paren,
+    Invalid: t.invalid,
+  })
+)
 
 /* ------------------------------------------------------------------ */
 /*  Parser implementation                                              */

@@ -175,12 +175,9 @@ a:hover {
   outline: none;
 }
 
-.semantic-error {
+.cm-lintRange-error {
   background-color: var(--mark-color) !important;
-}
-
-.hole {
-  color: var(--hole-color) !important;
+  background-image: none !important;
 }
 
 .item-info-sidebar {

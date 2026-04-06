@@ -103,10 +103,55 @@ function processCode(code) {
 
 const printTerm = Melange__Print.printTerm;
 
+function lexToTokens(code) {
+  const tokens = Melange__Lexer.lex(code);
+  const buf = [];
+  Stdlib__List.iter((function (rtok) {
+    const match = rtok.value;
+    let nodeType;
+    if (match.TAG === /* Primary */ 0) {
+      const match$1 = match._0;
+      if (/* tag */ typeof match$1 === "number" || typeof match$1 === "string") {
+        switch (match$1) {
+          case /* BOF */ 0 :
+          case /* EOF */ 1 :
+            nodeType = undefined;
+            break;
+          case /* TOP */ 2 :
+            nodeType = 5;
+            break;
+          case /* TCP */ 3 :
+            nodeType = 6;
+            break;
+          case /* TColon */ 4 :
+            nodeType = 4;
+            break;
+          default:
+            nodeType = 1;
+        }
+      } else {
+        let tmp = match$1._0;
+        nodeType = /* tag */ typeof tmp === "number" || typeof tmp === "string" ? 3 : 2;
+      }
+    } else {
+      nodeType = match._0.TAG === /* Whitespace */ 0 ? undefined : 7;
+    }
+    if (nodeType !== undefined) {
+      buf.push(nodeType);
+      buf.push(rtok.start);
+      buf.push(rtok.end_);
+      return;
+    }
+    
+  }), tokens);
+  return buf;
+}
+
 export {
   displayTerm,
   contextToJsMap,
   processCode,
   printTerm,
+  lexToTokens,
 }
 /* Melange__Check Not a pure module */

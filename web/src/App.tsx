@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react'
 import ReactMarkdown from 'react-markdown'
 import CodeMirror from '@uiw/react-codemirror'
-import { EditorView, Decoration } from '@codemirror/view'
+import { EditorView } from '@codemirror/view'
 import { EditorState } from "@codemirror/state";
+import { linter, type Diagnostic } from '@codemirror/lint'
 
 import './App.css'
 
@@ -44,7 +45,7 @@ function lookup<A,B>(l : [A,B][], x : A) : B | undefined {
 function App() {
   const [page, setPage] = useState<PageState>({ type: 'loading' })
   const [cursorPosition, setCursorPosition] = useState<number>(0)
-  const [semanticErrors, setSemanticErrors] = useState<any[]>([])
+  const [semanticErrors, setSemanticErrors] = useState<Error[]>([])
   const [holes, setHoles] = useState<[Number,holeInfo][]>([])
   const [currentHole, setCurrentHole] = useState<holeInfo | undefined>(undefined)
   
@@ -260,7 +261,9 @@ function App() {
           Errors:
         </span>
         <div>
-          {semanticErrors.map((error: any, i: number) => (
+          {semanticErrors
+            .filter((e: Error) => e.from >= 0)
+            .map((error: Error, i: number) => (
             <div key={i}>
               <div className="error-message">
                 {messageOfError(error)}
@@ -352,17 +355,20 @@ function App() {
                         whiteSpace: 'pre'  // Prevent line wrapping
                       }
                     }),
-                    EditorView.decorations.of(Decoration.set(
-                      semanticErrors
-                        .filter(error => (error.type !== "hole"))
-                        .filter(error => (error.from < error.to))
-                        .sort((a, b) => a.from - b.from)
-                        .map(error => 
-                          Decoration.mark({
-                            class: "semantic-error"
-                          }).range(error.from, error.to)
-                        )
-                    )),
+                    linter((view) => {
+                      const code = view.state.doc.toString()
+                      const statics = getStaticsFromCode(code)
+                      setSemanticErrors(statics.errors)
+                      updateHoles(statics.holes)
+                      return statics.errors
+                        .filter((e: Error) => e.from >= 0 && e.from < e.to)
+                        .map((e: Error): Diagnostic => ({
+                          from: e.from,
+                          to: e.to,
+                          severity: "error",
+                          message: e.message,
+                        }))
+                    }, { delay: 0 }),
                     autoReplace,
                   ]}
                   basicSetup={{
@@ -370,24 +376,7 @@ function App() {
                     foldGutter: false,
                     dropCursor: false,
                     allowMultipleSelections: false,
-                  }}
-                  onChange={(val, viewUpdate) => {
-                    // Check semantic errors when code changes
-                    // console.log(printTerm(build(parse(lex(val)))))
-                    if (viewUpdate?.view) {
-                      const statics = getStaticsFromCode(val)
-                      setSemanticErrors(statics.errors)
-                      updateHoles(statics.holes)
-                    }
-                  }}
-                  onCreateEditor={(view) => {
-                    // Check errors when editor is first created
-                    setTimeout(() => {
-                      // console.log(build(parse(lex(view.state.doc.toString()))))
-                      const statics = getStaticsFromCode(view.state.doc.toString())
-                      setSemanticErrors(statics.errors)
-                      updateHoles(statics.holes)
-                    }, 100)
+                    bracketMatching: true,
                   }}
                   onUpdate={(viewUpdate) => {
                     const cursor = viewUpdate.state.selection.main.head
