@@ -14,7 +14,7 @@ let printPrimaryToken =
   | TAtom(a)    => printAtom(a)
   | TColon      => ":"
   | TPostulate  => "postulate"
-  | TChecker    => "checker"
+  | TSchema   => "schema"
   | TConstruct  => "construct"
   | TEnd        => "end";
 
@@ -37,8 +37,8 @@ and printTerm = (t: term): string => {
       "postulate "
       ++ String.concat("\n", List.map(printTerm, body))
       ++ " end" ++ printRest(rest)
-    | Checker(rest) =>
-      "checker end" ++ printRest(rest)
+    | Schema(rest) =>
+      "schema" ++ printRest(rest)
     | Construct(by, body, rest) =>
       "construct " ++ printTerm(by) ++ " "
       ++ String.concat("\n", List.map(printTerm, body))

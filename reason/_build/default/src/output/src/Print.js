@@ -27,8 +27,8 @@ function printPrimaryToken(a) {
       return ":";
     case /* TPostulate */ 5 :
       return "postulate";
-    case /* TChecker */ 6 :
-      return "checker";
+    case /* TSchema */ 6 :
+      return "schema";
     case /* TConstruct */ 7 :
       return "construct";
     case /* TEnd */ 8 :
@@ -69,8 +69,8 @@ function printTerm(t) {
       case /* Postulate */ 5 :
         inner = "postulate " + (Stdlib__String.concat("\n", Stdlib__List.map(printTerm, token._0)) + (" end" + printRest(token._1)));
         break;
-      case /* Checker */ 6 :
-        inner = "checker end" + printRest(token._0);
+      case /* Schema */ 6 :
+        inner = "schema" + printRest(token._0);
         break;
       case /* Construct */ 7 :
         inner = "construct " + (printTerm(token._0) + (" " + (Stdlib__String.concat("\n", Stdlib__List.map(printTerm, token._1)) + (" end" + printRest(token._2)))));

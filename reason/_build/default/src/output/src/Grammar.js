@@ -10,6 +10,12 @@ function getPrecedence(token) {
     ];
   }
   switch (token) {
+    case /* BOF */ 0 :
+    case /* TOP */ 2 :
+      return [
+        /* Uninterested */ 1,
+        /* Interior */ 0
+      ];
     case /* TColon */ 4 :
       return [
         {
@@ -21,17 +27,20 @@ function getPrecedence(token) {
           _0: 1.1
         }
       ];
-    case /* EOF */ 1 :
-    case /* TCP */ 3 :
-    case /* TEnd */ 8 :
+    case /* TPostulate */ 5 :
+    case /* TSchema */ 6 :
+    case /* TConstruct */ 7 :
       return [
-        /* Interior */ 0,
-        /* Uninterested */ 1
+        /* Uninterested */ 1,
+        {
+          TAG: /* Precedence */ 0,
+          _0: 0
+        }
       ];
     default:
       return [
-        /* Uninterested */ 1,
-        /* Interior */ 0
+        /* Interior */ 0,
+        /* Uninterested */ 1
       ];
   }
 }
@@ -50,7 +59,7 @@ function isBlockToken(param) {
   }
   switch (param) {
     case /* TPostulate */ 5 :
-    case /* TChecker */ 6 :
+    case /* TSchema */ 6 :
     case /* TConstruct */ 7 :
       return true;
     default:
@@ -73,7 +82,7 @@ function matchToken(t1, t2) {
         break;
     }
   }
-  if (isBlockToken(t1) && isBlockToken(t2) || isBlockToken(t1) && Caml_obj.caml_equal(t2, /* TEnd */ 8)) {
+  if (isBlockToken(t1) && isBlockToken(t2)) {
     return /* Match */ 0;
   } else {
     return /* NoMatch */ 1;

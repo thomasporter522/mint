@@ -120,10 +120,10 @@ function resolve(env, t) {
         },
         meta: t.meta
       };
-    case /* Checker */ 6 :
+    case /* Schema */ 6 :
       return {
         value: {
-          TAG: /* Checker */ 6,
+          TAG: /* Schema */ 6,
           _0: Stdlib__Option.map((function (param) {
             return resolve(env, param);
           }), v._0)

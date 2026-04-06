@@ -58,8 +58,8 @@ let rec resolve = (env: env, t: term): term =>
       {...t, value: Ap(resolve(env, f), List.map(resolve(env), args))}
     | Postulate(body, rest) =>
       {...t, value: Postulate(List.map(resolve(env), body), Option.map(resolve(env), rest))}
-    | Checker(rest) =>
-      {...t, value: Checker(Option.map(resolve(env), rest))}
+    | Schema(rest) =>
+      {...t, value: Schema(Option.map(resolve(env), rest))}
     | Construct(by, body, rest) =>
       {...t, value: Construct(resolve(env, by), List.map(resolve(env), body), Option.map(resolve(env), rest))}
     | Hole(_) | Shard(_) | BuilderError => t

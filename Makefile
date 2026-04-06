@@ -3,6 +3,7 @@ make:
 	$(MAKE) reason
 	cd web && npm run dev
 
+.PHONY: reason
 reason:
 	cd reason && eval $$(opam env --switch=hazel) && dune build @reason
 

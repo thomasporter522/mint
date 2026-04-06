@@ -40,14 +40,14 @@ function isAlphanum(c) {
 
 function keywordOrIdent(s) {
   switch (s) {
-    case "checker" :
-      return /* TChecker */ 6;
     case "construct" :
       return /* TConstruct */ 7;
     case "end" :
       return /* TEnd */ 8;
     case "postulate" :
       return /* TPostulate */ 5;
+    case "schema" :
+      return /* TSchema */ 6;
     default:
       return {
         TAG: /* TAtom */ 0,

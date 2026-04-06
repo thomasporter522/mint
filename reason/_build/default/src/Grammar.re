@@ -12,7 +12,7 @@ type primaryToken =
   | TAtom(atom)
   | TColon
   | TPostulate
-  | TChecker
+  | TSchema
   | TConstruct
   | TEnd;
 
@@ -37,9 +37,9 @@ let getPrecedence = (token: primaryToken): (precedence, precedence) =>
   | TCP        => (Interior,     Uninterested)
   | TAtom(_)   => (Uninterested, Uninterested)
   | TColon     => (Precedence(1.0), Precedence(1.1))
-  | TPostulate => (Uninterested, Interior)
-  | TChecker   => (Uninterested, Interior)
-  | TConstruct => (Uninterested, Interior)
+  | TPostulate => (Uninterested, Precedence(0.))
+  | TSchema   => (Uninterested, Precedence(0.))
+  | TConstruct => (Uninterested, Precedence(0.))
   | TEnd       => (Interior,     Uninterested)
   };
 
@@ -53,7 +53,7 @@ type matchTokenResult =
 
 let isBlockToken =
   fun
-  | TPostulate | TChecker | TConstruct => true
+  | TPostulate | TSchema | TConstruct => true
   | _ => false;
 
 let matchToken = (t1: primaryToken, t2: primaryToken): matchTokenResult =>
@@ -61,10 +61,26 @@ let matchToken = (t1: primaryToken, t2: primaryToken): matchTokenResult =>
   | (BOF, EOF) => Match
   | (TOP, TCP) => Match
   | _ when isBlockToken(t1) && isBlockToken(t2) => Match
-  | _ when isBlockToken(t1) && t2 == TEnd => Match
+  // | _ when isBlockToken(t1) && t2 == TEnd => Match
   | _ => NoMatch
   };
 
 let isValidStart = t => leftPrec(t) != Interior;
 
 let isValidEnd = (t: ranged(primaryToken)) => rightPrec(t.value) != Interior;
+
+// Alternate way to express the start, end, and matching information
+
+// type languageExpression = 
+//   | Token(primaryToken)
+//   | Sequence(list(languageExpression))
+//   | Sum(list(languageExpression))
+//   | Star(languageExpression)
+
+// let matchingLanguage : languageExpression = 
+//   Sum([
+//     Sequence([Token(BOF), Token(EOF)]),
+//     Sequence([Token(TOP), Token(TCP)]),
+//     // how to express Atoms or things with params?
+//     // Token(TAtom(...)),
+//   ])

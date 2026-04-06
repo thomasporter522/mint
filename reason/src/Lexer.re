@@ -9,7 +9,7 @@ let isAlphanum   = c => isLetter(c) || isDigit(c) || c == '_' || c == '-';
 let keywordOrIdent =
   fun
   | "postulate" => TPostulate
-  | "checker"   => TChecker
+  | "schema"   => TSchema
   | "construct" => TConstruct
   | "end"       => TEnd
   | s           => TAtom(Identifier(s));

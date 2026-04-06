@@ -13,7 +13,7 @@ type cTerm =
   | Asc(term, term)
   | Ap(term, list(term))
   | Postulate(list(term), option(term))
-  | Checker(option(term))
+  | Schema(option(term))
   | Construct(term, list(term), option(term))
   | BuilderError
 and term = {
