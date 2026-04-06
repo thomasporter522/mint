@@ -8,11 +8,9 @@ import './App.css'
 
 import { mintTheme } from "./CodeTheme"
 import { getStaticsFromCode, printTerm } from './lytr/reason-bridge'
-// import { mintlang } from './CodeLanguage'
+import { lytr } from './lytr/language'
 
-import type { holeInfo } from './semantics/Check'
-import type { Term } from './lytr/term'
-import type { Error } from './semantics/Error'
+import type { holeInfo, Term, Error } from './lytr/types'
 // import {prettyProposition} from './semantics/Pretty'
 
 
@@ -339,7 +337,7 @@ function App() {
                   height="100%"
                   theme={mintTheme}
                   extensions={[
-                    // mintlang(),
+                    lytr(),
                     EditorView.theme({
                       '.cm-editor': {
                         width: '100%',
@@ -363,15 +361,6 @@ function App() {
                           Decoration.mark({
                             class: "semantic-error"
                           }).range(error.from, error.to)
-                        )
-                    )),
-                    EditorView.decorations.of(Decoration.set(
-                      holes
-                        .sort((a, b) => (a[0].valueOf() - b[0].valueOf()))
-                        .map(h => 
-                          Decoration.mark({
-                            class: "hole"
-                          }).range(h[0].valueOf(), h[0].valueOf()+1)
                         )
                     )),
                     autoReplace,

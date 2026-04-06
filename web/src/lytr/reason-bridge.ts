@@ -4,9 +4,7 @@
 // @ts-ignore - Melange compiled module
 import { processCode as _processCode, printTerm as _printTerm } from '@reason/Lytr_api.js';
 
-import type { Term } from './term';
-import type { Error } from '../semantics/Error';
-import type { holeInfo } from '../semantics/Check';
+import type { Term, Error, holeInfo } from './types';
 
 // The combined pipeline: replaces lex -> parse -> build -> getStatics
 export function getStaticsFromCode(code: string): { errors: Error[], holes: [Number, holeInfo][] } {
