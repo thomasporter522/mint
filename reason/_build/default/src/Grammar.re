@@ -37,9 +37,9 @@ let getPrecedence = (token: primaryToken): (precedence, precedence) =>
   | TCP        => (Interior,     Uninterested)
   | TAtom(_)   => (Uninterested, Uninterested)
   | TColon     => (Precedence(1.0), Precedence(1.1))
-  | TPostulate => (Uninterested, Precedence(0.))
-  | TSchema   => (Uninterested, Precedence(0.))
-  | TConstruct => (Uninterested, Precedence(0.))
+  | TPostulate => (Uninterested, Interior)
+  | TSchema   => (Uninterested, Interior)
+  | TConstruct => (Uninterested, Interior)
   | TEnd       => (Interior,     Uninterested)
   };
 
@@ -61,7 +61,7 @@ let matchToken = (t1: primaryToken, t2: primaryToken): matchTokenResult =>
   | (BOF, EOF) => Match
   | (TOP, TCP) => Match
   | _ when isBlockToken(t1) && isBlockToken(t2) => Match
-  // | _ when isBlockToken(t1) && t2 == TEnd => Match
+  | _ when isBlockToken(t1) && t2 == TEnd => Match
   | _ => NoMatch
   };
 
