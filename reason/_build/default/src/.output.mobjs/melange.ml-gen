@@ -15,8 +15,17 @@ module Grammar = Melange__Grammar
 (** @canonical Melange.Lexer *)
 module Lexer = Melange__Lexer
 
+(** @canonical Melange.LytrGrammar *)
+module LytrGrammar = Melange__LytrGrammar
+
 (** @canonical Melange.Lytr_api *)
 module Lytr_api = Melange__Lytr_api
+
+(** @canonical Melange.MLCheck *)
+module MLCheck = Melange__MLCheck
+
+(** @canonical Melange.MLType *)
+module MLType = Melange__MLType
 
 (** @canonical Melange.Parser *)
 module Parser = Melange__Parser

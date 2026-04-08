@@ -1,5 +1,3 @@
-open Grammar;
-
 type termMeta = {
   parens: bool,
   start: int,
@@ -7,11 +5,19 @@ type termMeta = {
 };
 
 type cTerm =
-  | Shard(primaryToken)
+  | Shard(Grammar.primaryToken)
   | Hole(bool)
   | Identifier(string)
+  | StringLit(string)
   | Asc(term, term)
+  | Arrow(term, term)
+  | Eq(term, term)
+  | FatArrow(term, term)
+  | Comma(term, term)
+  | Pipe(term, term)
+  | BinOp(string, term, term)
   | Ap(term, list(term))
+  | List(list(term))
   | Postulate(list(term), option(term))
   | Schema(option(term))
   | Construct(term, list(term), option(term))

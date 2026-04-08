@@ -14,5 +14,10 @@ test:
 		if grep -q 'is not exported by' /tmp/vite-build.log; then echo "BUILD ERROR: unresolved imports"; exit 1; fi
 	cd web && npx vitest run
 
+.PHONY: try
+try:
+	$(MAKE) reason
+	@node --no-warnings --input-type=module -e "import { parseAndPrint } from './reason/_build/default/src/output/src/Lytr_api.js'; console.log(parseAndPrint(process.argv[1]));" -- "$(EXPR)"
+
 init:
 	cd web && npm install

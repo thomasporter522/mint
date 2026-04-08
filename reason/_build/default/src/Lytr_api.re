@@ -1,8 +1,11 @@
+open Grammar;
 open Term;
 open Lexer;
 open Parser;
 open Builder;
 open Check;
+
+let g = LytrGrammar.grammar;
 
 /* === JS Map interop === */
 
@@ -82,7 +85,7 @@ external makeJsResult:
 /* === Pipeline === */
 
 let processCode = (code: string): jsResult => {
-  let statics = getStatics(build(parse(lex(code))));
+  let statics = getStatics(build(parse(g, lex(g, code))));
 
   let errors =
     Array.of_list(
@@ -112,27 +115,52 @@ let processCode = (code: string): jsResult => {
 
 let printTerm = (t: term): string => Print.printTerm(t);
 
+/* ML type checking */
+type jsMLResult;
+
+[@mel.obj]
+external makeMLResult:
+  (~ok: bool, ~error: string, ~from: int, ~to_: [@mel.as "to"] int) => jsMLResult =
+  "";
+
+let checkSchemaCode = (code: string): jsMLResult => {
+  let ast = build(parse(g, lex(g, code)));
+  switch (MLCheck.checkSchema(MLCheck.StringMap.empty, ast)) {
+  | Ok () => makeMLResult(~ok=true, ~error="", ~from=0, ~to_=0)
+  | Err(TypeError(msg, from, to_)) =>
+    makeMLResult(~ok=false, ~error=msg, ~from, ~to_)
+  | Err(Unimplemented(msg, from, to_)) =>
+    makeMLResult(~ok=false, ~error="UNIMPLEMENTED: " ++ msg, ~from, ~to_)
+  };
+};
+
+let parseAndPrint = (code: string): string =>
+  Print.printTerm(build(parse(g, lex(g, code))));
+
 /* === Token data for CodeMirror tree === */
-/* Returns flat array of [nodeType, start, end] triples.
-   Node type IDs must match language.ts:
-   1=Keyword, 2=Identifier, 3=Hole, 4=Colon, 5=OpenParen, 6=CloseParen, 7=Invalid */
 
 [@mel.send] external push: (array(int), int) => int = "push";
 
 let lexToTokens = (code: string): array(int) => {
-  let tokens = lex(code);
+  let tokens = lex(g, code);
   let buf: array(int) = [||];
 
   List.iter(
-    (rtok: Utils.ranged(Grammar.token)) => {
+    (rtok: Utils.ranged(token)) => {
       let nodeType =
         switch (rtok.value) {
-        | Primary(TPostulate | TSchema | TConstruct | TEnd) => Some(1)
+        | Primary(TNamed(name)) =>
+          let def = StringMap.find_opt(name, g.tokens);
+          switch (def) {
+          | Some({kind: Keyword(_), _}) => Some(1)
+          | Some({kind: Symbol("(" | "["), _}) => Some(5)
+          | Some({kind: Symbol(")" | "]"), _}) => Some(6)
+          | Some({kind: Symbol(_), _}) => Some(4)
+          | _ => None
+          };
         | Primary(TAtom(Identifier(_))) => Some(2)
+        | Primary(TAtom(StringLit(_))) => Some(8)
         | Primary(TAtom(Hole)) => Some(3)
-        | Primary(TColon) => Some(4)
-        | Primary(TOP) => Some(5)
-        | Primary(TCP) => Some(6)
         | Primary(BOF | EOF) => None
         | Secondary(Whitespace(_)) => None
         | Secondary(Unlexed(_)) => Some(7)

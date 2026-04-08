@@ -14,10 +14,11 @@ const nodeTypes = [
   /* 1 */ NodeType.define({ id: 1, name: "Keyword" }),
   /* 2 */ NodeType.define({ id: 2, name: "Identifier" }),
   /* 3 */ NodeType.define({ id: 3, name: "Hole" }),
-  /* 4 */ NodeType.define({ id: 4, name: "Colon" }),
-  /* 5 */ NodeType.define({ id: 5, name: "OpenParen", props: [[NodeProp.closedBy, ["CloseParen"]]] }),
-  /* 6 */ NodeType.define({ id: 6, name: "CloseParen", props: [[NodeProp.openedBy, ["OpenParen"]]] }),
+  /* 4 */ NodeType.define({ id: 4, name: "Operator" }),
+  /* 5 */ NodeType.define({ id: 5, name: "OpenBracket", props: [[NodeProp.closedBy, ["CloseBracket"]]] }),
+  /* 6 */ NodeType.define({ id: 6, name: "CloseBracket", props: [[NodeProp.openedBy, ["OpenBracket"]]] }),
   /* 7 */ NodeType.define({ id: 7, name: "Invalid" }),
+  /* 8 */ NodeType.define({ id: 8, name: "String" }),
 ]
 
 const nodeSet = new NodeSet(nodeTypes).extend(
@@ -25,10 +26,11 @@ const nodeSet = new NodeSet(nodeTypes).extend(
     Keyword: t.keyword,
     Identifier: t.variableName,
     Hole: t.punctuation,
-    Colon: t.separator,
-    OpenParen: t.paren,
-    CloseParen: t.paren,
+    Operator: t.operator,
+    OpenBracket: t.paren,
+    CloseBracket: t.paren,
     Invalid: t.invalid,
+    String: t.string,
   })
 )
 

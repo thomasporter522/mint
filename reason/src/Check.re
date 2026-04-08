@@ -62,7 +62,14 @@ let rec resolve = (env: env, t: term): term =>
       {...t, value: Schema(Option.map(resolve(env), rest))}
     | Construct(by, body, rest) =>
       {...t, value: Construct(resolve(env, by), List.map(resolve(env), body), Option.map(resolve(env), rest))}
-    | Hole(_) | Shard(_) | BuilderError => t
+    | Arrow(l, r) => {...t, value: Arrow(resolve(env, l), resolve(env, r))}
+    | Eq(l, r) => {...t, value: Eq(resolve(env, l), resolve(env, r))}
+    | FatArrow(l, r) => {...t, value: FatArrow(resolve(env, l), resolve(env, r))}
+    | Comma(l, r) => {...t, value: Comma(resolve(env, l), resolve(env, r))}
+    | Pipe(l, r) => {...t, value: Pipe(resolve(env, l), resolve(env, r))}
+    | BinOp(op, l, r) => {...t, value: BinOp(op, resolve(env, l), resolve(env, r))}
+    | List(items) => {...t, value: List(List.map(resolve(env), items))}
+    | StringLit(_) | Hole(_) | Shard(_) | BuilderError => t
     };
   };
 
@@ -210,7 +217,7 @@ let lineBinding = (left: term, right: term): context =>
 
 let rec checkTerm = (ctx: context, mode: checkingMode, t: term): staticInfo =>
   switch (t.value) {
-  | Postulate(body, _rest) =>
+  | Postulate(body, rest) =>
     let (info, finalCtx) =
       List.fold_left(
         ((accInfo, accCtx), line) => {
@@ -222,6 +229,11 @@ let rec checkTerm = (ctx: context, mode: checkingMode, t: term): staticInfo =>
         body,
       );
     let info = withBindings(info, finalCtx);
+    let info =
+      switch (rest) {
+      | Some(r) => mergeInfos(info, checkTerm(finalCtx, Program, r))
+      | None => info
+      };
     withErrors(info, ensureMode(["program"], mode, t.meta.start, t.meta.end_));
 
   | Identifier(v) =>
@@ -305,6 +317,20 @@ let rec checkTerm = (ctx: context, mode: checkingMode, t: term): staticInfo =>
 
   | Ap(f, args) =>
     switch (mode) {
+    | Program =>
+      /* Sequential top-level blocks: check each with accumulated context */
+      let (info, _) =
+        List.fold_left(
+          ((accInfo, accCtx), item) => {
+            let itemInfo = checkTerm(accCtx, Program, item);
+            let newCtx = mergeBindings(accCtx, itemInfo.bindings);
+            (mergeInfos(accInfo, itemInfo), newCtx);
+          },
+          (emptyInfo, ctx),
+          [f, ...args],
+        );
+      info;
+
     | Spine =>
       let (info, _) =
         List.fold_left(

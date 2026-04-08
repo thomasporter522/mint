@@ -40,8 +40,8 @@ function shatter(token) {
   }
 }
 
-function finalize(f) {
-  if (Melange__Grammar.isValidEnd(faceOf(f))) {
+function finalize(g, f) {
+  if (Melange__Grammar.isValidEnd(g, faceOf(f))) {
     return {
       hd: {
         TAG: /* Form */ 1,
@@ -54,20 +54,22 @@ function finalize(f) {
   }
 }
 
-function flattenStack(param) {
-  return Stdlib__List.concat_map((function (u) {
-    if (u.TAG === /* Unform */ 0) {
-      return {
-        hd: u,
-        tl: /* [] */ 0
-      };
-    } else {
-      return finalize(u._0);
-    }
-  }), param);
+function flattenStack(g) {
+  return function (param) {
+    return Stdlib__List.concat_map((function (u) {
+      if (u.TAG === /* Unform */ 0) {
+        return {
+          hd: u,
+          tl: /* [] */ 0
+        };
+      } else {
+        return finalize(g, u._0);
+      }
+    }), param);
+  };
 }
 
-function findMatch(_stack, t, _skipped) {
+function findMatch(g, _stack, t, _skipped) {
   while (true) {
     const skipped = _skipped;
     const stack = _stack;
@@ -85,7 +87,7 @@ function findMatch(_stack, t, _skipped) {
     }
     const rest = stack.tl;
     const form = u._0;
-    const morphed = Melange__Grammar.matchToken(faceOf(form).value, t.value);
+    const morphed = Melange__Grammar.matchToken(g, faceOf(form).value, t.value);
     if (/* tag */ typeof morphed === "number" || typeof morphed === "string") {
       if (morphed === /* Match */ 0) {
         return Stdlib.$at(Stdlib__List.rev(rest), {
@@ -94,7 +96,7 @@ function findMatch(_stack, t, _skipped) {
             _0: {
               TAG: /* PMatch */ 1,
               _0: form,
-              _1: flattenStack(skipped),
+              _1: flattenStack(g)(skipped),
               _2: t
             }
           },
@@ -125,7 +127,7 @@ function findMatch(_stack, t, _skipped) {
           _0: {
             TAG: /* PMatch */ 1,
             _0: form,
-            _1: flattenStack(skipped),
+            _1: flattenStack(g)(skipped),
             _2: t$p
           }
         },
@@ -155,7 +157,7 @@ function asSecondary(t) {
   }), t);
 }
 
-function matchPush(stack, t) {
+function matchPush(g, stack, t) {
   const pt = t.value;
   if (pt.TAG !== /* Primary */ 0) {
     return Stdlib.$at(stack, {
@@ -169,11 +171,11 @@ function matchPush(stack, t) {
       tl: /* [] */ 0
     });
   }
-  const result = findMatch(Stdlib__List.rev(stack), asPrimary(t), /* [] */ 0);
+  const result = findMatch(g, Stdlib__List.rev(stack), asPrimary(t), /* [] */ 0);
   if (result !== undefined) {
     return result;
   }
-  const item = Melange__Grammar.isValidStart(pt._0) ? ({
+  const item = Melange__Grammar.isValidStart(g, pt._0) ? ({
       TAG: /* Form */ 1,
       _0: {
         TAG: /* Head */ 0,
@@ -192,8 +194,10 @@ function matchPush(stack, t) {
   });
 }
 
-function matchParse(ts) {
-  const result = Stdlib__List.fold_left(matchPush, /* [] */ 0, Stdlib.$at({
+function matchParse(g, ts) {
+  const result = Stdlib__List.fold_left((function (param, param$1) {
+    return matchPush(g, param, param$1);
+  }), /* [] */ 0, Stdlib.$at({
     hd: {
       value: {
         TAG: /* Primary */ 0,
@@ -263,9 +267,9 @@ function faceOfClosed(param) {
   }
 }
 
-function compare(t1, t2) {
-  const match = Melange__Grammar.rightPrec(t1);
-  const match$1 = Melange__Grammar.leftPrec(t2);
+function compare(g, t1, t2) {
+  const match = Melange__Grammar.rightPrec(g, t1);
+  const match$1 = Melange__Grammar.leftPrec(g, t2);
   if (/* tag */ typeof match === "number" || typeof match === "string") {
     if (match === /* Interior */ 0) {
       return Stdlib.failwith("Precondition violated: Interior precedence in compare");
@@ -297,8 +301,8 @@ function compare(t1, t2) {
   }
 }
 
-function wantsLeftChild(t) {
-  const match = Melange__Grammar.leftPrec(t);
+function wantsLeftChild(g, t) {
+  const match = Melange__Grammar.leftPrec(g, t);
   if (/* tag */ typeof match === "number" || typeof match === "string") {
     return false;
   } else {
@@ -383,7 +387,7 @@ function rollState(s, acc) {
   return roll(s.completed, Stdlib__List.rev(s.halfOpen), acc);
 }
 
-function pushForm(_os, _acc, _seAcc, f) {
+function pushForm(g, _os, _acc, _seAcc, f) {
   while (true) {
     const seAcc = _seAcc;
     const acc = _acc;
@@ -391,7 +395,7 @@ function pushForm(_os, _acc, _seAcc, f) {
     const match = os.halfOpen;
     if (!match) {
       if (acc !== undefined) {
-        if (wantsLeftChild(headOf(f).value)) {
+        if (wantsLeftChild(g, headOf(f).value)) {
           return {
             completed: os.completed,
             halfOpen: {
@@ -414,7 +418,7 @@ function pushForm(_os, _acc, _seAcc, f) {
     }
     const match$1 = unsnoc(os.halfOpen);
     const face = match$1[1];
-    const match$2 = compare(faceOfClosed(face.hClosed).value, headOf(f).value);
+    const match$2 = compare(g, faceOfClosed(face.hClosed).value, headOf(f).value);
     switch (match$2) {
       case /* Shift */ 0 :
         const newHalf = mkHalf(Caml_option.some(acc), seAcc, undefined, f);
@@ -459,9 +463,9 @@ function pushForm(_os, _acc, _seAcc, f) {
   };
 }
 
-function pushSharded(os, f) {
+function pushSharded(g, os, f) {
   if (f.TAG !== /* Unform */ 0) {
-    return pushForm(os, undefined, /* [] */ 0, f._0);
+    return pushForm(g, os, undefined, /* [] */ 0, f._0);
   }
   const u = f._0;
   if (u.TAG !== /* USecondary */ 0) {
@@ -513,7 +517,7 @@ function pushSharded(os, f) {
   };
 }
 
-function closePartial(token) {
+function closePartial(g, token) {
   if (token.TAG === /* Head */ 0) {
     return {
       TAG: /* CHead */ 0,
@@ -522,14 +526,14 @@ function closePartial(token) {
   } else {
     return {
       TAG: /* CMatch */ 1,
-      _0: closePartial(token._0),
-      _1: operatorize(token._1),
+      _0: closePartial(g, token._0),
+      _1: operatorize(g, token._1),
       _2: token._2
     };
   }
 }
 
-function closeShardedPartial(u) {
+function closeShardedPartial(g, u) {
   if (u.TAG === /* Unform */ 0) {
     return {
       TAG: /* Unform */ 0,
@@ -538,14 +542,14 @@ function closeShardedPartial(u) {
   } else {
     return {
       TAG: /* Form */ 1,
-      _0: closePartial(u._0)
+      _0: closePartial(g, u._0)
     };
   }
 }
 
-function operatorize(fs) {
+function operatorize(g, fs) {
   const state = Stdlib__List.fold_left((function (s, f) {
-    return pushSharded(s, closeShardedPartial(f));
+    return pushSharded(g, s, closeShardedPartial(g, f));
   }), {
     completed: /* [] */ 0,
     halfOpen: /* [] */ 0
@@ -553,8 +557,8 @@ function operatorize(fs) {
   return rollState(state, undefined);
 }
 
-function parse(tokens) {
-  return operatorize(matchParse(tokens));
+function parse(g, tokens) {
+  return operatorize(g, matchParse(g, tokens));
 }
 
 export {
@@ -584,4 +588,4 @@ export {
   operatorize,
   parse,
 }
-/* No side effect */
+/* Melange__Grammar Not a pure module */

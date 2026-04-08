@@ -6,6 +6,10 @@ constructs. The OL is a subset of the ML — OL terms are ML values of type `Ter
 ## Key principles
 
 - `?` is purely ML-level: binds in patterns, represents holes/metas in expressions.
+- In patterns, the first occurrence of `?x` binds; subsequent `?x` in the same
+  pattern means "must equal the already-bound `x`" (equality constraint).
+- In expressions, pattern-bound variables are used without `?` — they're just
+  regular ML variables.
 - OL terms are just identifiers and application. No ascription, no patterns, no meta-variables.
 - Unquoted identifiers resolve from the combined OL+ML scope.
 - Schemas always have type `List Signature -> Result (List Term)` (implicit from `schema` keyword).
@@ -38,9 +42,9 @@ branches ::= | pat => expr { | pat => expr }
 
 (* ===== Patterns ===== *)
 
-pat      ::= ?ident                       (* binding *)
+pat      ::= ?ident                       (* binding / equality constraint *)
            | _                            (* wildcard *)
-           | ident pat*                   (* constructor + sub-patterns *)
+           | ident pat*                   (* OL constructor + sub-patterns *)
            | [pat, ..., pat]              (* list pattern *)
            | (pat, pat)                   (* pair pattern *)
            | str                          (* string literal pattern *)
@@ -63,10 +67,10 @@ A schema that checks "definition" blocks (two declarations where the second
 is an equality proof):
 
 ```
-schema definition =
+schema definition : List Signature -> Result (List Term) =
   fun s => match s with
-  | [([("x", ?t)], ?ret),
-     ([("x_eq", eq t t ?body)], _)]
+  | [([(?x, ?t)], ?ret),
+     ([(?x_eq, eq ?t ?t ?body)], _)]
       => Ok [body, refl t body]
   | _ =>
     if List.length s != 2

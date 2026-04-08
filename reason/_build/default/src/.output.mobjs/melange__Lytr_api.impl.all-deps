@@ -3,6 +3,9 @@ melange__Check
 melange__Error
 melange__Grammar
 melange__Lexer
+melange__LytrGrammar
+melange__MLCheck
+melange__MLType
 melange__Parser
 melange__Print
 melange__Term

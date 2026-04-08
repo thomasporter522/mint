@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import ReactMarkdown from 'react-markdown'
 import CodeMirror from '@uiw/react-codemirror'
 import { EditorView } from '@codemirror/view'
@@ -48,6 +48,27 @@ function App() {
   const [semanticErrors, setSemanticErrors] = useState<Error[]>([])
   const [holes, setHoles] = useState<[Number,holeInfo][]>([])
   const [currentHole, setCurrentHole] = useState<holeInfo | undefined>(undefined)
+
+  const setSemanticErrorsRef = useRef(setSemanticErrors)
+  setSemanticErrorsRef.current = setSemanticErrors
+  const updateHolesRef = useRef<(h: [Number, holeInfo][]) => void>(() => {})
+
+  const lytrLinter = useMemo(() =>
+    linter((view) => {
+      const code = view.state.doc.toString()
+      const statics = getStaticsFromCode(code)
+      setSemanticErrorsRef.current(statics.errors)
+      updateHolesRef.current(statics.holes)
+      return statics.errors
+        .filter((e: Error) => e.from >= 0 && e.from < e.to)
+        .map((e: Error): Diagnostic => ({
+          from: e.from,
+          to: e.to,
+          severity: "error",
+          message: e.message,
+        }))
+    }, { delay: 0 }),
+  [])
   
   // const urlParams = new URLSearchParams(window.location.search)
   // const itemId = urlParams.get('item')
@@ -153,11 +174,12 @@ function App() {
     return newUrl
   }
 
-  function updateHoles(holes : [Number, holeInfo][]) {
-    setHoles(holes)
-    const newCurrentHole = lookup(holes,cursorPosition) || lookup(holes, cursorPosition - 1);
+  function updateHoles(newHoles : [Number, holeInfo][]) {
+    setHoles(newHoles)
+    const newCurrentHole = lookup(newHoles,cursorPosition) || lookup(newHoles, cursorPosition - 1);
     setCurrentHole(newCurrentHole)
   }
+  updateHolesRef.current = updateHoles;
 
   function DisplayCodeBlock({ code, height = "auto" }: { code: string, height?: string }) {
     const lineCount = code.split('\n').length + 1
@@ -355,20 +377,7 @@ function App() {
                         whiteSpace: 'pre'  // Prevent line wrapping
                       }
                     }),
-                    linter((view) => {
-                      const code = view.state.doc.toString()
-                      const statics = getStaticsFromCode(code)
-                      setSemanticErrors(statics.errors)
-                      updateHoles(statics.holes)
-                      return statics.errors
-                        .filter((e: Error) => e.from >= 0 && e.from < e.to)
-                        .map((e: Error): Diagnostic => ({
-                          from: e.from,
-                          to: e.to,
-                          severity: "error",
-                          message: e.message,
-                        }))
-                    }, { delay: 0 }),
+                    lytrLinter,
                     autoReplace,
                   ]}
                   basicSetup={{

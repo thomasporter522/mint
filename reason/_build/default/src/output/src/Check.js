@@ -87,19 +87,74 @@ function resolve(env, t) {
       } else {
         return t;
       }
-    case /* Asc */ 3 :
+    case /* Asc */ 4 :
       return {
         value: {
-          TAG: /* Asc */ 3,
+          TAG: /* Asc */ 4,
           _0: resolve(env, v._0),
           _1: resolve(env, v._1)
         },
         meta: t.meta
       };
-    case /* Ap */ 4 :
+    case /* Arrow */ 5 :
       return {
         value: {
-          TAG: /* Ap */ 4,
+          TAG: /* Arrow */ 5,
+          _0: resolve(env, v._0),
+          _1: resolve(env, v._1)
+        },
+        meta: t.meta
+      };
+    case /* Eq */ 6 :
+      return {
+        value: {
+          TAG: /* Eq */ 6,
+          _0: resolve(env, v._0),
+          _1: resolve(env, v._1)
+        },
+        meta: t.meta
+      };
+    case /* FatArrow */ 7 :
+      return {
+        value: {
+          TAG: /* FatArrow */ 7,
+          _0: resolve(env, v._0),
+          _1: resolve(env, v._1)
+        },
+        meta: t.meta
+      };
+    case /* Comma */ 8 :
+      return {
+        value: {
+          TAG: /* Comma */ 8,
+          _0: resolve(env, v._0),
+          _1: resolve(env, v._1)
+        },
+        meta: t.meta
+      };
+    case /* Pipe */ 9 :
+      return {
+        value: {
+          TAG: /* Pipe */ 9,
+          _0: resolve(env, v._0),
+          _1: resolve(env, v._1)
+        },
+        meta: t.meta
+      };
+    case /* BinOp */ 10 :
+      return {
+        value: {
+          TAG: /* BinOp */ 10,
+          _0: v._0,
+          _1: resolve(env, v._1),
+          _2: resolve(env, v._2)
+        },
+        meta: t.meta
+      };
+    case /* Ap */ 11 :
+      return {
+        value: {
+          TAG: /* Ap */ 11,
           _0: resolve(env, v._0),
           _1: Stdlib__List.map((function (param) {
             return resolve(env, param);
@@ -107,10 +162,20 @@ function resolve(env, t) {
         },
         meta: t.meta
       };
-    case /* Postulate */ 5 :
+    case /* List */ 12 :
       return {
         value: {
-          TAG: /* Postulate */ 5,
+          TAG: /* List */ 12,
+          _0: Stdlib__List.map((function (param) {
+            return resolve(env, param);
+          }), v._0)
+        },
+        meta: t.meta
+      };
+    case /* Postulate */ 13 :
+      return {
+        value: {
+          TAG: /* Postulate */ 13,
           _0: Stdlib__List.map((function (param) {
             return resolve(env, param);
           }), v._0),
@@ -120,20 +185,20 @@ function resolve(env, t) {
         },
         meta: t.meta
       };
-    case /* Schema */ 6 :
+    case /* Schema */ 14 :
       return {
         value: {
-          TAG: /* Schema */ 6,
+          TAG: /* Schema */ 14,
           _0: Stdlib__Option.map((function (param) {
             return resolve(env, param);
           }), v._0)
         },
         meta: t.meta
       };
-    case /* Construct */ 7 :
+    case /* Construct */ 15 :
       return {
         value: {
-          TAG: /* Construct */ 7,
+          TAG: /* Construct */ 15,
           _0: resolve(env, v._0),
           _1: Stdlib__List.map((function (param) {
             return resolve(env, param);
@@ -279,7 +344,7 @@ function extractParams(args) {
         arg
       ];
     }
-    if (match.TAG !== /* Asc */ 3) {
+    if (match.TAG !== /* Asc */ 4) {
       return [
         undefined,
         arg
@@ -306,7 +371,7 @@ function lineBinding(left, right) {
         /* [] */ 0,
         right
       ]);
-    case /* Ap */ 4 :
+    case /* Ap */ 11 :
       const x$1 = x._0.value;
       if (/* tag */ typeof x$1 === "number" || typeof x$1 === "string" || x$1.TAG !== /* Identifier */ 2) {
         return StringMap.empty;
@@ -398,7 +463,7 @@ function checkTerm(ctx, mode, t) {
         inferred: inferred$1,
         bindings: StringMap.empty
       };
-    case /* Asc */ 3 :
+    case /* Asc */ 4 :
       const right = v._1;
       const left = v._0;
       if (/* tag */ typeof mode === "number" || typeof mode === "string") {
@@ -420,7 +485,7 @@ function checkTerm(ctx, mode, t) {
                 case /* Identifier */ 2 :
                   const match = right.value;
                   let ty;
-                  if (/* tag */ typeof match === "number" || typeof match === "string" || match.TAG !== /* Ap */ 4) {
+                  if (/* tag */ typeof match === "number" || typeof match === "string" || match.TAG !== /* Ap */ 11) {
                     ty = right;
                   } else {
                     const match$1 = rightInfo.inferred;
@@ -431,7 +496,7 @@ function checkTerm(ctx, mode, t) {
                     ty
                   ]);
                   break;
-                case /* Ap */ 4 :
+                case /* Ap */ 11 :
                   const x$1 = x._0.value;
                   bindings = /* tag */ typeof x$1 === "number" || typeof x$1 === "string" || x$1.TAG !== /* Identifier */ 2 ? StringMap.empty : Curry._2(StringMap.singleton, x$1._0, [
                       extractParams(x._1),
@@ -481,43 +546,64 @@ function checkTerm(ctx, mode, t) {
         _0: hole
       }, right));
       return withErrors(info$2, modeErrors$1);
-    case /* Ap */ 4 :
+    case /* Ap */ 11 :
       const args = v._1;
       const f = v._0;
       if (/* tag */ typeof mode === "number" || typeof mode === "string") {
-        if (mode === /* Spine */ 2) {
-          const funInfo = checkTerm(ctx, /* IdentifierMode */ 4, f);
-          return Stdlib__List.fold_left((function (param) {
-            const accCtx = param[1];
-            const accInfo = param[0];
-            return function (arg) {
-              const argInfo = checkTerm(accCtx, /* Argument */ 3, arg);
-              const combined = mergeInfos(accInfo, argInfo);
-              return [
-                combined,
-                mergeBindings(accCtx, combined.bindings)
-              ];
-            };
-          }), [
-            funInfo,
-            mergeBindings(ctx, funInfo.bindings)
-          ], args)[0];
+        switch (mode) {
+          case /* Program */ 0 :
+            return Stdlib__List.fold_left((function (param) {
+              const accCtx = param[1];
+              const accInfo = param[0];
+              return function (item) {
+                const itemInfo = checkTerm(accCtx, /* Program */ 0, item);
+                const newCtx = mergeBindings(accCtx, itemInfo.bindings);
+                return [
+                  mergeInfos(accInfo, itemInfo),
+                  newCtx
+                ];
+              };
+            }), [
+              emptyInfo,
+              ctx
+            ], {
+              hd: f,
+              tl: args
+            })[0];
+          case /* Spine */ 2 :
+            const funInfo = checkTerm(ctx, /* IdentifierMode */ 4, f);
+            return Stdlib__List.fold_left((function (param) {
+              const accCtx = param[1];
+              const accInfo = param[0];
+              return function (arg) {
+                const argInfo = checkTerm(accCtx, /* Argument */ 3, arg);
+                const combined = mergeInfos(accInfo, argInfo);
+                return [
+                  combined,
+                  mergeBindings(accCtx, combined.bindings)
+                ];
+              };
+            }), [
+              funInfo,
+              mergeBindings(ctx, funInfo.bindings)
+            ], args)[0];
+          default:
+            const modeErrors$2 = ensureMode({
+              hd: "spine",
+              tl: /* [] */ 0
+            }, mode, t.meta.start, t.meta.end_);
+            const funInfo$1 = checkTerm(ctx, {
+              TAG: /* Expression */ 0,
+              _0: hole
+            }, f);
+            const argInfos = Stdlib__List.map((function (a) {
+              return checkTerm(ctx, {
+                TAG: /* Expression */ 0,
+                _0: hole
+              }, a);
+            }), args);
+            return withErrors(Stdlib__List.fold_left(mergeInfos, funInfo$1, argInfos), modeErrors$2);
         }
-        const modeErrors$2 = ensureMode({
-          hd: "spine",
-          tl: /* [] */ 0
-        }, mode, t.meta.start, t.meta.end_);
-        const funInfo$1 = checkTerm(ctx, {
-          TAG: /* Expression */ 0,
-          _0: hole
-        }, f);
-        const argInfos = Stdlib__List.map((function (a) {
-          return checkTerm(ctx, {
-            TAG: /* Expression */ 0,
-            _0: hole
-          }, a);
-        }), args);
-        return withErrors(Stdlib__List.fold_left(mergeInfos, funInfo$1, argInfos), modeErrors$2);
       } else {
         const funInfo$2 = checkTerm(ctx, {
           TAG: /* Expression */ 0,
@@ -573,7 +659,8 @@ function checkTerm(ctx, mode, t) {
           bindings: info$3.bindings
         }, Stdlib.$at(arityErrors, subErrors$1));
       }
-    case /* Postulate */ 5 :
+    case /* Postulate */ 13 :
+      const rest = v._1;
       const match$4 = Stdlib__List.fold_left((function (param) {
         const accCtx = param[1];
         const accInfo = param[0];
@@ -589,8 +676,10 @@ function checkTerm(ctx, mode, t) {
         emptyInfo,
         ctx
       ], v._0);
-      const info$4 = withBindings(match$4[0], match$4[1]);
-      return withErrors(info$4, ensureMode({
+      const finalCtx = match$4[1];
+      const info$4 = withBindings(match$4[0], finalCtx);
+      const info$5 = rest !== undefined ? mergeInfos(info$4, checkTerm(finalCtx, /* Program */ 0, rest)) : info$4;
+      return withErrors(info$5, ensureMode({
         hd: "program",
         tl: /* [] */ 0
       }, mode, t.meta.start, t.meta.end_));

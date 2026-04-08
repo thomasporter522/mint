@@ -4,6 +4,8 @@ import * as Curry from "melange.js/curry.js";
 import * as Melange__Builder from "./Builder.js";
 import * as Melange__Check from "./Check.js";
 import * as Melange__Lexer from "./Lexer.js";
+import * as Melange__LytrGrammar from "./LytrGrammar.js";
+import * as Melange__MLCheck from "./MLCheck.js";
 import * as Melange__Parser from "./Parser.js";
 import * as Melange__Print from "./Print.js";
 import * as Melange__Term from "./Term.js";
@@ -19,7 +21,7 @@ function displayTerm(name, ft) {
   });
   if (!params) {
     return Melange__Term.mk({
-      TAG: /* Asc */ 3,
+      TAG: /* Asc */ 4,
       _0: nameTerm,
       _1: retType
     });
@@ -34,7 +36,7 @@ function displayTerm(name, ft) {
         _0: true
       });
     const asc = Melange__Term.mk({
-      TAG: /* Asc */ 3,
+      TAG: /* Asc */ 4,
       _0: n,
       _1: param[1]
     });
@@ -49,7 +51,7 @@ function displayTerm(name, ft) {
     };
   }), params);
   const spine = paramTerms ? Melange__Term.mk({
-      TAG: /* Ap */ 4,
+      TAG: /* Ap */ 11,
       _0: nameTerm,
       _1: {
         hd: paramTerms.hd,
@@ -57,7 +59,7 @@ function displayTerm(name, ft) {
       }
     }) : nameTerm;
   return Melange__Term.mk({
-    TAG: /* Asc */ 3,
+    TAG: /* Asc */ 4,
     _0: spine,
     _1: retType
   });
@@ -76,7 +78,7 @@ function contextToJsMap(ctx) {
 }
 
 function processCode(code) {
-  const statics = Melange__Check.getStatics(Melange__Builder.build(Melange__Parser.parse(Melange__Lexer.lex(code))));
+  const statics = Melange__Check.getStatics(Melange__Builder.build(Melange__Parser.parse(Melange__LytrGrammar.grammar, Melange__Lexer.lex(Melange__LytrGrammar.grammar, code))));
   const errors = Stdlib__Array.of_list(Stdlib__List.map((function (e) {
     return {
       type: e.type_,
@@ -103,35 +105,79 @@ function processCode(code) {
 
 const printTerm = Melange__Print.printTerm;
 
+function checkSchemaCode(code) {
+  const ast = Melange__Builder.build(Melange__Parser.parse(Melange__LytrGrammar.grammar, Melange__Lexer.lex(Melange__LytrGrammar.grammar, code)));
+  const match = Melange__MLCheck.checkSchema(Melange__MLCheck.StringMap.empty, ast);
+  if (match.TAG === /* Ok */ 0) {
+    return {
+      ok: true,
+      error: "",
+      from: 0,
+      to: 0
+    };
+  }
+  const match$1 = match._0;
+  if (match$1.TAG === /* TypeError */ 0) {
+    return {
+      ok: false,
+      error: match$1._0,
+      from: match$1._1,
+      to: match$1._2
+    };
+  } else {
+    return {
+      ok: false,
+      error: "UNIMPLEMENTED: " + match$1._0,
+      from: match$1._1,
+      to: match$1._2
+    };
+  }
+}
+
+function parseAndPrint(code) {
+  return Melange__Print.printTerm(Melange__Builder.build(Melange__Parser.parse(Melange__LytrGrammar.grammar, Melange__Lexer.lex(Melange__LytrGrammar.grammar, code))));
+}
+
 function lexToTokens(code) {
-  const tokens = Melange__Lexer.lex(code);
+  const tokens = Melange__Lexer.lex(Melange__LytrGrammar.grammar, code);
   const buf = [];
   Stdlib__List.iter((function (rtok) {
     const match = rtok.value;
     let nodeType;
     if (match.TAG === /* Primary */ 0) {
-      const match$1 = match._0;
-      if (/* tag */ typeof match$1 === "number" || typeof match$1 === "string") {
-        switch (match$1) {
-          case /* BOF */ 0 :
-          case /* EOF */ 1 :
-            nodeType = undefined;
-            break;
-          case /* TOP */ 2 :
-            nodeType = 5;
-            break;
-          case /* TCP */ 3 :
-            nodeType = 6;
-            break;
-          case /* TColon */ 4 :
-            nodeType = 4;
-            break;
-          default:
-            nodeType = 1;
-        }
+      const name = match._0;
+      if (/* tag */ typeof name === "number" || typeof name === "string") {
+        nodeType = undefined;
+      } else if (name.TAG === /* TAtom */ 0) {
+        let tmp = name._0;
+        nodeType = /* tag */ typeof tmp === "number" || typeof tmp === "string" ? 3 : (
+            tmp.TAG === /* Identifier */ 0 ? 2 : 8
+          );
       } else {
-        let tmp = match$1._0;
-        nodeType = /* tag */ typeof tmp === "number" || typeof tmp === "string" ? 3 : 2;
+        const def = Curry._2(Melange__Check.StringMap.find_opt, name._0, Melange__LytrGrammar.grammar.tokens);
+        if (def !== undefined) {
+          const match$1 = def.kind;
+          if (/* tag */ typeof match$1 === "number" || typeof match$1 === "string") {
+            nodeType = undefined;
+          } else if (match$1.TAG === /* Keyword */ 0) {
+            nodeType = 1;
+          } else {
+            switch (match$1._0) {
+              case "(" :
+              case "[" :
+                nodeType = 5;
+                break;
+              case ")" :
+              case "]" :
+                nodeType = 6;
+                break;
+              default:
+                nodeType = 4;
+            }
+          }
+        } else {
+          nodeType = undefined;
+        }
       }
     } else {
       nodeType = match._0.TAG === /* Whitespace */ 0 ? undefined : 7;
@@ -147,11 +193,16 @@ function lexToTokens(code) {
   return buf;
 }
 
+const g = Melange__LytrGrammar.grammar;
+
 export {
+  g,
   displayTerm,
   contextToJsMap,
   processCode,
   printTerm,
+  checkSchemaCode,
+  parseAndPrint,
   lexToTokens,
 }
 /* Melange__Check Not a pure module */

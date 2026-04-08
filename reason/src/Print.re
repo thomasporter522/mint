@@ -4,19 +4,14 @@ open Term;
 let printAtom =
   fun
   | Grammar.Hole => "?"
-  | Identifier(v) => v;
+  | Identifier(v) => v
+  | StringLit(s) => "\"" ++ s ++ "\"";
 
 let printPrimaryToken =
   fun
   | BOF | EOF   => ""
-  | TOP         => "("
-  | TCP         => ")"
   | TAtom(a)    => printAtom(a)
-  | TColon      => ":"
-  | TPostulate  => "postulate"
-  | TSchema   => "schema"
-  | TConstruct  => "construct"
-  | TEnd        => "end";
+  | TNamed(n)   => n;
 
 let rec printRest =
   fun
@@ -29,10 +24,25 @@ and printTerm = (t: term): string => {
     | Shard(token) => printPrimaryToken(token)
     | Hole(inserted) => inserted ? "" : "?"
     | Identifier(v) => v
+    | StringLit(s) => "\"" ++ s ++ "\""
     | Asc(left, right) =>
       printTerm(left) ++ " : " ++ printTerm(right)
+    | Arrow(left, right) =>
+      printTerm(left) ++ " -> " ++ printTerm(right)
+    | Eq(left, right) =>
+      printTerm(left) ++ " = " ++ printTerm(right)
+    | FatArrow(left, right) =>
+      printTerm(left) ++ " => " ++ printTerm(right)
+    | Comma(left, right) =>
+      printTerm(left) ++ ", " ++ printTerm(right)
+    | Pipe(left, right) =>
+      printTerm(left) ++ " | " ++ printTerm(right)
+    | BinOp(op, left, right) =>
+      printTerm(left) ++ " " ++ op ++ " " ++ printTerm(right)
     | Ap(f, args) =>
       printTerm(f) ++ " " ++ String.concat(" ", List.map(printTerm, args))
+    | List(items) =>
+      "[" ++ String.concat(", ", List.map(printTerm, items)) ++ "]"
     | Postulate(body, rest) =>
       "postulate "
       ++ String.concat("\n", List.map(printTerm, body))

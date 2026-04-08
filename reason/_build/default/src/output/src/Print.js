@@ -6,33 +6,20 @@ import * as Stdlib__String from "melange/string.js";
 function printAtom(v) {
   if (/* tag */ typeof v === "number" || typeof v === "string") {
     return "?";
-  } else {
+  } else if (v.TAG === /* Identifier */ 0) {
     return v._0;
+  } else {
+    return "\"" + (v._0 + "\"");
   }
 }
 
 function printPrimaryToken(a) {
-  if (!/* tag */ (typeof a === "number" || typeof a === "string")) {
+  if (/* tag */ typeof a === "number" || typeof a === "string") {
+    return "";
+  } else if (a.TAG === /* TAtom */ 0) {
     return printAtom(a._0);
-  }
-  switch (a) {
-    case /* BOF */ 0 :
-    case /* EOF */ 1 :
-      return "";
-    case /* TOP */ 2 :
-      return "(";
-    case /* TCP */ 3 :
-      return ")";
-    case /* TColon */ 4 :
-      return ":";
-    case /* TPostulate */ 5 :
-      return "postulate";
-    case /* TSchema */ 6 :
-      return "schema";
-    case /* TConstruct */ 7 :
-      return "construct";
-    case /* TEnd */ 8 :
-      return "end";
+  } else {
+    return a._0;
   }
 }
 
@@ -60,19 +47,43 @@ function printTerm(t) {
       case /* Identifier */ 2 :
         inner = token._0;
         break;
-      case /* Asc */ 3 :
+      case /* StringLit */ 3 :
+        inner = "\"" + (token._0 + "\"");
+        break;
+      case /* Asc */ 4 :
         inner = printTerm(token._0) + (" : " + printTerm(token._1));
         break;
-      case /* Ap */ 4 :
+      case /* Arrow */ 5 :
+        inner = printTerm(token._0) + (" -> " + printTerm(token._1));
+        break;
+      case /* Eq */ 6 :
+        inner = printTerm(token._0) + (" = " + printTerm(token._1));
+        break;
+      case /* FatArrow */ 7 :
+        inner = printTerm(token._0) + (" => " + printTerm(token._1));
+        break;
+      case /* Comma */ 8 :
+        inner = printTerm(token._0) + (", " + printTerm(token._1));
+        break;
+      case /* Pipe */ 9 :
+        inner = printTerm(token._0) + (" | " + printTerm(token._1));
+        break;
+      case /* BinOp */ 10 :
+        inner = printTerm(token._1) + (" " + (token._0 + (" " + printTerm(token._2))));
+        break;
+      case /* Ap */ 11 :
         inner = printTerm(token._0) + (" " + Stdlib__String.concat(" ", Stdlib__List.map(printTerm, token._1)));
         break;
-      case /* Postulate */ 5 :
+      case /* List */ 12 :
+        inner = "[" + (Stdlib__String.concat(", ", Stdlib__List.map(printTerm, token._0)) + "]");
+        break;
+      case /* Postulate */ 13 :
         inner = "postulate " + (Stdlib__String.concat("\n", Stdlib__List.map(printTerm, token._0)) + (" end" + printRest(token._1)));
         break;
-      case /* Schema */ 6 :
+      case /* Schema */ 14 :
         inner = "schema" + printRest(token._0);
         break;
-      case /* Construct */ 7 :
+      case /* Construct */ 15 :
         inner = "construct " + (printTerm(token._0) + (" " + (Stdlib__String.concat("\n", Stdlib__List.map(printTerm, token._1)) + (" end" + printRest(token._2)))));
         break;
     }
