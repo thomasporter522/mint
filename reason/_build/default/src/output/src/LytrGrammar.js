@@ -101,6 +101,10 @@ const g = Melange__Grammar.addToken("_", {
 }, Melange__Grammar.addMatch({
   TAG: /* MatchPair */ 0,
   _0: "with",
+  _1: "end"
+}, Melange__Grammar.addMatch({
+  TAG: /* MatchPair */ 0,
+  _0: "with",
   _1: "|"
 }, Melange__Grammar.addMatch({
   TAG: /* MatchPair */ 0,
@@ -223,7 +227,7 @@ const g = Melange__Grammar.addToken("_", {
   },
   leftPrec: /* Uninterested */ 1,
   rightPrec: /* Interior */ 0
-}, Melange__Grammar.empty))))))))))))))))))))))))))))))))))))))))))));
+}, Melange__Grammar.empty)))))))))))))))))))))))))))))))))))))))))))));
 
 const g$1 = Stdlib__List.fold_left((function (g, kw) {
   const g$1 = Melange__Grammar.addBlock(kw, "end", g);

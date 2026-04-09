@@ -38,6 +38,7 @@ let grammar = {
     |> addToken("=>",    {kind: Symbol("=>"),      leftPrec: Interior,     rightPrec: Precedence(0.5)})
     |> addMatch(MatchPair("match", "with"))
     |> addMatch(MatchPair("with", "|"))
+    |> addMatch(MatchPair("with", "end"))
     |> addMatch(MatchPair("|", "=>"))
     |> addMatch(MatchPair("=>", "|"))
     |> addMatch(MatchPair("=>", "end"))

@@ -32,10 +32,7 @@ let rec shatter =
     shatter(form) @ items @ [Unform(UShard(token))];
 
 let finalize = (g, f: partialForm): list(sharded(partialForm)) =>
-  switch (f) {
-  | PMatch(_, _, _) => [Form(f)]  /* matched forms are always valid */
-  | Head(_) => isValidEnd(g, faceOf(f)) ? [Form(f)] : shatter(f)
-  };
+  isValidEnd(g, faceOf(f)) ? [Form(f)] : shatter(f);
 
 let flattenStack = (g) =>
   List.concat_map(
