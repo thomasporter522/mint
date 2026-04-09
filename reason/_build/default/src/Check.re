@@ -70,6 +70,7 @@ let rec resolve = (env: env, t: term): term =>
     | Fun(pat, body) => {...t, value: Fun(resolve(env, pat), resolve(env, body))}
     | Match(scrut, branches) =>
       {...t, value: Match(resolve(env, scrut), List.map(((p, b)) => (resolve(env, p), resolve(env, b)), branches))}
+    | Let(b, body) => {...t, value: Let(resolve(env, b), resolve(env, body))}
     | If(c, th, el) => {...t, value: If(resolve(env, c), resolve(env, th), resolve(env, el))}
     | StringLit(_) | Hole(_) | Shard(_) | BuilderError => t
     };

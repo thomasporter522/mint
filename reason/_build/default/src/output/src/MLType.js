@@ -8,7 +8,9 @@ function printType(t) {
         return "Term";
       case /* MSort */ 1 :
         return "Sort";
-      case /* MString */ 2 :
+      case /* MBool */ 2 :
+        return "Bool";
+      case /* MString */ 3 :
         return "String";
     }
   } else {
@@ -26,18 +28,21 @@ function printType(t) {
 }
 
 function printTypeAtom(t) {
-  if (/* tag */ typeof t === "number" || typeof t === "string") {
-    return printType(t);
-  }
-  switch (t.TAG) {
-    case /* MList */ 0 :
-    case /* MResult */ 1 :
-    case /* MArrow */ 3 :
-      break;
-    default:
+  if (!/* tag */ (typeof t === "number" || typeof t === "string")) {
+    if (t.TAG === /* MPair */ 2) {
       return printType(t);
+    } else {
+      return "(" + (printType(t) + ")");
+    }
   }
-  return "(" + (printType(t) + ")");
+  switch (t) {
+    case /* MTerm */ 0 :
+    case /* MSort */ 1 :
+    case /* MString */ 3 :
+      return printType(t);
+    default:
+      return "(" + (printType(t) + ")");
+  }
 }
 
 function eqType(_a, _b) {
@@ -58,8 +63,14 @@ function eqType(_a, _b) {
           } else {
             return false;
           }
-        case /* MString */ 2 :
-          if (/* tag */ (typeof b === "number" || typeof b === "string") && b === /* MString */ 2) {
+        case /* MBool */ 2 :
+          if (/* tag */ (typeof b === "number" || typeof b === "string") && b === /* MBool */ 2) {
+            return true;
+          } else {
+            return false;
+          }
+        case /* MString */ 3 :
+          if (/* tag */ (typeof b === "number" || typeof b === "string") && b === /* MString */ 3) {
             return true;
           } else {
             return false;

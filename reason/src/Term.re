@@ -19,6 +19,7 @@ type cTerm =
   | Fun(term, term)                          /* fun pat => body */
   | Match(term, list((term, term)))          /* match scrut with branches */
   | If(term, term, term)                     /* if cond then thenBr else elseBr */
+  | Let(term, term)                          /* let binding in body */
   | Postulate(list(term), option(term))
   | Schema(option(term))
   | Construct(term, list(term), option(term))

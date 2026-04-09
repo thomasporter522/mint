@@ -21,20 +21,27 @@ const g = Melange__Grammar.addToken("_", {
   },
   leftPrec: /* Uninterested */ 1,
   rightPrec: /* Uninterested */ 1
+}, Melange__Grammar.addMatch({
+  TAG: /* MatchPair */ 0,
+  _0: "let",
+  _1: "in"
 }, Melange__Grammar.addToken("in", {
   kind: {
     TAG: /* Keyword */ 0,
     _0: "in"
   },
-  leftPrec: /* Uninterested */ 1,
-  rightPrec: /* Uninterested */ 1
+  leftPrec: /* Interior */ 0,
+  rightPrec: {
+    TAG: /* Precedence */ 0,
+    _0: 0.1
+  }
 }, Melange__Grammar.addToken("let", {
   kind: {
     TAG: /* Keyword */ 0,
     _0: "let"
   },
   leftPrec: /* Uninterested */ 1,
-  rightPrec: /* Uninterested */ 1
+  rightPrec: /* Interior */ 0
 }, Melange__Grammar.addMatch({
   TAG: /* MatchPair */ 0,
   _0: "else",
@@ -216,7 +223,7 @@ const g = Melange__Grammar.addToken("_", {
   },
   leftPrec: /* Uninterested */ 1,
   rightPrec: /* Interior */ 0
-}, Melange__Grammar.empty)))))))))))))))))))))))))))))))))))))))))));
+}, Melange__Grammar.empty))))))))))))))))))))))))))))))))))))))))))));
 
 const g$1 = Stdlib__List.fold_left((function (g, kw) {
   const g$1 = Melange__Grammar.addBlock(kw, "end", g);

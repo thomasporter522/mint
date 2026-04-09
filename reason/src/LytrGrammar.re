@@ -51,9 +51,10 @@ let grammar = {
     |> addMatch(MatchPair("if", "then"))
     |> addMatch(MatchPair("then", "else"))
     |> addMatch(MatchPair("else", "end"))
-    /* Other keywords */
-    |> addToken("let", {kind: Keyword("let"), leftPrec: Uninterested, rightPrec: Uninterested})
-    |> addToken("in",  {kind: Keyword("in"),  leftPrec: Uninterested, rightPrec: Uninterested})
+    /* let...in — matched pair, body after in needs parens */
+    |> addToken("let", {kind: Keyword("let"), leftPrec: Uninterested, rightPrec: Interior})
+    |> addToken("in",  {kind: Keyword("in"),  leftPrec: Interior,     rightPrec: Precedence(0.1)})
+    |> addMatch(MatchPair("let", "in"))
     |> addToken("_",   {kind: Symbol("_"),    leftPrec: Uninterested, rightPrec: Uninterested});
 
   /* Block keywords and their match rules */

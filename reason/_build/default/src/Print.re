@@ -26,6 +26,7 @@ let rec debugTerm = (t: term): string => {
   | Match(scrut, branches) =>
     "Match(" ++ debugTerm(scrut) ++ ",[" ++
     String.concat(",", List.map(((p, b)) => "(" ++ debugTerm(p) ++ "=>" ++ debugTerm(b) ++ ")", branches)) ++ "])"
+  | Let(b, body) => "Let(" ++ debugTerm(b) ++ "," ++ debugTerm(body) ++ ")"
   | If(c, t, e) => "If(" ++ debugTerm(c) ++ "," ++ debugTerm(t) ++ "," ++ debugTerm(e) ++ ")"
   | Postulate(body, _) => "Post([" ++ String.concat(",", List.map(debugTerm, body)) ++ "])"
   | Schema(_) => "Schema"
@@ -64,6 +65,8 @@ let rec printTerm = (t: term): string => {
            branches,
          ))
       ++ " end"
+    | Let(binding, body) =>
+      "let " ++ printTerm(binding) ++ " in " ++ printTerm(body)
     | If(cond, thenBr, elseBr) =>
       "if " ++ printTerm(cond)
       ++ " then " ++ printTerm(thenBr)

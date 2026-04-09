@@ -108,7 +108,7 @@ function checkPat(_env, _ty, _t) {
           return e$1;
         }
       case /* StringLit */ 3 :
-        const e$2 = expectType(/* MString */ 2, ty, t);
+        const e$2 = expectType(/* MString */ 3, ty, t);
         if (e$2.TAG === /* Ok */ 0) {
           return {
             TAG: /* Ok */ 0,
@@ -234,7 +234,7 @@ function inferExpr(env, _t) {
       case /* StringLit */ 3 :
         return {
           TAG: /* Ok */ 0,
-          _0: /* MString */ 2
+          _0: /* MString */ 3
         };
       case /* Asc */ 4 :
         _t = name._0;
@@ -244,9 +244,6 @@ function inferExpr(env, _t) {
           TAG: /* Ok */ 0,
           _0: /* MSort */ 1
         };
-      case /* Eq */ 6 :
-        _t = name._1;
-        continue;
       case /* Comma */ 7 :
         const e = inferExpr(env, name._0);
         if (e.TAG !== /* Ok */ 0) {
@@ -303,21 +300,21 @@ function inferExpr(env, _t) {
             if (e$5.TAG === /* Ok */ 0) {
               return {
                 TAG: /* Ok */ 0,
-                _0: /* MTerm */ 0
+                _0: /* MBool */ 2
               };
             } else {
               return e$5;
             }
           case 2 :
-            const e$6 = checkExpr(env, /* MTerm */ 0, left);
+            const e$6 = checkExpr(env, /* MBool */ 2, left);
             if (e$6.TAG !== /* Ok */ 0) {
               return e$6;
             }
-            const e$7 = checkExpr(env, /* MTerm */ 0, right);
+            const e$7 = checkExpr(env, /* MBool */ 2, right);
             if (e$7.TAG === /* Ok */ 0) {
               return {
                 TAG: /* Ok */ 0,
-                _0: /* MTerm */ 0
+                _0: /* MBool */ 2
               };
             } else {
               return e$7;
@@ -449,20 +446,28 @@ function inferExpr(env, _t) {
           return result;
         }
       case /* If */ 13 :
-        const e$13 = inferExpr(env, name._1);
+        const e$13 = checkExpr(env, /* MBool */ 2, name._0);
         if (e$13.TAG !== /* Ok */ 0) {
           return e$13;
         }
-        const ty$1 = e$13._0;
-        const e$14 = checkExpr(env, ty$1, name._2);
-        if (e$14.TAG === /* Ok */ 0) {
+        const e$14 = inferExpr(env, name._1);
+        if (e$14.TAG !== /* Ok */ 0) {
+          return e$14;
+        }
+        const ty$1 = e$14._0;
+        const e$15 = checkExpr(env, ty$1, name._2);
+        if (e$15.TAG === /* Ok */ 0) {
           return {
             TAG: /* Ok */ 0,
             _0: ty$1
           };
         } else {
-          return e$14;
+          return e$15;
         }
+      case /* Eq */ 6 :
+      case /* Let */ 14 :
+        _t = name._1;
+        continue;
       default:
         return {
           TAG: /* Ok */ 0,
@@ -494,7 +499,7 @@ function checkExpr(_env, _expected, _t) {
                     return err("Error but expected " + Melange__MLType.printType(expected), t);
                   }
                   _t = match$1.hd;
-                  _expected = /* MString */ 2;
+                  _expected = /* MString */ 3;
                   continue;
                 }
                 break;
@@ -580,19 +585,23 @@ function checkExpr(_env, _expected, _t) {
             _0: undefined
           }, items._1);
         case /* If */ 13 :
-          const e$3 = checkExpr(env, expected, items._1);
+          const e$3 = checkExpr(env, /* MBool */ 2, items._0);
           if (e$3.TAG !== /* Ok */ 0) {
             return e$3;
+          }
+          const e$4 = checkExpr(env, expected, items._1);
+          if (e$4.TAG !== /* Ok */ 0) {
+            return e$4;
           }
           _t = items._2;
           continue;
       }
     }
-    const e$4 = inferExpr(env, t);
-    if (e$4.TAG === /* Ok */ 0) {
-      return expectType(expected, e$4._0, t);
+    const e$5 = inferExpr(env, t);
+    if (e$5.TAG === /* Ok */ 0) {
+      return expectType(expected, e$5._0, t);
     } else {
-      return e$4;
+      return e$5;
     }
   };
 }
@@ -603,7 +612,7 @@ const signatureType = {
     TAG: /* MList */ 0,
     _0: {
       TAG: /* MPair */ 2,
-      _0: /* MString */ 2,
+      _0: /* MString */ 3,
       _1: /* MTerm */ 0
     }
   },

@@ -177,11 +177,17 @@ and buildForm = (form: openForm): term => {
   | (None, [], CHead({value: TAtom(StringLit(s)), _} as tok), [], None) =>
     localize(mk(Term.StringLit(s)), tok)
 
-  /* fun(pat)=> — body is captured between => and next match (|, end, etc.) */
+  /* fun(pat)=> — body captured by =>_face's right-precedence */
   | (_, _, CMatch(CHead({value: TNamed("fun"), _}), patItems, {value: TNamed("=>"), _}), _, _) =>
     let pat = buildTerms(patItems);
     let body = buildChild(rightUf, right);
     mk(Fun(pat, body))
+
+  /* let(binding)in — body captured by in_face's right-precedence */
+  | (_, _, CMatch(CHead({value: TNamed("let"), _}), bindingItems, {value: TNamed("in"), _}), _, _) =>
+    let binding = buildTerms(bindingItems);
+    let body = buildChild(rightUf, right);
+    mk(Let(binding, body))
 
   /* Infix operators */
   | (_, _, CHead({value: TNamed(":"), _} as tok), _, _) =>

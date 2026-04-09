@@ -4,6 +4,7 @@
 type mlType =
   | MTerm
   | MSort
+  | MBool
   | MString
   | MList(mlType)
   | MResult(mlType)
@@ -14,6 +15,7 @@ let rec printType =
   fun
   | MTerm => "Term"
   | MSort => "Sort"
+  | MBool => "Bool"
   | MString => "String"
   | MList(t) => "List " ++ printTypeAtom(t)
   | MResult(t) => "Result " ++ printTypeAtom(t)
@@ -28,6 +30,7 @@ let rec eqType = (a: mlType, b: mlType): bool =>
   switch (a, b) {
   | (MTerm, MTerm)
   | (MSort, MSort)
+  | (MBool, MBool)
   | (MString, MString) => true
   | (MList(a), MList(b)) => eqType(a, b)
   | (MResult(a), MResult(b)) => eqType(a, b)

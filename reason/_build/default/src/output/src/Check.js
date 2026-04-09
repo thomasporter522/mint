@@ -187,10 +187,19 @@ function resolve(env, t) {
         },
         meta: t.meta
       };
-    case /* Postulate */ 14 :
+    case /* Let */ 14 :
       return {
         value: {
-          TAG: /* Postulate */ 14,
+          TAG: /* Let */ 14,
+          _0: resolve(env, v._0),
+          _1: resolve(env, v._1)
+        },
+        meta: t.meta
+      };
+    case /* Postulate */ 15 :
+      return {
+        value: {
+          TAG: /* Postulate */ 15,
           _0: Stdlib__List.map((function (param) {
             return resolve(env, param);
           }), v._0),
@@ -200,20 +209,20 @@ function resolve(env, t) {
         },
         meta: t.meta
       };
-    case /* Schema */ 15 :
+    case /* Schema */ 16 :
       return {
         value: {
-          TAG: /* Schema */ 15,
+          TAG: /* Schema */ 16,
           _0: Stdlib__Option.map((function (param) {
             return resolve(env, param);
           }), v._0)
         },
         meta: t.meta
       };
-    case /* Construct */ 16 :
+    case /* Construct */ 17 :
       return {
         value: {
-          TAG: /* Construct */ 16,
+          TAG: /* Construct */ 17,
           _0: resolve(env, v._0),
           _1: Stdlib__List.map((function (param) {
             return resolve(env, param);
@@ -674,7 +683,7 @@ function checkTerm(ctx, mode, t) {
           bindings: info$3.bindings
         }, Stdlib.$at(arityErrors, subErrors$1));
       }
-    case /* Postulate */ 14 :
+    case /* Postulate */ 15 :
       const rest = v._1;
       const match$4 = Stdlib__List.fold_left((function (param) {
         const accCtx = param[1];

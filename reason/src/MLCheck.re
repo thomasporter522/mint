@@ -203,6 +203,12 @@ let rec inferExpr = (env: mlEnv, t: term): mlResult(mlType) =>
   /* Fun: can't infer without expected type */
   | Fun(_, _) => unimpl("Cannot infer type of fun without context", t)
 
+  /* Let: let binding in body — infer body type with binding in env */
+  | Let(binding, body) =>
+    /* For now, just infer the body. TODO: extract binding from the = expression */
+    ignore(binding);
+    inferExpr(env, body)
+
   /* Match: infer from first branch body */
   | Match(scrut, branches) =>
     switch (inferExpr(env, scrut)) {
@@ -240,10 +246,10 @@ let rec inferExpr = (env: mlEnv, t: term): mlResult(mlType) =>
       }
     }
 
-  /* If: infer from then branch, check else matches */
   | If(cond, thenBr, elseBr) =>
-    /* Don't check cond type for now — no Bool type */
-    ignore(cond);
+    switch (checkExpr(env, MBool, cond)) {
+    | Err(_) as e => e
+    | Ok () =>
     switch (inferExpr(env, thenBr)) {
     | Err(_) as e => e
     | Ok(ty) =>
@@ -251,6 +257,7 @@ let rec inferExpr = (env: mlEnv, t: term): mlResult(mlType) =>
       | Err(_) as e => e
       | Ok () => Ok(ty)
       }
+    }
     }
 
   /* Comma: (a, b) — pair */
@@ -303,18 +310,16 @@ let rec inferExpr = (env: mlEnv, t: term): mlResult(mlType) =>
       | Ok(ty) =>
         switch (checkExpr(env, ty, right)) {
         | Err(_) as e => e
-        /* HACK: comparison returns... what? No Bool type yet. Use Term. TODO */
-        | Ok () => Ok(MTerm)
+        | Ok () => Ok(MBool)
         }
       }
     | "&&" | "||" =>
-      /* HACK: boolean ops on Terms. TODO: add Bool type */
-      switch (checkExpr(env, MTerm, left)) {
+      switch (checkExpr(env, MBool, left)) {
       | Err(_) as e => e
       | Ok () =>
-        switch (checkExpr(env, MTerm, right)) {
+        switch (checkExpr(env, MBool, right)) {
         | Err(_) as e => e
-        | Ok () => Ok(MTerm)
+        | Ok () => Ok(MBool)
         }
       }
     | _ =>
@@ -367,11 +372,15 @@ and checkExpr = (env: mlEnv, expected: mlType, t: term): mlResult(unit) =>
       )
     }
 
-  /* If: check both branches against expected */
-  | If(_cond, thenBr, elseBr) =>
-    switch (checkExpr(env, expected, thenBr)) {
+  /* If: check cond as Bool, both branches against expected */
+  | If(cond, thenBr, elseBr) =>
+    switch (checkExpr(env, MBool, cond)) {
     | Err(_) as e => e
-    | Ok () => checkExpr(env, expected, elseBr)
+    | Ok () =>
+      switch (checkExpr(env, expected, thenBr)) {
+      | Err(_) as e => e
+      | Ok () => checkExpr(env, expected, elseBr)
+      }
     }
 
   /* Ok expr — HACK: polymorphic. TODO: principled polymorphism */
