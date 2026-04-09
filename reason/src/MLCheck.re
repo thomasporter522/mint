@@ -137,15 +137,6 @@ and checkOLPat = (env: mlEnv, t: term): mlResult(mlEnv) =>
   | _ => Ok(env)
   };
 
-/* --- Helpers --- */
-
-let combineArgs = (args: list(term)): term =>
-  switch (args) {
-  | [] => mk(Hole(true))
-  | [t] => t
-  | [f, ...rest] => mk(Ap(f, rest))
-  };
-
 /* --- Expression type inference --- */
 
 let rec inferExpr = (env: mlEnv, t: term): mlResult(mlType) =>
@@ -209,11 +200,58 @@ let rec inferExpr = (env: mlEnv, t: term): mlResult(mlType) =>
   /* Equals: name = body (used in schema definitions) */
   | Eq(_name, body) => inferExpr(env, body)
 
-  /* Fat arrow: pat => body (lambda or match branch) */
-  | FatArrow(_, _) =>
-    /* Without expected type info, we can't infer the parameter type.
-       This should normally be checked, not inferred. */
-    unimpl("Cannot infer type of => without context", t)
+  /* Fun: can't infer without expected type */
+  | Fun(_, _) => unimpl("Cannot infer type of fun without context", t)
+
+  /* Match: infer from first branch body */
+  | Match(scrut, branches) =>
+    switch (inferExpr(env, scrut)) {
+    | Err(_) as e => e
+    | Ok(scrutTy) =>
+      switch (branches) {
+      | [] => err("Empty match", t)
+      | [(pat, body), ...rest] =>
+        switch (checkPat(env, scrutTy, pat)) {
+        | Err(_) as e => e
+        | Ok(patEnv) =>
+          switch (inferExpr(patEnv, body)) {
+          | Err(_) as e => e
+          | Ok(bodyTy) =>
+            let result =
+              List.fold_left(
+                (acc, (p, b)) =>
+                  switch (acc) {
+                  | Err(_) as e => e
+                  | Ok () =>
+                    switch (checkPat(env, scrutTy, p)) {
+                    | Err(_) as e => e
+                    | Ok(pEnv) => checkExpr(pEnv, bodyTy, b)
+                    }
+                  },
+                Ok(),
+                rest,
+              );
+            switch (result) {
+            | Err(_) as e => e
+            | Ok () => Ok(bodyTy)
+            };
+          }
+        }
+      }
+    }
+
+  /* If: infer from then branch, check else matches */
+  | If(cond, thenBr, elseBr) =>
+    /* Don't check cond type for now — no Bool type */
+    ignore(cond);
+    switch (inferExpr(env, thenBr)) {
+    | Err(_) as e => e
+    | Ok(ty) =>
+      switch (checkExpr(env, ty, elseBr)) {
+      | Err(_) as e => e
+      | Ok () => Ok(ty)
+      }
+    }
 
   /* Comma: (a, b) — pair */
   | Comma(left, right) =>
@@ -223,18 +261,6 @@ let rec inferExpr = (env: mlEnv, t: term): mlResult(mlType) =>
       switch (inferExpr(env, right)) {
       | Err(_) as e => e
       | Ok(tyB) => Ok(MPair(tyA, tyB))
-      }
-    }
-
-  /* Pipe: a | b — used in match branches */
-  | Pipe(left, right) =>
-    /* Each side of | should be a branch (pat => body) with the same result type */
-    switch (inferExpr(env, left)) {
-    | Err(_) as e => e
-    | Ok(ty) =>
-      switch (checkExpr(env, ty, right)) {
-      | Err(_) as e => e
-      | Ok () => Ok(ty)
       }
     }
 
@@ -310,72 +336,56 @@ let rec inferExpr = (env: mlEnv, t: term): mlResult(mlType) =>
 
 and checkExpr = (env: mlEnv, expected: mlType, t: term): mlResult(unit) =>
   switch (t.value) {
-  /* FatArrow: fun pat => body or bare pat => body (match branch) */
-  | FatArrow(lhs, body) =>
-    let pat =
-      switch (lhs.value) {
-      | Ap({value: Identifier("fun"), _}, [p]) => p
-      | _ => lhs
-      };
+  /* Fun: fun pat => body */
+  | Fun(pat, body) =>
     switch (expected) {
     | MArrow(paramTy, retTy) =>
       switch (checkPat(env, paramTy, pat)) {
       | Err(_) as e => e
       | Ok(patEnv) => checkExpr(patEnv, retTy, body)
       }
-    | _ => err("=> expression but expected " ++ printType(expected), t)
+    | _ => err("Lambda but expected " ++ printType(expected), t)
     }
 
-  /* Ok expr — HACK: polymorphic, Result(t) for any t.
-     TODO: replace with principled polymorphism */
+  /* Match: check each branch body against expected */
+  | Match(scrut, branches) =>
+    switch (inferExpr(env, scrut)) {
+    | Err(_) as e => e
+    | Ok(scrutTy) =>
+      List.fold_left(
+        (acc, (pat, body)) =>
+          switch (acc) {
+          | Err(_) as e => e
+          | Ok () =>
+            switch (checkPat(env, scrutTy, pat)) {
+            | Err(_) as e => e
+            | Ok(patEnv) => checkExpr(patEnv, expected, body)
+            }
+          },
+        Ok(),
+        branches,
+      )
+    }
+
+  /* If: check both branches against expected */
+  | If(_cond, thenBr, elseBr) =>
+    switch (checkExpr(env, expected, thenBr)) {
+    | Err(_) as e => e
+    | Ok () => checkExpr(env, expected, elseBr)
+    }
+
+  /* Ok expr — HACK: polymorphic. TODO: principled polymorphism */
   | Ap({value: Identifier("Ok"), _}, [arg]) =>
     switch (expected) {
     | MResult(innerTy) => checkExpr(env, innerTy, arg)
     | _ => err("Ok but expected " ++ printType(expected), t)
     }
 
-  /* Error msg — HACK: polymorphic, Result(t) for any t.
-     TODO: replace with principled polymorphism */
+  /* Error msg — HACK: polymorphic. TODO: principled polymorphism */
   | Ap({value: Identifier("Error"), _}, [arg]) =>
     switch (expected) {
     | MResult(_) => checkExpr(env, MString, arg)
     | _ => err("Error but expected " ++ printType(expected), t)
-    }
-
-  /* match s with branches — Ap(match, [scrutinee, with, branch1, branch2, ...]) */
-  | Ap({value: Identifier("match"), _}, args) =>
-    switch (args) {
-    | [scrutinee, {value: Identifier("with"), _}, ...branches] =>
-      switch (inferExpr(env, scrutinee)) {
-      | Err(_) as e => e
-      | Ok(scrutTy) => checkBranches(env, scrutTy, expected, branches)
-      }
-    | _ => err("Malformed match expression", t)
-    }
-
-  /* if cond then thenBr else elseBr — parsed as Ap(if, [cond, then, thenBr, else, elseBr]) */
-  | Ap({value: Identifier("if"), _}, args) =>
-    let splitIf = (remaining) =>
-      switch (remaining) {
-      | [cond, {value: Identifier("then"), _}, ...afterThen] =>
-        let rec splitElse = (thenAcc, rem) =>
-          switch (rem) {
-          | [{value: Identifier("else"), _}, ...elseArgs] => Some((cond, thenAcc, elseArgs))
-          | [x, ...rest] => splitElse(thenAcc @ [x], rest)
-          | [] => Some((cond, thenAcc, []))
-          };
-        splitElse([], afterThen);
-      | _ => None
-      };
-    switch (splitIf(args)) {
-    | Some((_cond, thenArgs, elseArgs)) =>
-      let thenBr = combineArgs(thenArgs);
-      let elseBr = combineArgs(elseArgs);
-      switch (checkExpr(env, expected, thenBr)) {
-      | Err(_) as e => e
-      | Ok () => checkExpr(env, expected, elseBr)
-      }
-    | None => err("Malformed if expression", t)
     }
 
   /* List literal checked against List(t) */
@@ -392,7 +402,6 @@ and checkExpr = (env: mlEnv, expected: mlType, t: term): mlResult(unit) =>
         items,
       )
     | _ =>
-      /* Fall through to infer */
       switch (inferExpr(env, t)) {
       | Err(_) as e => e
       | Ok(got) => expectType(expected, got, t)
@@ -405,48 +414,6 @@ and checkExpr = (env: mlEnv, expected: mlType, t: term): mlResult(unit) =>
     | Err(_) as e => e
     | Ok(got) => expectType(expected, got, t)
     }
-  }
-
-/* --- Check match branches: pipe-separated pat => body --- */
-
-and checkBranches = (env, scrutTy, expected, branches): mlResult(unit) =>
-  /* branches is a list but usually just one element containing the pipe chain */
-  List.fold_left(
-    (acc, branch) =>
-      switch (acc) {
-      | Err(_) as e => e
-      | Ok () => checkBranch(env, scrutTy, expected, branch)
-      },
-    Ok(),
-    branches,
-  )
-
-and checkBranch = (env, scrutTy, expected, t): mlResult(unit) =>
-  switch (t.value) {
-  | Pipe(left, right) =>
-    let leftResult =
-      switch (left.value) {
-      | Hole(true) => Ok() /* leading | with nothing before it */
-      | _ => checkBranch(env, scrutTy, expected, left)
-      };
-    switch (leftResult) {
-    | Err(_) as e => e
-    | Ok () => checkBranch(env, scrutTy, expected, right)
-    }
-  | FatArrow(pat, body) =>
-    /* Leading | produces Pipe(Hole(inserted), realPat) — unwrap it */
-    let realPat =
-      switch (pat.value) {
-      | Pipe({value: Hole(true), _}, p) => p
-      | _ => pat
-      };
-    switch (checkPat(env, scrutTy, realPat)) {
-    | Err(_) as e => e
-    | Ok(patEnv) => checkExpr(patEnv, expected, body)
-    }
-  | _ =>
-    /* Single expression without pattern — check against expected */
-    checkExpr(env, expected, t)
   }
 
 /* --- Top-level: check a schema definition --- */

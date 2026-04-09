@@ -136,11 +136,11 @@ describe('ML type checker: OL patterns', () => {
 
 describe('ML type checker: if/then/else', () => {
   it('accepts if/then/else returning Result', () => {
-    ok('fun s => (if s then (Ok []) else (Error "bad"))');
+    ok('fun s => (if s then (Ok []) else (Error "bad") end)');
   });
 
   it('rejects if with mismatched branch types', () => {
-    fails('fun s => (if s then (Ok []) else "wrong")');
+    fails('fun s => (if s then (Ok []) else "wrong" end)');
   });
 });
 
@@ -150,11 +150,11 @@ describe('ML type checker: if/then/else', () => {
 
 describe('ML type checker: nested structures', () => {
   it('match inside if', () => {
-    ok('fun s => (if s then match s with | _ => (Ok []) end else (Error "bad"))');
+    ok('fun s => (if s then match s with | _ => (Ok []) end else (Error "bad") end)');
   });
 
   it('if inside match branch', () => {
-    ok('fun s => match s with | _ => (if s then (Ok []) else (Error "bad")) end');
+    ok('fun s => match s with | _ => if s then (Ok []) else (Error "bad") end end');
   });
 
   it('nested match', () => {
@@ -177,6 +177,7 @@ describe('ML type checker: full schema example', () => {
       '  if (List length s != two)',
       '  then (Error "definition declarations must have length 2")',
       '  else (Error "invalid declaration")',
+      '  end',
       'end',
     ].join('\n');
     ok(code);

@@ -22,6 +22,12 @@ let isToken = (name: string, tok: primaryToken): bool =>
   | _ => false
   };
 
+let isCommaToken = (tok: primaryToken): bool =>
+  switch (tok) {
+  | TNamed("," | ",p" | ",l") => true
+  | _ => false
+  };
+
 let rec buildTerms = (fs: list(sharded(openForm))): term =>
   combineTerms(List.concat_map(buildSharded, fs))
 
@@ -40,6 +46,8 @@ and buildItems = (items: list(sharded(openForm))): list(term) =>
     | Form(f) => Some(buildForm(f)),
     items,
   )
+
+/* --- Block builders --- */
 
 and faceToken = (form: closedForm): string =>
   switch (form) {
@@ -82,8 +90,8 @@ and buildLeftChild = (left, leftUf) =>
 and buildInfix = (constructor, left, leftUf, tok, rightUf, right) =>
   localize(mk(constructor(buildLeftChild(left, leftUf), buildChild(rightUf, right))), tok)
 
+/* --- Match chain: match(scrut)with()|(pat)=>(body)|(pat)=>(body)end --- */
 
-/* Check if a closed form is a match...with...|...=> chain */
 and isMatchChain = (cf: closedForm): bool =>
   switch (cf) {
   | CMatch(inner, _, {value: TNamed("end" | "=>" | "|" | "with"), _}) =>
@@ -92,19 +100,13 @@ and isMatchChain = (cf: closedForm): bool =>
   | _ => false
   }
 
-/* Walk a match chain and extract: scrutinee + list of (pattern, body) branches.
-   Chain structure: CMatch(CMatch(...CMatch(CHead(match), [scrut], with)..., [pat], =>), [body], |/end)
-   Alternating: match(scrut)with()|(pat)=>(body)|(pat)=>(body)end */
 and collectMatchBranches = (cf: closedForm): (term, list((term, term))) =>
   switch (cf) {
-  /* Base: match(scrutinee)with */
   | CMatch(CHead({value: TNamed("match"), _}), scrutItems, {value: TNamed("with"), _}) =>
     (buildTerms(scrutItems), [])
-  /* (body)end or (body)| — outermost has the body, inner has the pattern */
   | CMatch(inner, bodyItems, {value: TNamed("end" | "|"), _}) =>
     let body = buildTerms(bodyItems);
     switch (inner) {
-    /* (pat)=> — pattern captured between | and => */
     | CMatch(deeper, patItems, {value: TNamed("=>"), _}) =>
       let pat = buildTerms(patItems);
       let (scrutinee, prevBranches) = collectMatchBranches(deeper);
@@ -112,72 +114,62 @@ and collectMatchBranches = (cf: closedForm): (term, list((term, term))) =>
     | _ =>
       collectMatchBranches(inner)
     }
-  /* ()| — skip empty levels (e.g. with()| connector) */
   | _ => (mk(Hole(true)), [])
   }
 
-and buildMatchChain = (cf: closedForm, rightUf, right): term => {
-  let (scrutinee, branches) = collectMatchBranches(cf);
-  let branchTerms =
-    List.map(
-      ((pat, body)) => mk(FatArrow(pat, body)),
-      branches,
-    );
-  let branchPipe =
-    switch (branchTerms) {
-    | [] => mk(Hole(true))
-    | [first, ...rest] =>
-      List.fold_left((acc, b) => mk(Pipe(acc, b)), first, rest)
-    };
-  let matchTerm = mk(Ap(mk(Identifier("match")), [scrutinee, mk(Identifier("with")), branchPipe]));
-  /* If there's content after end, wrap in application */
-  let rest = buildChild(rightUf, right);
-  switch (rest.value) {
-  | Hole(true) => matchTerm
-  | _ => mk(Ap(matchTerm, [rest]))
-  };
-}
+/* --- If chain: if(cond)then(thenBr)else(elseBr)end --- */
 
-/* Collect comma-separated elements from a matched bracket form.
-   (a, b, c) = CMatch(CMatch(CMatch(CHead("("), [a], ","), [b], ","), [c], ")")
-   Returns the list of element terms and the opening bracket name. */
+and isIfChain = (cf: closedForm): bool =>
+  switch (cf) {
+  | CMatch(inner, _, {value: TNamed("end" | "else" | "then"), _}) =>
+    isIfChain(inner)
+  | CHead({value: TNamed("if"), _}) => true
+  | _ => false
+  }
+
+and buildIfChain = (cf: closedForm): term =>
+  switch (cf) {
+  | CMatch(CMatch(CMatch(CHead({value: TNamed("if"), _}), condItems, {value: TNamed("then"), _}), thenItems, {value: TNamed("else"), _}), elseItems, {value: TNamed("end"), _}) =>
+    mk(If(buildTerms(condItems), buildTerms(thenItems), buildTerms(elseItems)))
+  | _ => mk(BuilderError)
+  }
+
+/* --- Bracket elements: walk comma chain --- */
+
 and collectBracketElements = (cf: closedForm): (string, list(list(sharded(openForm)))) =>
   switch (cf) {
   | CHead({value: TNamed(open_), _}) => (open_, [])
-  | CMatch(inner, items, {value: TNamed("," | ")" | "]"), _}) =>
+  | CMatch(inner, items, {value, _}) when isCommaToken(value) || value == TNamed(")") || value == TNamed("]") =>
     let (open_, prev) = collectBracketElements(inner);
     (open_, prev @ [items])
   | _ => ("", [])
   }
 
+/* === Main builder === */
+
 and buildForm = (form: openForm): term => {
   let {left, leftUf, closed, rightUf, right} = form;
 
   switch (left, leftUf, closed, rightUf, right) {
-  /* Bracket forms: (...), [...], and (...,...,...), [...,...,...] */
+  /* Bracket forms: (...), [...], with commas */
   | (None, [], CMatch(_, _, {value: TNamed(")" | "]"), _}), [], None) =>
     let (open_, elementGroups) = collectBracketElements(closed);
     let elements = List.map(buildTerms, elementGroups);
     switch (open_, elements) {
-    /* (expr) — single element in parens */
     | ("(", [single]) => {...single, meta: {...single.meta, parens: true}}
-    /* (a, b, ...) — tuple/pair */
     | ("(", elements) =>
-      let rec buildComma = (elems) =>
-        switch (elems) {
+      let rec buildComma =
+        fun
         | [] => mk(Hole(true))
         | [single] => single
-        | [first, ...rest] => mk(Comma(first, buildComma(rest)))
-        };
+        | [first, ...rest] => mk(Comma(first, buildComma(rest)));
       let t = buildComma(elements);
       {...t, meta: {...t.meta, parens: true}}
-    /* [a, b, ...] — list */
     | ("[", items) => mk(Term.List(items))
-    /* fallback */
     | _ => mk(BuilderError)
     };
 
-  /* atoms */
+  /* Atoms */
   | (None, [], CHead({value: TAtom(Hole), _} as tok), [], None) =>
     localize(mk(Term.Hole(false)), tok)
   | (None, [], CHead({value: TAtom(Identifier(v)), _} as tok), [], None) =>
@@ -185,45 +177,47 @@ and buildForm = (form: openForm): term => {
   | (None, [], CHead({value: TAtom(StringLit(s)), _} as tok), [], None) =>
     localize(mk(Term.StringLit(s)), tok)
 
-  /* fun...=> lambda — body is the right child via =>_face's precedence */
+  /* fun(pat)=> — body is captured between => and next match (|, end, etc.) */
   | (_, _, CMatch(CHead({value: TNamed("fun"), _}), patItems, {value: TNamed("=>"), _}), _, _) =>
     let pat = buildTerms(patItems);
     let body = buildChild(rightUf, right);
-    mk(FatArrow(mk(Ap(mk(Identifier("fun")), [pat])), body));
+    mk(Fun(pat, body))
 
-  /* infix operators */
+  /* Infix operators */
   | (_, _, CHead({value: TNamed(":"), _} as tok), _, _) =>
     buildInfix((l, r) => Asc(l, r), left, leftUf, tok, rightUf, right)
   | (_, _, CHead({value: TNamed("->"), _} as tok), _, _) =>
     buildInfix((l, r) => Arrow(l, r), left, leftUf, tok, rightUf, right)
   | (_, _, CHead({value: TNamed("="), _} as tok), _, _) =>
     buildInfix((l, r) => Eq(l, r), left, leftUf, tok, rightUf, right)
-  | (_, _, CHead({value: TNamed("=>"), _} as tok), _, _) =>
-    buildInfix((l, r) => FatArrow(l, r), left, leftUf, tok, rightUf, right)
-  | (_, _, CHead({value: TNamed(","), _} as tok), _, _) =>
-    buildInfix((l, r) => Comma(l, r), left, leftUf, tok, rightUf, right)
-  | (_, _, CHead({value: TNamed("|"), _} as tok), _, _) =>
-    buildInfix((l, r) => Pipe(l, r), left, leftUf, tok, rightUf, right)
 
-  /* keywords that are just atoms (fun, match, with, if, then, else, _) */
+  /* Keyword atoms */
   | (None, [], CHead({value: TNamed(name), _} as tok), [], None) =>
     localize(mk(Term.Identifier(name)), tok)
 
-  /* catch-all infix: any named operator with children */
+  /* Catch-all infix */
   | (_, _, CHead({value: TNamed(op), _} as tok), _, _) =>
     buildInfix((l, r) => BinOp(op, l, r), left, leftUf, tok, rightUf, right)
 
-  /* match...with...|...=>...end chain */
-  | (_, _, CMatch(_, _, {value: TNamed("end"), _}), _, _)
-      when isMatchChain(closed) =>
-    buildMatchChain(closed, rightUf, right)
+  /* match...with...|...=>...end */
+  | (_, _, CMatch(_, _, {value: TNamed("end"), _}), _, _) when isMatchChain(closed) =>
+    buildMatchChain(closed)
 
-  /* blocks terminated by `end` */
+  /* if...then...else...end */
+  | (_, _, CMatch(_, _, {value: TNamed("end"), _}), _, _) when isIfChain(closed) =>
+    buildIfChain(closed)
+
+  /* Other blocks terminated by `end` */
   | (_, _, CMatch(inner, innerItems, {value: TNamed("end"), _}), [], None) =>
     buildBlocks(inner, innerItems, None)
 
   | _ => mk(BuilderError)
   };
+}
+
+and buildMatchChain = (cf: closedForm): term => {
+  let (scrutinee, branches) = collectMatchBranches(cf);
+  mk(Match(scrutinee, branches));
 }
 
 and buildUnform =

@@ -114,47 +114,29 @@ function resolve(env, t) {
         },
         meta: t.meta
       };
-    case /* FatArrow */ 7 :
+    case /* Comma */ 7 :
       return {
         value: {
-          TAG: /* FatArrow */ 7,
+          TAG: /* Comma */ 7,
           _0: resolve(env, v._0),
           _1: resolve(env, v._1)
         },
         meta: t.meta
       };
-    case /* Comma */ 8 :
+    case /* BinOp */ 8 :
       return {
         value: {
-          TAG: /* Comma */ 8,
-          _0: resolve(env, v._0),
-          _1: resolve(env, v._1)
-        },
-        meta: t.meta
-      };
-    case /* Pipe */ 9 :
-      return {
-        value: {
-          TAG: /* Pipe */ 9,
-          _0: resolve(env, v._0),
-          _1: resolve(env, v._1)
-        },
-        meta: t.meta
-      };
-    case /* BinOp */ 10 :
-      return {
-        value: {
-          TAG: /* BinOp */ 10,
+          TAG: /* BinOp */ 8,
           _0: v._0,
           _1: resolve(env, v._1),
           _2: resolve(env, v._2)
         },
         meta: t.meta
       };
-    case /* Ap */ 11 :
+    case /* Ap */ 9 :
       return {
         value: {
-          TAG: /* Ap */ 11,
+          TAG: /* Ap */ 9,
           _0: resolve(env, v._0),
           _1: Stdlib__List.map((function (param) {
             return resolve(env, param);
@@ -162,20 +144,53 @@ function resolve(env, t) {
         },
         meta: t.meta
       };
-    case /* List */ 12 :
+    case /* List */ 10 :
       return {
         value: {
-          TAG: /* List */ 12,
+          TAG: /* List */ 10,
           _0: Stdlib__List.map((function (param) {
             return resolve(env, param);
           }), v._0)
         },
         meta: t.meta
       };
-    case /* Postulate */ 13 :
+    case /* Fun */ 11 :
       return {
         value: {
-          TAG: /* Postulate */ 13,
+          TAG: /* Fun */ 11,
+          _0: resolve(env, v._0),
+          _1: resolve(env, v._1)
+        },
+        meta: t.meta
+      };
+    case /* Match */ 12 :
+      return {
+        value: {
+          TAG: /* Match */ 12,
+          _0: resolve(env, v._0),
+          _1: Stdlib__List.map((function (param) {
+            return [
+              resolve(env, param[0]),
+              resolve(env, param[1])
+            ];
+          }), v._1)
+        },
+        meta: t.meta
+      };
+    case /* If */ 13 :
+      return {
+        value: {
+          TAG: /* If */ 13,
+          _0: resolve(env, v._0),
+          _1: resolve(env, v._1),
+          _2: resolve(env, v._2)
+        },
+        meta: t.meta
+      };
+    case /* Postulate */ 14 :
+      return {
+        value: {
+          TAG: /* Postulate */ 14,
           _0: Stdlib__List.map((function (param) {
             return resolve(env, param);
           }), v._0),
@@ -185,20 +200,20 @@ function resolve(env, t) {
         },
         meta: t.meta
       };
-    case /* Schema */ 14 :
+    case /* Schema */ 15 :
       return {
         value: {
-          TAG: /* Schema */ 14,
+          TAG: /* Schema */ 15,
           _0: Stdlib__Option.map((function (param) {
             return resolve(env, param);
           }), v._0)
         },
         meta: t.meta
       };
-    case /* Construct */ 15 :
+    case /* Construct */ 16 :
       return {
         value: {
-          TAG: /* Construct */ 15,
+          TAG: /* Construct */ 16,
           _0: resolve(env, v._0),
           _1: Stdlib__List.map((function (param) {
             return resolve(env, param);
@@ -371,7 +386,7 @@ function lineBinding(left, right) {
         /* [] */ 0,
         right
       ]);
-    case /* Ap */ 11 :
+    case /* Ap */ 9 :
       const x$1 = x._0.value;
       if (/* tag */ typeof x$1 === "number" || typeof x$1 === "string" || x$1.TAG !== /* Identifier */ 2) {
         return StringMap.empty;
@@ -485,7 +500,7 @@ function checkTerm(ctx, mode, t) {
                 case /* Identifier */ 2 :
                   const match = right.value;
                   let ty;
-                  if (/* tag */ typeof match === "number" || typeof match === "string" || match.TAG !== /* Ap */ 11) {
+                  if (/* tag */ typeof match === "number" || typeof match === "string" || match.TAG !== /* Ap */ 9) {
                     ty = right;
                   } else {
                     const match$1 = rightInfo.inferred;
@@ -496,7 +511,7 @@ function checkTerm(ctx, mode, t) {
                     ty
                   ]);
                   break;
-                case /* Ap */ 11 :
+                case /* Ap */ 9 :
                   const x$1 = x._0.value;
                   bindings = /* tag */ typeof x$1 === "number" || typeof x$1 === "string" || x$1.TAG !== /* Identifier */ 2 ? StringMap.empty : Curry._2(StringMap.singleton, x$1._0, [
                       extractParams(x._1),
@@ -546,7 +561,7 @@ function checkTerm(ctx, mode, t) {
         _0: hole
       }, right));
       return withErrors(info$2, modeErrors$1);
-    case /* Ap */ 11 :
+    case /* Ap */ 9 :
       const args = v._1;
       const f = v._0;
       if (/* tag */ typeof mode === "number" || typeof mode === "string") {
@@ -659,7 +674,7 @@ function checkTerm(ctx, mode, t) {
           bindings: info$3.bindings
         }, Stdlib.$at(arityErrors, subErrors$1));
       }
-    case /* Postulate */ 13 :
+    case /* Postulate */ 14 :
       const rest = v._1;
       const match$4 = Stdlib__List.fold_left((function (param) {
         const accCtx = param[1];

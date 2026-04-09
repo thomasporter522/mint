@@ -51,7 +51,7 @@ function displayTerm(name, ft) {
     };
   }), params);
   const spine = paramTerms ? Melange__Term.mk({
-      TAG: /* Ap */ 11,
+      TAG: /* Ap */ 9,
       _0: nameTerm,
       _1: {
         hd: paramTerms.hd,

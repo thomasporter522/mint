@@ -12,12 +12,13 @@ type cTerm =
   | Asc(term, term)
   | Arrow(term, term)
   | Eq(term, term)
-  | FatArrow(term, term)
   | Comma(term, term)
-  | Pipe(term, term)
   | BinOp(string, term, term)
   | Ap(term, list(term))
   | List(list(term))
+  | Fun(term, term)                          /* fun pat => body */
+  | Match(term, list((term, term)))          /* match scrut with branches */
+  | If(term, term, term)                     /* if cond then thenBr else elseBr */
   | Postulate(list(term), option(term))
   | Schema(option(term))
   | Construct(term, list(term), option(term))

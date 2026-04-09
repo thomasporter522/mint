@@ -37,9 +37,10 @@ type tokenDef = {
 /* --- Matching rules --- */
 
 type matchRule =
-  | MatchPair(string, string)             /* e.g. ("(", ")") */
-  | MatchBlockEnd(string, string)         /* e.g. ("postulate", "end") */
-  | MatchBlockBlock(string, string);      /* e.g. ("postulate", "schema") */
+  | MatchPair(string, string)              /* e.g. ("(", ")") */
+  | MatchPairMorph(string, string, string) /* e.g. ("(", ",", ",p") — match and morph right token */
+  | MatchBlockEnd(string, string)          /* e.g. ("postulate", "end") */
+  | MatchBlockBlock(string, string);       /* e.g. ("postulate", "schema") */
 
 /* --- The grammar object --- */
 
@@ -172,6 +173,8 @@ let matchToken = (g: grammar, t1: primaryToken, t2: primaryToken): matchTokenRes
           switch (rule) {
           | MatchPair(a, b) =>
             if (n1 == a && n2 == b) { result := Match }
+          | MatchPairMorph(a, b, morphTo) =>
+            if (n1 == a && n2 == b) { result := MatchMorph(TNamed(morphTo)) }
           | MatchBlockEnd(a, b) =>
             if (n1 == a && n2 == b) { result := Match }
           | MatchBlockBlock(a, b) =>

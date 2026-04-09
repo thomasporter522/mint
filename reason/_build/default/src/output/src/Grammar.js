@@ -109,7 +109,7 @@ function addParens(open_, close, g) {
 function addBlock(keyword, close, g) {
   const g$1 = addKeyword(keyword, /* Uninterested */ 1, /* Interior */ 0, g);
   return addMatch({
-    TAG: /* MatchBlockEnd */ 1,
+    TAG: /* MatchBlockEnd */ 2,
     _0: keyword,
     _1: close
   }, g$1);
@@ -167,9 +167,26 @@ function matchToken(g, t1, t2) {
       contents: /* NoMatch */ 1
     };
     Stdlib__List.iter((function (rule) {
-      if (Caml_obj.caml_equal(result.contents, /* NoMatch */ 1) && name1 === rule._0 && name2 === rule._1) {
-        result.contents = /* Match */ 0;
-        return;
+      if (Caml_obj.caml_equal(result.contents, /* NoMatch */ 1)) {
+        if (rule.TAG === /* MatchPairMorph */ 1) {
+          if (name1 === rule._0 && name2 === rule._1) {
+            result.contents = {
+              TAG: /* MatchMorph */ 0,
+              _0: {
+                TAG: /* TNamed */ 1,
+                _0: rule._2
+              }
+            };
+            return;
+          } else {
+            return;
+          }
+        } else if (name1 === rule._0 && name2 === rule._1) {
+          result.contents = /* Match */ 0;
+          return;
+        } else {
+          return;
+        }
       }
       
     }), g.matchRules);

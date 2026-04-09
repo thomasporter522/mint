@@ -3,8 +3,6 @@
 import * as Caml_string from "melange.js/caml_string.js";
 import * as Curry from "melange.js/curry.js";
 import * as Melange__MLType from "./MLType.js";
-import * as Melange__Term from "./Term.js";
-import * as Stdlib from "melange/stdlib.js";
 import * as Stdlib__List from "melange/list.js";
 import * as Stdlib__Map from "melange/map.js";
 import * as Stdlib__String from "melange/string.js";
@@ -119,7 +117,7 @@ function checkPat(_env, _ty, _t) {
         } else {
           return e$2;
         }
-      case /* Comma */ 8 :
+      case /* Comma */ 7 :
         if (/* tag */ typeof ty === "number" || typeof ty === "string") {
           return err("Pair pattern but expected " + Melange__MLType.printType(ty), t);
         }
@@ -134,13 +132,13 @@ function checkPat(_env, _ty, _t) {
         _ty = ty._1;
         _env = e$3._0;
         continue;
-      case /* Ap */ 11 :
+      case /* Ap */ 9 :
         if (Melange__MLType.eqType(ty, /* MTerm */ 0)) {
           return checkOLPat(env, t);
         } else {
           return unimpl("Pattern form not yet supported", t);
         }
-      case /* List */ 12 :
+      case /* List */ 10 :
         if (/* tag */ typeof ty === "number" || typeof ty === "string") {
           return err("List pattern but expected " + Melange__MLType.printType(ty), t);
         }
@@ -194,7 +192,7 @@ function checkOLPat(env, t) {
           _0: Curry._3(StringMap.add, varName, /* MTerm */ 0, env)
         };
       }
-    case /* Ap */ 11 :
+    case /* Ap */ 9 :
       return Stdlib__List.fold_left((function (accResult, arg) {
         if (accResult.TAG === /* Ok */ 0) {
           return checkOLPat(accResult._0, arg);
@@ -207,25 +205,6 @@ function checkOLPat(env, t) {
         TAG: /* Ok */ 0,
         _0: env
       };
-  }
-}
-
-function combineArgs(args) {
-  if (!args) {
-    return Melange__Term.mk({
-      TAG: /* Hole */ 1,
-      _0: true
-    });
-  }
-  const t = args.hd;
-  if (args.tl) {
-    return Melange__Term.mk({
-      TAG: /* Ap */ 11,
-      _0: t,
-      _1: args.tl
-    });
-  } else {
-    return t;
   }
 }
 
@@ -268,9 +247,7 @@ function inferExpr(env, _t) {
       case /* Eq */ 6 :
         _t = name._1;
         continue;
-      case /* FatArrow */ 7 :
-        return unimpl("Cannot infer type of => without context", t);
-      case /* Comma */ 8 :
+      case /* Comma */ 7 :
         const e = inferExpr(env, name._0);
         if (e.TAG !== /* Ok */ 0) {
           return e;
@@ -288,22 +265,7 @@ function inferExpr(env, _t) {
         } else {
           return e$1;
         }
-      case /* Pipe */ 9 :
-        const e$2 = inferExpr(env, name._0);
-        if (e$2.TAG !== /* Ok */ 0) {
-          return e$2;
-        }
-        const ty$1 = e$2._0;
-        const e$3 = checkExpr(env, ty$1, name._1);
-        if (e$3.TAG === /* Ok */ 0) {
-          return {
-            TAG: /* Ok */ 0,
-            _0: ty$1
-          };
-        } else {
-          return e$3;
-        }
-      case /* BinOp */ 10 :
+      case /* BinOp */ 8 :
         const right = name._2;
         const left = name._1;
         let exit = 0;
@@ -317,11 +279,27 @@ function inferExpr(env, _t) {
             exit = 2;
             break;
           default:
-            const e$4 = checkExpr(env, /* MTerm */ 0, left);
+            const e$2 = checkExpr(env, /* MTerm */ 0, left);
+            if (e$2.TAG !== /* Ok */ 0) {
+              return e$2;
+            }
+            const e$3 = checkExpr(env, /* MTerm */ 0, right);
+            if (e$3.TAG === /* Ok */ 0) {
+              return {
+                TAG: /* Ok */ 0,
+                _0: /* MTerm */ 0
+              };
+            } else {
+              return e$3;
+            }
+        }
+        switch (exit) {
+          case 1 :
+            const e$4 = inferExpr(env, left);
             if (e$4.TAG !== /* Ok */ 0) {
               return e$4;
             }
-            const e$5 = checkExpr(env, /* MTerm */ 0, right);
+            const e$5 = checkExpr(env, e$4._0, right);
             if (e$5.TAG === /* Ok */ 0) {
               return {
                 TAG: /* Ok */ 0,
@@ -330,14 +308,12 @@ function inferExpr(env, _t) {
             } else {
               return e$5;
             }
-        }
-        switch (exit) {
-          case 1 :
-            const e$6 = inferExpr(env, left);
+          case 2 :
+            const e$6 = checkExpr(env, /* MTerm */ 0, left);
             if (e$6.TAG !== /* Ok */ 0) {
               return e$6;
             }
-            const e$7 = checkExpr(env, e$6._0, right);
+            const e$7 = checkExpr(env, /* MTerm */ 0, right);
             if (e$7.TAG === /* Ok */ 0) {
               return {
                 TAG: /* Ok */ 0,
@@ -346,26 +322,12 @@ function inferExpr(env, _t) {
             } else {
               return e$7;
             }
-          case 2 :
-            const e$8 = checkExpr(env, /* MTerm */ 0, left);
-            if (e$8.TAG !== /* Ok */ 0) {
-              return e$8;
-            }
-            const e$9 = checkExpr(env, /* MTerm */ 0, right);
-            if (e$9.TAG === /* Ok */ 0) {
-              return {
-                TAG: /* Ok */ 0,
-                _0: /* MTerm */ 0
-              };
-            } else {
-              return e$9;
-            }
         }
         break;
-      case /* Ap */ 11 :
+      case /* Ap */ 9 :
         const f = name._0;
-        const e$10 = inferExpr(env, f);
-        if (e$10.TAG === /* Ok */ 0) {
+        const e$8 = inferExpr(env, f);
+        if (e$8.TAG === /* Ok */ 0) {
           return Stdlib__List.fold_left((function (accResult, arg) {
             if (accResult.TAG !== /* Ok */ 0) {
               return accResult;
@@ -400,12 +362,12 @@ function inferExpr(env, _t) {
             }
           }), {
             TAG: /* Ok */ 0,
-            _0: e$10._0
+            _0: e$8._0
           }, name._1);
         } else {
-          return e$10;
+          return e$8;
         }
-      case /* List */ 12 :
+      case /* List */ 10 :
         const match = name._0;
         if (!match) {
           return {
@@ -416,11 +378,11 @@ function inferExpr(env, _t) {
             }
           };
         }
-        const e$11 = inferExpr(env, match.hd);
-        if (e$11.TAG !== /* Ok */ 0) {
-          return e$11;
+        const e$9 = inferExpr(env, match.hd);
+        if (e$9.TAG !== /* Ok */ 0) {
+          return e$9;
         }
-        const elemTy = e$11._0;
+        const elemTy = e$9._0;
         const checkResult = Stdlib__List.fold_left((function (acc, item) {
           if (acc.TAG === /* Ok */ 0) {
             return checkExpr(env, elemTy, item);
@@ -442,6 +404,65 @@ function inferExpr(env, _t) {
         } else {
           return checkResult;
         }
+      case /* Fun */ 11 :
+        return unimpl("Cannot infer type of fun without context", t);
+      case /* Match */ 12 :
+        const branches = name._1;
+        const e$10 = inferExpr(env, name._0);
+        if (e$10.TAG !== /* Ok */ 0) {
+          return e$10;
+        }
+        const scrutTy = e$10._0;
+        if (!branches) {
+          return err("Empty match", t);
+        }
+        const match$1 = branches.hd;
+        const e$11 = checkPat(env, scrutTy, match$1[0]);
+        if (e$11.TAG !== /* Ok */ 0) {
+          return e$11;
+        }
+        const e$12 = inferExpr(e$11._0, match$1[1]);
+        if (e$12.TAG !== /* Ok */ 0) {
+          return e$12;
+        }
+        const bodyTy = e$12._0;
+        const result = Stdlib__List.fold_left((function (acc, param) {
+          if (acc.TAG !== /* Ok */ 0) {
+            return acc;
+          }
+          const e = checkPat(env, scrutTy, param[0]);
+          if (e.TAG === /* Ok */ 0) {
+            return checkExpr(e._0, bodyTy, param[1]);
+          } else {
+            return e;
+          }
+        }), {
+          TAG: /* Ok */ 0,
+          _0: undefined
+        }, branches.tl);
+        if (result.TAG === /* Ok */ 0) {
+          return {
+            TAG: /* Ok */ 0,
+            _0: bodyTy
+          };
+        } else {
+          return result;
+        }
+      case /* If */ 13 :
+        const e$13 = inferExpr(env, name._1);
+        if (e$13.TAG !== /* Ok */ 0) {
+          return e$13;
+        }
+        const ty$1 = e$13._0;
+        const e$14 = checkExpr(env, ty$1, name._2);
+        if (e$14.TAG === /* Ok */ 0) {
+          return {
+            TAG: /* Ok */ 0,
+            _0: ty$1
+          };
+        } else {
+          return e$14;
+        }
       default:
         return {
           TAG: /* Ok */ 0,
@@ -459,157 +480,42 @@ function checkExpr(_env, _expected, _t) {
     const items = t.value;
     if (!/* tag */ (typeof items === "number" || typeof items === "string")) {
       switch (items.TAG) {
-        case /* FatArrow */ 7 :
-          const lhs = items._0;
-          const match = lhs.value;
-          let pat;
-          if (/* tag */ typeof match === "number" || typeof match === "string" || match.TAG !== /* Ap */ 11) {
-            pat = lhs;
-          } else {
-            const match$1 = match._0.value;
-            if (/* tag */ typeof match$1 === "number" || typeof match$1 === "string" || !(match$1.TAG === /* Identifier */ 2 && match$1._0 === "fun")) {
-              pat = lhs;
-            } else {
-              const match$2 = match._1;
-              pat = match$2 && !match$2.tl ? match$2.hd : lhs;
-            }
-          }
-          if (/* tag */ typeof expected === "number" || typeof expected === "string") {
-            return err("=> expression but expected " + Melange__MLType.printType(expected), t);
-          }
-          if (expected.TAG !== /* MArrow */ 3) {
-            return err("=> expression but expected " + Melange__MLType.printType(expected), t);
-          }
-          const e = checkPat(env, expected._0, pat);
-          if (e.TAG !== /* Ok */ 0) {
-            return e;
-          }
-          _t = items._1;
-          _expected = expected._1;
-          _env = e._0;
-          continue;
-        case /* Ap */ 11 :
-          const match$3 = items._0.value;
-          if (!/* tag */ (typeof match$3 === "number" || typeof match$3 === "string") && match$3.TAG === /* Identifier */ 2) {
-            switch (match$3._0) {
+        case /* Ap */ 9 :
+          const match = items._0.value;
+          if (!/* tag */ (typeof match === "number" || typeof match === "string") && match.TAG === /* Identifier */ 2) {
+            switch (match._0) {
               case "Error" :
-                const match$4 = items._1;
-                if (match$4 && !match$4.tl) {
+                const match$1 = items._1;
+                if (match$1 && !match$1.tl) {
                   if (/* tag */ typeof expected === "number" || typeof expected === "string") {
                     return err("Error but expected " + Melange__MLType.printType(expected), t);
                   }
                   if (expected.TAG !== /* MResult */ 1) {
                     return err("Error but expected " + Melange__MLType.printType(expected), t);
                   }
-                  _t = match$4.hd;
+                  _t = match$1.hd;
                   _expected = /* MString */ 2;
                   continue;
                 }
                 break;
               case "Ok" :
-                const match$5 = items._1;
-                if (match$5 && !match$5.tl) {
+                const match$2 = items._1;
+                if (match$2 && !match$2.tl) {
                   if (/* tag */ typeof expected === "number" || typeof expected === "string") {
                     return err("Ok but expected " + Melange__MLType.printType(expected), t);
                   }
                   if (expected.TAG !== /* MResult */ 1) {
                     return err("Ok but expected " + Melange__MLType.printType(expected), t);
                   }
-                  _t = match$5.hd;
+                  _t = match$2.hd;
                   _expected = expected._0;
                   continue;
                 }
                 break;
-              case "if" :
-                const splitIf = function (remaining) {
-                  if (!remaining) {
-                    return;
-                  }
-                  const match = remaining.tl;
-                  if (!match) {
-                    return;
-                  }
-                  const match$1 = match.hd.value;
-                  if (/* tag */ typeof match$1 === "number" || typeof match$1 === "string") {
-                    return;
-                  }
-                  if (match$1.TAG !== /* Identifier */ 2) {
-                    return;
-                  }
-                  const cond = remaining.hd;
-                  if (match$1._0 !== "then") {
-                    return;
-                  }
-                  let _thenAcc = /* [] */ 0;
-                  let _rem = match.tl;
-                  while (true) {
-                    const rem = _rem;
-                    const thenAcc = _thenAcc;
-                    if (!rem) {
-                      return [
-                        cond,
-                        thenAcc,
-                        /* [] */ 0
-                      ];
-                    }
-                    const x = rem.hd;
-                    const match$2 = x.value;
-                    if (!/* tag */ (typeof match$2 === "number" || typeof match$2 === "string") && match$2.TAG === /* Identifier */ 2 && match$2._0 === "else") {
-                      return [
-                        cond,
-                        thenAcc,
-                        rem.tl
-                      ];
-                    }
-                    _rem = rem.tl;
-                    _thenAcc = Stdlib.$at(thenAcc, {
-                      hd: x,
-                      tl: /* [] */ 0
-                    });
-                    continue;
-                  };
-                };
-                const match$6 = splitIf(items._1);
-                if (match$6 === undefined) {
-                  return err("Malformed if expression", t);
-                }
-                const thenBr = combineArgs(match$6[1]);
-                const elseBr = combineArgs(match$6[2]);
-                const e$1 = checkExpr(env, expected, thenBr);
-                if (e$1.TAG !== /* Ok */ 0) {
-                  return e$1;
-                }
-                _t = elseBr;
-                continue;
-              case "match" :
-                const args = items._1;
-                if (!args) {
-                  return err("Malformed match expression", t);
-                }
-                const match$7 = args.tl;
-                if (!match$7) {
-                  return err("Malformed match expression", t);
-                }
-                const match$8 = match$7.hd.value;
-                if (/* tag */ typeof match$8 === "number" || typeof match$8 === "string") {
-                  return err("Malformed match expression", t);
-                }
-                if (match$8.TAG !== /* Identifier */ 2) {
-                  return err("Malformed match expression", t);
-                }
-                if (match$8._0 !== "with") {
-                  return err("Malformed match expression", t);
-                }
-                const e$2 = inferExpr(env, args.hd);
-                if (e$2.TAG === /* Ok */ 0) {
-                  return checkBranches(env, e$2._0, expected, match$7.tl);
-                } else {
-                  return e$2;
-                }
             }
           }
           break;
-        case /* List */ 12 :
+        case /* List */ 10 :
           let exit = 0;
           if (/* tag */ typeof expected === "number" || typeof expected === "string") {
             exit = 2;
@@ -630,14 +536,56 @@ function checkExpr(_env, _expected, _t) {
             exit = 2;
           }
           if (exit === 2) {
-            const e$3 = inferExpr(env, t);
-            if (e$3.TAG === /* Ok */ 0) {
-              return expectType(expected, e$3._0, t);
+            const e = inferExpr(env, t);
+            if (e.TAG === /* Ok */ 0) {
+              return expectType(expected, e._0, t);
             } else {
-              return e$3;
+              return e;
             }
           }
           break;
+        case /* Fun */ 11 :
+          if (/* tag */ typeof expected === "number" || typeof expected === "string") {
+            return err("Lambda but expected " + Melange__MLType.printType(expected), t);
+          }
+          if (expected.TAG !== /* MArrow */ 3) {
+            return err("Lambda but expected " + Melange__MLType.printType(expected), t);
+          }
+          const e$1 = checkPat(env, expected._0, items._0);
+          if (e$1.TAG !== /* Ok */ 0) {
+            return e$1;
+          }
+          _t = items._1;
+          _expected = expected._1;
+          _env = e$1._0;
+          continue;
+        case /* Match */ 12 :
+          const e$2 = inferExpr(env, items._0);
+          if (e$2.TAG !== /* Ok */ 0) {
+            return e$2;
+          }
+          const scrutTy = e$2._0;
+          return Stdlib__List.fold_left((function (acc, param) {
+            if (acc.TAG !== /* Ok */ 0) {
+              return acc;
+            }
+            const e = checkPat(env, scrutTy, param[0]);
+            if (e.TAG === /* Ok */ 0) {
+              return checkExpr(e._0, expected, param[1]);
+            } else {
+              return e;
+            }
+          }), {
+            TAG: /* Ok */ 0,
+            _0: undefined
+          }, items._1);
+        case /* If */ 13 :
+          const e$3 = checkExpr(env, expected, items._1);
+          if (e$3.TAG !== /* Ok */ 0) {
+            return e$3;
+          }
+          _t = items._2;
+          continue;
       }
     }
     const e$4 = inferExpr(env, t);
@@ -645,71 +593,6 @@ function checkExpr(_env, _expected, _t) {
       return expectType(expected, e$4._0, t);
     } else {
       return e$4;
-    }
-  };
-}
-
-function checkBranches(env, scrutTy, expected, branches) {
-  return Stdlib__List.fold_left((function (acc, branch) {
-    if (acc.TAG === /* Ok */ 0) {
-      return checkBranch(env, scrutTy, expected, branch);
-    } else {
-      return acc;
-    }
-  }), {
-    TAG: /* Ok */ 0,
-    _0: undefined
-  }, branches);
-}
-
-function checkBranch(env, scrutTy, expected, _t) {
-  while (true) {
-    const t = _t;
-    const match = t.value;
-    if (/* tag */ typeof match === "number" || typeof match === "string") {
-      return checkExpr(env, expected, t);
-    }
-    switch (match.TAG) {
-      case /* FatArrow */ 7 :
-        const pat = match._0;
-        const match$1 = pat.value;
-        let realPat;
-        if (/* tag */ typeof match$1 === "number" || typeof match$1 === "string" || match$1.TAG !== /* Pipe */ 9) {
-          realPat = pat;
-        } else {
-          const match$2 = match$1._0.value;
-          realPat = /* tag */ typeof match$2 === "number" || typeof match$2 === "string" || !(match$2.TAG === /* Hole */ 1 && match$2._0) ? pat : match$1._1;
-        }
-        const e = checkPat(env, scrutTy, realPat);
-        if (e.TAG === /* Ok */ 0) {
-          return checkExpr(e._0, expected, match._1);
-        } else {
-          return e;
-        }
-      case /* Pipe */ 9 :
-        const left = match._0;
-        const match$3 = left.value;
-        let leftResult;
-        let exit = 0;
-        if (/* tag */ typeof match$3 === "number" || typeof match$3 === "string" || !(match$3.TAG === /* Hole */ 1 && match$3._0)) {
-          exit = 1;
-        } else {
-          leftResult = {
-            TAG: /* Ok */ 0,
-            _0: undefined
-          };
-        }
-        if (exit === 1) {
-          leftResult = checkBranch(env, scrutTy, expected, left);
-        }
-        if (leftResult.TAG !== /* Ok */ 0) {
-          return leftResult;
-        }
-        _t = match._1;
-        continue;
-        break;
-      default:
-        return checkExpr(env, expected, t);
     }
   };
 }
@@ -757,11 +640,8 @@ export {
   expectType,
   checkPat,
   checkOLPat,
-  combineArgs,
   inferExpr,
   checkExpr,
-  checkBranches,
-  checkBranch,
   signatureType,
   schemaType,
   checkSchema,

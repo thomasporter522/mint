@@ -3,23 +3,20 @@
 import * as Stdlib__List from "melange/list.js";
 import * as Stdlib__String from "melange/string.js";
 
-function printAtom(v) {
+function printPrimaryToken(n) {
+  if (/* tag */ typeof n === "number" || typeof n === "string") {
+    return "";
+  }
+  if (n.TAG !== /* TAtom */ 0) {
+    return n._0;
+  }
+  const v = n._0;
   if (/* tag */ typeof v === "number" || typeof v === "string") {
     return "?";
   } else if (v.TAG === /* Identifier */ 0) {
     return v._0;
   } else {
     return "\"" + (v._0 + "\"");
-  }
-}
-
-function printPrimaryToken(a) {
-  if (/* tag */ typeof a === "number" || typeof a === "string") {
-    return "";
-  } else if (a.TAG === /* TAtom */ 0) {
-    return printAtom(a._0);
-  } else {
-    return a._0;
   }
 }
 
@@ -48,32 +45,28 @@ function debugTerm(t) {
       return p + ("Arrow(" + (debugTerm(ins._0) + ("," + (debugTerm(ins._1) + ")"))));
     case /* Eq */ 6 :
       return p + ("Eq(" + (debugTerm(ins._0) + ("," + (debugTerm(ins._1) + ")"))));
-    case /* FatArrow */ 7 :
-      return p + ("Fat(" + (debugTerm(ins._0) + ("," + (debugTerm(ins._1) + ")"))));
-    case /* Comma */ 8 :
+    case /* Comma */ 7 :
       return p + ("Comma(" + (debugTerm(ins._0) + ("," + (debugTerm(ins._1) + ")"))));
-    case /* Pipe */ 9 :
-      return p + ("Pipe(" + (debugTerm(ins._0) + ("," + (debugTerm(ins._1) + ")"))));
-    case /* BinOp */ 10 :
+    case /* BinOp */ 8 :
       return p + ("BinOp(" + (ins._0 + ("," + (debugTerm(ins._1) + ("," + (debugTerm(ins._2) + ")"))))));
-    case /* Ap */ 11 :
+    case /* Ap */ 9 :
       return p + ("Ap(" + (debugTerm(ins._0) + (",[" + (Stdlib__String.concat(",", Stdlib__List.map(debugTerm, ins._1)) + "])"))));
-    case /* List */ 12 :
+    case /* List */ 10 :
       return "List([" + (Stdlib__String.concat(",", Stdlib__List.map(debugTerm, ins._0)) + "])");
-    case /* Postulate */ 13 :
+    case /* Fun */ 11 :
+      return "Fun(" + (debugTerm(ins._0) + ("," + (debugTerm(ins._1) + ")")));
+    case /* Match */ 12 :
+      return "Match(" + (debugTerm(ins._0) + (",[" + (Stdlib__String.concat(",", Stdlib__List.map((function (param) {
+        return "(" + (debugTerm(param[0]) + ("=>" + (debugTerm(param[1]) + ")")));
+      }), ins._1)) + "])")));
+    case /* If */ 13 :
+      return "If(" + (debugTerm(ins._0) + ("," + (debugTerm(ins._1) + ("," + (debugTerm(ins._2) + ")")))));
+    case /* Postulate */ 14 :
       return "Post([" + (Stdlib__String.concat(",", Stdlib__List.map(debugTerm, ins._0)) + "])");
-    case /* Schema */ 14 :
+    case /* Schema */ 15 :
       return "Schema";
-    case /* Construct */ 15 :
+    case /* Construct */ 16 :
       return "Construct";
-  }
-}
-
-function printRest(r) {
-  if (r !== undefined) {
-    return " " + printTerm(r);
-  } else {
-    return "";
   }
 }
 
@@ -105,32 +98,46 @@ function printTerm(t) {
       case /* Eq */ 6 :
         inner = printTerm(token._0) + (" = " + printTerm(token._1));
         break;
-      case /* FatArrow */ 7 :
-        inner = printTerm(token._0) + (" => " + printTerm(token._1));
-        break;
-      case /* Comma */ 8 :
+      case /* Comma */ 7 :
         inner = printTerm(token._0) + (", " + printTerm(token._1));
         break;
-      case /* Pipe */ 9 :
-        inner = printTerm(token._0) + (" | " + printTerm(token._1));
-        break;
-      case /* BinOp */ 10 :
+      case /* BinOp */ 8 :
         inner = printTerm(token._1) + (" " + (token._0 + (" " + printTerm(token._2))));
         break;
-      case /* Ap */ 11 :
+      case /* Ap */ 9 :
         inner = printTerm(token._0) + (" " + Stdlib__String.concat(" ", Stdlib__List.map(printTerm, token._1)));
         break;
-      case /* List */ 12 :
+      case /* List */ 10 :
         inner = "[" + (Stdlib__String.concat(", ", Stdlib__List.map(printTerm, token._0)) + "]");
         break;
-      case /* Postulate */ 13 :
-        inner = "postulate " + (Stdlib__String.concat("\n", Stdlib__List.map(printTerm, token._0)) + (" end" + printRest(token._1)));
+      case /* Fun */ 11 :
+        inner = "fun " + (printTerm(token._0) + (" => " + printTerm(token._1)));
         break;
-      case /* Schema */ 14 :
-        inner = "schema" + printRest(token._0);
+      case /* Match */ 12 :
+        inner = "match " + (printTerm(token._0) + (" with" + (Stdlib__String.concat("", Stdlib__List.map((function (param) {
+          return " | " + (printTerm(param[0]) + (" => " + printTerm(param[1])));
+        }), token._1)) + " end")));
         break;
-      case /* Construct */ 15 :
-        inner = "construct " + (printTerm(token._0) + (" " + (Stdlib__String.concat("\n", Stdlib__List.map(printTerm, token._1)) + (" end" + printRest(token._2)))));
+      case /* If */ 13 :
+        inner = "if " + (printTerm(token._0) + (" then " + (printTerm(token._1) + (" else " + (printTerm(token._2) + " end")))));
+        break;
+      case /* Postulate */ 14 :
+        const rest = token._1;
+        inner = "postulate " + (Stdlib__String.concat("\n", Stdlib__List.map(printTerm, token._0)) + (" end" + (
+          rest !== undefined ? " " + printTerm(rest) : ""
+        )));
+        break;
+      case /* Schema */ 15 :
+        const rest$1 = token._0;
+        inner = "schema" + (
+          rest$1 !== undefined ? " " + printTerm(rest$1) : ""
+        );
+        break;
+      case /* Construct */ 16 :
+        const rest$2 = token._2;
+        inner = "construct " + (printTerm(token._0) + (" " + (Stdlib__String.concat("\n", Stdlib__List.map(printTerm, token._1)) + (" end" + (
+          rest$2 !== undefined ? " " + printTerm(rest$2) : ""
+        )))));
         break;
     }
   }
@@ -142,10 +149,8 @@ function printTerm(t) {
 }
 
 export {
-  printAtom,
   printPrimaryToken,
   debugTerm,
-  printRest,
   printTerm,
 }
 /* No side effect */

@@ -64,11 +64,13 @@ let rec resolve = (env: env, t: term): term =>
       {...t, value: Construct(resolve(env, by), List.map(resolve(env), body), Option.map(resolve(env), rest))}
     | Arrow(l, r) => {...t, value: Arrow(resolve(env, l), resolve(env, r))}
     | Eq(l, r) => {...t, value: Eq(resolve(env, l), resolve(env, r))}
-    | FatArrow(l, r) => {...t, value: FatArrow(resolve(env, l), resolve(env, r))}
     | Comma(l, r) => {...t, value: Comma(resolve(env, l), resolve(env, r))}
-    | Pipe(l, r) => {...t, value: Pipe(resolve(env, l), resolve(env, r))}
     | BinOp(op, l, r) => {...t, value: BinOp(op, resolve(env, l), resolve(env, r))}
     | List(items) => {...t, value: List(List.map(resolve(env), items))}
+    | Fun(pat, body) => {...t, value: Fun(resolve(env, pat), resolve(env, body))}
+    | Match(scrut, branches) =>
+      {...t, value: Match(resolve(env, scrut), List.map(((p, b)) => (resolve(env, p), resolve(env, b)), branches))}
+    | If(c, th, el) => {...t, value: If(resolve(env, c), resolve(env, th), resolve(env, el))}
     | StringLit(_) | Hole(_) | Shard(_) | BuilderError => t
     };
   };

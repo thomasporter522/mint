@@ -41,7 +41,9 @@ function shatter(token) {
 }
 
 function finalize(g, f) {
-  if (Melange__Grammar.isValidEnd(g, faceOf(f))) {
+  if (f.TAG === /* Head */ 0 && !Melange__Grammar.isValidEnd(g, faceOf(f))) {
+    return shatter(f);
+  } else {
     return {
       hd: {
         TAG: /* Form */ 1,
@@ -49,8 +51,6 @@ function finalize(g, f) {
       },
       tl: /* [] */ 0
     };
-  } else {
-    return shatter(f);
   }
 }
 

@@ -408,15 +408,16 @@ describe('ML keywords', () => {
   });
 
   it('match/with parse', () => {
-    const result = pp('match x with y');
+    const result = pp('match x with | y => z end');
     expect(result).toContain('match');
     expect(result).toContain('with');
     expect(result).toContain('x');
     expect(result).toContain('y');
+    expect(result).toContain('end');
   });
 
   it('if/then/else parse', () => {
-    const result = pp('if a then b else c');
+    const result = pp('if a then b else c end');
     expect(result).toContain('if');
     expect(result).toContain('then');
     expect(result).toContain('else');
@@ -446,6 +447,7 @@ describe('schema definition example', () => {
       '    if List length s != two',
       '    then Error "definition declarations must have length 2"',
       '    else Error "invalid declaration"',
+      '    end',
       '  end',
     ].join('\n');
     const result = pp(code);
