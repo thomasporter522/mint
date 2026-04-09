@@ -125,7 +125,34 @@ const g = Melange__Grammar.addToken("_", {
   },
   leftPrec: /* Interior */ 0,
   rightPrec: /* Uninterested */ 1
-}, Melange__Grammar.addInfix("||", "||", 6.0, 6.1, Melange__Grammar.addInfix("&&", "&&", 5.0, 5.1, Melange__Grammar.addInfix("==", "==", 4.0, 4.1, Melange__Grammar.addInfix("!=", "!=", 4.0, 4.1, Melange__Grammar.addInfix(",", ",", 3.0, 3.1, Melange__Grammar.addInfix("->", "->", 2.0, 1.9, Melange__Grammar.addInfix(":", ":", 1.0, 1.1, Melange__Grammar.addInfix("=", "=", 0.2, 0.3, Melange__Grammar.addParens("[", "]", Melange__Grammar.addParens("(", ")", Melange__Grammar.empty))))))))))))))))))))))))))));
+}, Melange__Grammar.addInfix("||", "||", 6.0, 6.1, Melange__Grammar.addInfix("&&", "&&", 5.0, 5.1, Melange__Grammar.addInfix("==", "==", 4.0, 4.1, Melange__Grammar.addInfix("!=", "!=", 4.0, 4.1, Melange__Grammar.addMatch({
+  TAG: /* MatchPair */ 0,
+  _0: ",",
+  _1: "]"
+}, Melange__Grammar.addMatch({
+  TAG: /* MatchPair */ 0,
+  _0: "[",
+  _1: ","
+}, Melange__Grammar.addMatch({
+  TAG: /* MatchPair */ 0,
+  _0: ",",
+  _1: ")"
+}, Melange__Grammar.addMatch({
+  TAG: /* MatchPair */ 0,
+  _0: ",",
+  _1: ","
+}, Melange__Grammar.addMatch({
+  TAG: /* MatchPair */ 0,
+  _0: "(",
+  _1: ","
+}, Melange__Grammar.addToken(",", {
+  kind: {
+    TAG: /* Symbol */ 1,
+    _0: ","
+  },
+  leftPrec: /* Interior */ 0,
+  rightPrec: /* Interior */ 0
+}, Melange__Grammar.addInfix("->", "->", 2.0, 1.9, Melange__Grammar.addInfix(":", ":", 1.0, 1.1, Melange__Grammar.addInfix("=", "=", 0.2, 0.3, Melange__Grammar.addParens("[", "]", Melange__Grammar.addParens("(", ")", Melange__Grammar.empty)))))))))))))))))))))))))))))))));
 
 const g$1 = Stdlib__List.fold_left((function (g, kw) {
   const g$1 = Melange__Grammar.addBlock(kw, "end", g);

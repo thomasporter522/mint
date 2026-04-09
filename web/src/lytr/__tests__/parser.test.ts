@@ -290,13 +290,34 @@ describe('fat arrow', () => {
   });
 });
 
-describe('comma', () => {
+describe('tuples and commas', () => {
   it('parses pair', () => {
     expect(pp('(a, b)')).toBe('(a, b)');
   });
 
   it('parses triple', () => {
     expect(pp('(a, b, c)')).toBe('(a, b, c)');
+  });
+
+  it('application groups before comma', () => {
+    // (a, f x) should be Comma(a, Ap(f, x)), not Ap(Comma(a, f), x)
+    expect(pp('(a, f x)')).toBe('(a, f x)');
+  });
+
+  it('nested pairs', () => {
+    expect(pp('((a, b), c)')).toBe('((a, b), c)');
+  });
+
+  it('pair inside list', () => {
+    expect(pp('[(a, b), (c, d)]')).toBe('[(a, b), (c, d)]');
+  });
+
+  it('list inside pair', () => {
+    expect(pp('([a, b], c)')).toBe('([a, b], c)');
+  });
+
+  it('deeply nested pair with application', () => {
+    expect(pp('[([(?x, f y)], z)]')).toBe('[([(?x, f y)], z)]');
   });
 });
 

@@ -23,6 +23,52 @@ function printPrimaryToken(a) {
   }
 }
 
+function debugTerm(t) {
+  const p = t.meta.parens ? "P" : "";
+  const ins = t.value;
+  if (/* tag */ typeof ins === "number" || typeof ins === "string") {
+    return "ERR";
+  }
+  switch (ins.TAG) {
+    case /* Shard */ 0 :
+      return "Shard";
+    case /* Hole */ 1 :
+      if (ins._0) {
+        return "Hole_";
+      } else {
+        return "Hole";
+      }
+    case /* Identifier */ 2 :
+      return "Id(" + (ins._0 + ")");
+    case /* StringLit */ 3 :
+      return "Str(" + (ins._0 + ")");
+    case /* Asc */ 4 :
+      return p + ("Asc(" + (debugTerm(ins._0) + ("," + (debugTerm(ins._1) + ")"))));
+    case /* Arrow */ 5 :
+      return p + ("Arrow(" + (debugTerm(ins._0) + ("," + (debugTerm(ins._1) + ")"))));
+    case /* Eq */ 6 :
+      return p + ("Eq(" + (debugTerm(ins._0) + ("," + (debugTerm(ins._1) + ")"))));
+    case /* FatArrow */ 7 :
+      return p + ("Fat(" + (debugTerm(ins._0) + ("," + (debugTerm(ins._1) + ")"))));
+    case /* Comma */ 8 :
+      return p + ("Comma(" + (debugTerm(ins._0) + ("," + (debugTerm(ins._1) + ")"))));
+    case /* Pipe */ 9 :
+      return p + ("Pipe(" + (debugTerm(ins._0) + ("," + (debugTerm(ins._1) + ")"))));
+    case /* BinOp */ 10 :
+      return p + ("BinOp(" + (ins._0 + ("," + (debugTerm(ins._1) + ("," + (debugTerm(ins._2) + ")"))))));
+    case /* Ap */ 11 :
+      return p + ("Ap(" + (debugTerm(ins._0) + (",[" + (Stdlib__String.concat(",", Stdlib__List.map(debugTerm, ins._1)) + "])"))));
+    case /* List */ 12 :
+      return "List([" + (Stdlib__String.concat(",", Stdlib__List.map(debugTerm, ins._0)) + "])");
+    case /* Postulate */ 13 :
+      return "Post([" + (Stdlib__String.concat(",", Stdlib__List.map(debugTerm, ins._0)) + "])");
+    case /* Schema */ 14 :
+      return "Schema";
+    case /* Construct */ 15 :
+      return "Construct";
+  }
+}
+
 function printRest(r) {
   if (r !== undefined) {
     return " " + printTerm(r);
@@ -98,6 +144,7 @@ function printTerm(t) {
 export {
   printAtom,
   printPrimaryToken,
+  debugTerm,
   printRest,
   printTerm,
 }

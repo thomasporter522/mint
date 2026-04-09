@@ -138,6 +138,10 @@ function parseAndPrint(code) {
   return Melange__Print.printTerm(Melange__Builder.build(Melange__Parser.parse(Melange__LytrGrammar.grammar, Melange__Lexer.lex(Melange__LytrGrammar.grammar, code))));
 }
 
+function parseAndDebug(code) {
+  return Melange__Print.debugTerm(Melange__Builder.build(Melange__Parser.parse(Melange__LytrGrammar.grammar, Melange__Lexer.lex(Melange__LytrGrammar.grammar, code))));
+}
+
 function lexToTokens(code) {
   const tokens = Melange__Lexer.lex(Melange__LytrGrammar.grammar, code);
   const buf = [];
@@ -203,6 +207,7 @@ export {
   printTerm,
   checkSchemaCode,
   parseAndPrint,
+  parseAndDebug,
   lexToTokens,
 }
 /* Melange__Check Not a pure module */

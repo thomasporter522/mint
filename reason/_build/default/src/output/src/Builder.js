@@ -53,19 +53,39 @@ function isToken(name, tok) {
   }
 }
 
-function collectCommaItems(t) {
-  const match = t.value;
-  if (/* tag */ typeof match === "number" || typeof match === "string" || !(match.TAG === /* Comma */ 8 && !t.meta.parens)) {
-    return {
-      hd: t,
-      tl: /* [] */ 0
-    };
-  } else {
-    return {
-      hd: match._0,
-      tl: collectCommaItems(match._1)
-    };
-  }
+function buildTerms(fs) {
+  return combineTerms(Stdlib__List.concat_map(buildSharded, fs));
+}
+
+function isMatchChain(_cf) {
+  while (true) {
+    const cf = _cf;
+    if (cf.TAG === /* CHead */ 0) {
+      const match = cf._0.value;
+      if (/* tag */ typeof match === "number" || typeof match === "string" || !(match.TAG === /* TNamed */ 1 && match._0 === "match")) {
+        return false;
+      } else {
+        return true;
+      }
+    }
+    const match$1 = cf._2.value;
+    if (/* tag */ typeof match$1 === "number" || typeof match$1 === "string") {
+      return false;
+    }
+    if (match$1.TAG !== /* TNamed */ 1) {
+      return false;
+    }
+    switch (match$1._0) {
+      case "=>" :
+      case "end" :
+      case "with" :
+      case "|" :
+        _cf = cf._0;
+        continue;
+      default:
+        return false;
+    }
+  };
 }
 
 function buildUnform(token) {
@@ -128,83 +148,100 @@ function buildForm(form) {
     }
     exit = 2;
   } else {
-    const match$1 = closed._0;
-    if (match$1.TAG === /* CHead */ 0) {
-      const match$2 = match$1._0.value;
-      if (/* tag */ typeof match$2 === "number" || typeof match$2 === "string" || match$2.TAG !== /* TNamed */ 1) {
-        exit = 2;
-      } else {
-        switch (match$2._0) {
-          case "(" :
-            const match$3 = closed._2.value;
-            if (/* tag */ typeof match$3 === "number" || typeof match$3 === "string") {
-              return Melange__Term.mk(/* BuilderError */ 0);
-            }
-            if (match$3.TAG !== /* TNamed */ 1) {
-              return Melange__Term.mk(/* BuilderError */ 0);
-            }
-            if (match$3._0 === ")") {
-              if (rightUf) {
-                return Melange__Term.mk(/* BuilderError */ 0);
-              }
-              if (right !== undefined) {
-                return Melange__Term.mk(/* BuilderError */ 0);
-              }
-              const t = combineTerms(Stdlib__List.concat_map(buildSharded, closed._1));
-              const init = t.meta;
-              return {
-                value: t.value,
-                meta: {
-                  parens: true,
-                  start: init.start,
-                  end_: init.end_
-                }
-              };
-            }
-            exit = 2;
-            break;
-          case "[" :
-            const match$4 = closed._2.value;
-            if (/* tag */ typeof match$4 === "number" || typeof match$4 === "string") {
-              return Melange__Term.mk(/* BuilderError */ 0);
-            }
-            if (match$4.TAG !== /* TNamed */ 1) {
-              return Melange__Term.mk(/* BuilderError */ 0);
-            }
-            if (match$4._0 === "]") {
-              if (rightUf) {
-                return Melange__Term.mk(/* BuilderError */ 0);
-              }
-              if (right !== undefined) {
-                return Melange__Term.mk(/* BuilderError */ 0);
-              }
-              const inner = combineTerms(Stdlib__List.concat_map(buildSharded, closed._1));
-              return Melange__Term.mk({
-                TAG: /* List */ 12,
-                _0: collectCommaItems(inner)
-              });
-            }
-            exit = 2;
-            break;
-          default:
-            exit = 2;
-        }
-      }
-    } else {
-      exit = 2;
+    const match$1 = closed._2.value;
+    if (/* tag */ typeof match$1 === "number" || typeof match$1 === "string") {
+      return Melange__Term.mk(/* BuilderError */ 0);
     }
+    if (match$1.TAG !== /* TNamed */ 1) {
+      return Melange__Term.mk(/* BuilderError */ 0);
+    }
+    let exit$1 = 0;
+    switch (match$1._0) {
+      case ")" :
+      case "]" :
+        exit$1 = 3;
+        break;
+      default:
+        exit = 2;
+    }
+    if (exit$1 === 3) {
+      if (rightUf) {
+        return Melange__Term.mk(/* BuilderError */ 0);
+      }
+      if (right !== undefined) {
+        return Melange__Term.mk(/* BuilderError */ 0);
+      }
+      const match$2 = collectBracketElements(closed);
+      const elements = Stdlib__List.map(buildTerms, match$2[1]);
+      switch (match$2[0]) {
+        case "(" :
+          let exit$2 = 0;
+          if (elements && !elements.tl) {
+            const single = elements.hd;
+            const init = single.meta;
+            return {
+              value: single.value,
+              meta: {
+                parens: true,
+                start: init.start,
+                end_: init.end_
+              }
+            };
+          }
+          exit$2 = 4;
+          if (exit$2 === 4) {
+            const buildComma = function (elems) {
+              if (!elems) {
+                return Melange__Term.mk({
+                  TAG: /* Hole */ 1,
+                  _0: true
+                });
+              }
+              const single = elems.hd;
+              if (elems.tl) {
+                return Melange__Term.mk({
+                  TAG: /* Comma */ 8,
+                  _0: single,
+                  _1: buildComma(elems.tl)
+                });
+              } else {
+                return single;
+              }
+            };
+            const t = buildComma(elements);
+            const init$1 = t.meta;
+            return {
+              value: t.value,
+              meta: {
+                parens: true,
+                start: init$1.start,
+                end_: init$1.end_
+              }
+            };
+          }
+          break;
+        case "[" :
+          return Melange__Term.mk({
+            TAG: /* List */ 12,
+            _0: elements
+          });
+        default:
+          return Melange__Term.mk(/* BuilderError */ 0);
+      }
+    }
+    
   }
   if (exit === 2) {
     if (closed.TAG === /* CHead */ 0) {
       const tok$1 = closed._0;
-      const match$5 = tok$1.value;
-      if (/* tag */ typeof match$5 === "number" || typeof match$5 === "string") {
+      const match$3 = tok$1.value;
+      if (/* tag */ typeof match$3 === "number" || typeof match$3 === "string") {
         return Melange__Term.mk(/* BuilderError */ 0);
       }
-      if (match$5.TAG !== /* TNamed */ 1) {
+      if (match$3.TAG !== /* TNamed */ 1) {
         return Melange__Term.mk(/* BuilderError */ 0);
       }
-      switch (match$5._0) {
+      switch (match$3._0) {
         case "," :
           return buildInfix((function (l, r) {
             return {
@@ -264,21 +301,21 @@ function buildForm(form) {
           
       }
     } else {
-      const inner$1 = closed._0;
-      let exit$1 = 0;
-      if (inner$1.TAG === /* CHead */ 0) {
-        const match$6 = inner$1._0.value;
-        if (/* tag */ typeof match$6 === "number" || typeof match$6 === "string" || !(match$6.TAG === /* TNamed */ 1 && match$6._0 === "fun")) {
-          exit$1 = 3;
+      const inner = closed._0;
+      let exit$3 = 0;
+      if (inner.TAG === /* CHead */ 0) {
+        const match$4 = inner._0.value;
+        if (/* tag */ typeof match$4 === "number" || typeof match$4 === "string" || !(match$4.TAG === /* TNamed */ 1 && match$4._0 === "fun")) {
+          exit$3 = 3;
         } else {
-          const match$7 = closed._2.value;
-          if (/* tag */ typeof match$7 === "number" || typeof match$7 === "string") {
+          const match$5 = closed._2.value;
+          if (/* tag */ typeof match$5 === "number" || typeof match$5 === "string") {
             return Melange__Term.mk(/* BuilderError */ 0);
           }
-          if (match$7.TAG !== /* TNamed */ 1) {
+          if (match$5.TAG !== /* TNamed */ 1) {
             return Melange__Term.mk(/* BuilderError */ 0);
           }
-          if (match$7._0 === "=>") {
+          if (match$5._0 === "=>") {
             const pat = combineTerms(Stdlib__List.concat_map(buildSharded, closed._1));
             const body = buildChild(rightUf, right);
             return Melange__Term.mk({
@@ -297,21 +334,21 @@ function buildForm(form) {
               _1: body
             });
           }
-          exit$1 = 3;
+          exit$3 = 3;
         }
       } else {
-        exit$1 = 3;
+        exit$3 = 3;
       }
-      if (exit$1 === 3) {
-        const match$8 = closed._2.value;
-        if (/* tag */ typeof match$8 === "number" || typeof match$8 === "string" || !(match$8.TAG === /* TNamed */ 1 && match$8._0 === "end")) {
+      if (exit$3 === 3) {
+        const match$6 = closed._2.value;
+        if (/* tag */ typeof match$6 === "number" || typeof match$6 === "string" || !(match$6.TAG === /* TNamed */ 1 && match$6._0 === "end")) {
           return Melange__Term.mk(/* BuilderError */ 0);
         } else if (isMatchChain(closed)) {
           return buildMatchChain(closed, rightUf, right);
         } else if (rightUf || right !== undefined) {
           return Melange__Term.mk(/* BuilderError */ 0);
         } else {
-          return buildBlocks(inner$1, closed._1, undefined);
+          return buildBlocks(inner, closed._1, undefined);
         }
       }
       
@@ -337,6 +374,147 @@ function buildItems(items) {
       return buildForm(f._0);
     }
   }), items);
+}
+
+function collectBracketElements(cf) {
+  if (cf.TAG === /* CHead */ 0) {
+    const open_ = cf._0.value;
+    if (/* tag */ typeof open_ === "number" || typeof open_ === "string" || open_.TAG !== /* TNamed */ 1) {
+      return [
+        "",
+        /* [] */ 0
+      ];
+    } else {
+      return [
+        open_._0,
+        /* [] */ 0
+      ];
+    }
+  }
+  const match = cf._2.value;
+  if (/* tag */ typeof match === "number" || typeof match === "string") {
+    return [
+      "",
+      /* [] */ 0
+    ];
+  }
+  if (match.TAG !== /* TNamed */ 1) {
+    return [
+      "",
+      /* [] */ 0
+    ];
+  }
+  switch (match._0) {
+    case ")" :
+    case "," :
+    case "]" :
+      break;
+    default:
+      return [
+        "",
+        /* [] */ 0
+      ];
+  }
+  const match$1 = collectBracketElements(cf._0);
+  return [
+    match$1[0],
+    Stdlib.$at(match$1[1], {
+      hd: cf._1,
+      tl: /* [] */ 0
+    })
+  ];
+}
+
+function buildMatchChain(cf, rightUf, right) {
+  const match = collectMatchBranches(cf);
+  const branchTerms = Stdlib__List.map((function (param) {
+    return Melange__Term.mk({
+      TAG: /* FatArrow */ 7,
+      _0: param[0],
+      _1: param[1]
+    });
+  }), match[1]);
+  const branchPipe = branchTerms ? Stdlib__List.fold_left((function (acc, b) {
+      return Melange__Term.mk({
+        TAG: /* Pipe */ 9,
+        _0: acc,
+        _1: b
+      });
+    }), branchTerms.hd, branchTerms.tl) : Melange__Term.mk({
+      TAG: /* Hole */ 1,
+      _0: true
+    });
+  const matchTerm = Melange__Term.mk({
+    TAG: /* Ap */ 11,
+    _0: Melange__Term.mk({
+      TAG: /* Identifier */ 2,
+      _0: "match"
+    }),
+    _1: {
+      hd: match[0],
+      tl: {
+        hd: Melange__Term.mk({
+          TAG: /* Identifier */ 2,
+          _0: "with"
+        }),
+        tl: {
+          hd: branchPipe,
+          tl: /* [] */ 0
+        }
+      }
+    }
+  });
+  const rest = buildChild(rightUf, right);
+  const match$1 = rest.value;
+  if (!/* tag */ (typeof match$1 === "number" || typeof match$1 === "string") && match$1.TAG === /* Hole */ 1 && match$1._0) {
+    return matchTerm;
+  }
+  return Melange__Term.mk({
+    TAG: /* Ap */ 11,
+    _0: matchTerm,
+    _1: {
+      hd: rest,
+      tl: /* [] */ 0
+    }
+  });
+}
+
+function buildInfix(constructor, left, leftUf, tok, rightUf, right) {
+  return localize(Melange__Term.mk(Curry._2(constructor, buildLeftChild(left, leftUf), buildChild(rightUf, right))), tok);
+}
+
+function buildBlocks(_form, _contents, _rest) {
+  while (true) {
+    const rest = _rest;
+    const contents = _contents;
+    const form = _form;
+    const keyword = faceToken(form);
+    if (form.TAG === /* CHead */ 0) {
+      return buildBlock(keyword, contents, rest);
+    }
+    _rest = buildBlock(keyword, contents, rest);
+    _contents = form._1;
+    _form = form._0;
+    continue;
+  };
+}
+
+function buildSharded(u) {
+  if (u.TAG === /* Unform */ 0) {
+    return buildUnform(u._0);
+  } else {
+    return {
+      hd: buildForm(u._0),
+      tl: /* [] */ 0
+    };
+  }
+}
+
+function buildChild(unforms, form) {
+  return combineTerms(form !== undefined ? Stdlib.$at(Stdlib__List.concat_map(buildUnform, unforms), {
+      hd: buildForm(form),
+      tl: /* [] */ 0
+    }) : Stdlib__List.concat_map(buildUnform, unforms));
 }
 
 function collectMatchBranches(_cf) {
@@ -461,129 +639,6 @@ function collectMatchBranches(_cf) {
   };
 }
 
-function buildChild(unforms, form) {
-  return combineTerms(form !== undefined ? Stdlib.$at(Stdlib__List.concat_map(buildUnform, unforms), {
-      hd: buildForm(form),
-      tl: /* [] */ 0
-    }) : Stdlib__List.concat_map(buildUnform, unforms));
-}
-
-function buildInfix(constructor, left, leftUf, tok, rightUf, right) {
-  return localize(Melange__Term.mk(Curry._2(constructor, buildLeftChild(left, leftUf), buildChild(rightUf, right))), tok);
-}
-
-function buildBlocks(_form, _contents, _rest) {
-  while (true) {
-    const rest = _rest;
-    const contents = _contents;
-    const form = _form;
-    const keyword = faceToken(form);
-    if (form.TAG === /* CHead */ 0) {
-      return buildBlock(keyword, contents, rest);
-    }
-    _rest = buildBlock(keyword, contents, rest);
-    _contents = form._1;
-    _form = form._0;
-    continue;
-  };
-}
-
-function buildSharded(u) {
-  if (u.TAG === /* Unform */ 0) {
-    return buildUnform(u._0);
-  } else {
-    return {
-      hd: buildForm(u._0),
-      tl: /* [] */ 0
-    };
-  }
-}
-
-function buildMatchChain(cf, rightUf, right) {
-  const match = collectMatchBranches(cf);
-  const branchTerms = Stdlib__List.map((function (param) {
-    return Melange__Term.mk({
-      TAG: /* FatArrow */ 7,
-      _0: param[0],
-      _1: param[1]
-    });
-  }), match[1]);
-  const branchPipe = branchTerms ? Stdlib__List.fold_left((function (acc, b) {
-      return Melange__Term.mk({
-        TAG: /* Pipe */ 9,
-        _0: acc,
-        _1: b
-      });
-    }), branchTerms.hd, branchTerms.tl) : Melange__Term.mk({
-      TAG: /* Hole */ 1,
-      _0: true
-    });
-  const matchTerm = Melange__Term.mk({
-    TAG: /* Ap */ 11,
-    _0: Melange__Term.mk({
-      TAG: /* Identifier */ 2,
-      _0: "match"
-    }),
-    _1: {
-      hd: match[0],
-      tl: {
-        hd: Melange__Term.mk({
-          TAG: /* Identifier */ 2,
-          _0: "with"
-        }),
-        tl: {
-          hd: branchPipe,
-          tl: /* [] */ 0
-        }
-      }
-    }
-  });
-  const rest = buildChild(rightUf, right);
-  const match$1 = rest.value;
-  if (!/* tag */ (typeof match$1 === "number" || typeof match$1 === "string") && match$1.TAG === /* Hole */ 1 && match$1._0) {
-    return matchTerm;
-  }
-  return Melange__Term.mk({
-    TAG: /* Ap */ 11,
-    _0: matchTerm,
-    _1: {
-      hd: rest,
-      tl: /* [] */ 0
-    }
-  });
-}
-
-function isMatchChain(_cf) {
-  while (true) {
-    const cf = _cf;
-    if (cf.TAG === /* CHead */ 0) {
-      const match = cf._0.value;
-      if (/* tag */ typeof match === "number" || typeof match === "string" || !(match.TAG === /* TNamed */ 1 && match._0 === "match")) {
-        return false;
-      } else {
-        return true;
-      }
-    }
-    const match$1 = cf._2.value;
-    if (/* tag */ typeof match$1 === "number" || typeof match$1 === "string") {
-      return false;
-    }
-    if (match$1.TAG !== /* TNamed */ 1) {
-      return false;
-    }
-    switch (match$1._0) {
-      case "=>" :
-      case "end" :
-      case "with" :
-      case "|" :
-        _cf = cf._0;
-        continue;
-      default:
-        return false;
-    }
-  };
-}
-
 function buildLeftChild(left, leftUf) {
   return combineTerms(left !== undefined ? ({
       hd: buildForm(left),
@@ -646,10 +701,6 @@ function buildBlock(keyword, contents, rest) {
   }
 }
 
-function buildTerms(fs) {
-  return combineTerms(Stdlib__List.concat_map(buildSharded, fs));
-}
-
 function buildUnforms(unforms) {
   return Stdlib__List.concat_map(buildUnform, unforms);
 }
@@ -670,10 +721,10 @@ export {
   buildBlocks,
   buildLeftChild,
   buildInfix,
-  collectCommaItems,
   isMatchChain,
   collectMatchBranches,
   buildMatchChain,
+  collectBracketElements,
   buildForm,
   buildUnform,
   buildUnforms,

@@ -137,6 +137,9 @@ let checkSchemaCode = (code: string): jsMLResult => {
 let parseAndPrint = (code: string): string =>
   Print.printTerm(build(parse(g, lex(g, code))));
 
+let parseAndDebug = (code: string): string =>
+  Print.debugTerm(build(parse(g, lex(g, code))));
+
 /* === Token data for CodeMirror tree === */
 
 [@mel.send] external push: (array(int), int) => int = "push";

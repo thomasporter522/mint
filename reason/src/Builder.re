@@ -82,12 +82,6 @@ and buildLeftChild = (left, leftUf) =>
 and buildInfix = (constructor, left, leftUf, tok, rightUf, right) =>
   localize(mk(constructor(buildLeftChild(left, leftUf), buildChild(rightUf, right))), tok)
 
-/* Collect comma-separated items from a right-nested Comma tree */
-and collectCommaItems = (t: term): list(term) =>
-  switch (t.value) {
-  | Comma(l, r) when !t.meta.parens => [l, ...collectCommaItems(r)]
-  | _ => [t]
-  }
 
 /* Check if a closed form is a match...with...|...=> chain */
 and isMatchChain = (cf: closedForm): bool =>
@@ -144,19 +138,44 @@ and buildMatchChain = (cf: closedForm, rightUf, right): term => {
   };
 }
 
+/* Collect comma-separated elements from a matched bracket form.
+   (a, b, c) = CMatch(CMatch(CMatch(CHead("("), [a], ","), [b], ","), [c], ")")
+   Returns the list of element terms and the opening bracket name. */
+and collectBracketElements = (cf: closedForm): (string, list(list(sharded(openForm)))) =>
+  switch (cf) {
+  | CHead({value: TNamed(open_), _}) => (open_, [])
+  | CMatch(inner, items, {value: TNamed("," | ")" | "]"), _}) =>
+    let (open_, prev) = collectBracketElements(inner);
+    (open_, prev @ [items])
+  | _ => ("", [])
+  }
+
 and buildForm = (form: openForm): term => {
   let {left, leftUf, closed, rightUf, right} = form;
 
   switch (left, leftUf, closed, rightUf, right) {
-  /* parenthesized expression */
-  | (None, [], CMatch(CHead({value: TNamed("("), _}), items, {value: TNamed(")"), _}), [], None) =>
-    let t = buildTerms(items);
-    {...t, meta: {...t.meta, parens: true}};
-
-  /* list literal [...] */
-  | (None, [], CMatch(CHead({value: TNamed("["), _}), items, {value: TNamed("]"), _}), [], None) =>
-    let inner = buildTerms(items);
-    mk(Term.List(collectCommaItems(inner)));
+  /* Bracket forms: (...), [...], and (...,...,...), [...,...,...] */
+  | (None, [], CMatch(_, _, {value: TNamed(")" | "]"), _}), [], None) =>
+    let (open_, elementGroups) = collectBracketElements(closed);
+    let elements = List.map(buildTerms, elementGroups);
+    switch (open_, elements) {
+    /* (expr) — single element in parens */
+    | ("(", [single]) => {...single, meta: {...single.meta, parens: true}}
+    /* (a, b, ...) — tuple/pair */
+    | ("(", elements) =>
+      let rec buildComma = (elems) =>
+        switch (elems) {
+        | [] => mk(Hole(true))
+        | [single] => single
+        | [first, ...rest] => mk(Comma(first, buildComma(rest)))
+        };
+      let t = buildComma(elements);
+      {...t, meta: {...t.meta, parens: true}}
+    /* [a, b, ...] — list */
+    | ("[", items) => mk(Term.List(items))
+    /* fallback */
+    | _ => mk(BuilderError)
+    };
 
   /* atoms */
   | (None, [], CHead({value: TAtom(Hole), _} as tok), [], None) =>

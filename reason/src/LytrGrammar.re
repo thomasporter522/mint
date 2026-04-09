@@ -14,7 +14,12 @@ let grammar = {
     |> addInfix("=",  ~symbol="=",  ~left=0.2, ~right=0.3)
     |> addInfix(":",  ~symbol=":",  ~left=1.0, ~right=1.1)
     |> addInfix("->", ~symbol="->", ~left=2.0, ~right=1.9) /* right-assoc */
-    |> addInfix(",",  ~symbol=",",  ~left=3.0, ~right=3.1)
+    |> addToken(",",  {kind: Symbol(","),  leftPrec: Interior, rightPrec: Interior})
+    |> addMatch(MatchPair("(", ","))
+    |> addMatch(MatchPair(",", ","))
+    |> addMatch(MatchPair(",", ")"))
+    |> addMatch(MatchPair("[", ","))
+    |> addMatch(MatchPair(",", "]"))
     |> addInfix("!=", ~symbol="!=", ~left=4.0, ~right=4.1)
     |> addInfix("==", ~symbol="==", ~left=4.0, ~right=4.1)
     |> addInfix("&&", ~symbol="&&", ~left=5.0, ~right=5.1)
