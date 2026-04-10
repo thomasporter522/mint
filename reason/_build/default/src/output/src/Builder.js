@@ -266,7 +266,16 @@ function buildForm(form) {
               if (match$5.TAG !== /* TNamed */ 1) {
                 return Melange__Term.mk(/* BuilderError */ 0);
               }
-              if (match$5._0 === "=>") {
+              let exit$4 = 0;
+              switch (match$5._0) {
+                case "=>" :
+                case "=>f" :
+                  exit$4 = 4;
+                  break;
+                default:
+                  exit$3 = 3;
+              }
+              if (exit$4 === 4) {
                 const pat = combineTerms(Stdlib__List.concat_map(buildSharded, closed._1));
                 const body = buildChild(rightUf, right);
                 return Melange__Term.mk({
@@ -275,7 +284,6 @@ function buildForm(form) {
                   _1: body
                 });
               }
-              exit$3 = 3;
               break;
             case "let" :
               const match$6 = closed._2.value;
@@ -335,15 +343,15 @@ function buildForm(form) {
 function buildUnform(token) {
   if (token.TAG === /* USecondary */ 0) {
     return /* [] */ 0;
-  } else {
-    return {
-      hd: Melange__Term.mk({
-        TAG: /* Shard */ 0,
-        _0: token._0.value
-      }),
-      tl: /* [] */ 0
-    };
   }
+  const token$1 = token._0;
+  return {
+    hd: localize(Melange__Term.mk({
+      TAG: /* Shard */ 0,
+      _0: token$1.value
+    }), token$1),
+    tl: /* [] */ 0
+  };
 }
 
 function isMatchChain(_cf) {
@@ -693,7 +701,7 @@ function faceToken(form) {
 function buildBlock(keyword, contents, rest) {
   const body = buildItems(contents);
   switch (keyword) {
-    case "construct" :
+    case "by" :
       if (body) {
         return Melange__Term.mk({
           TAG: /* Construct */ 17,
@@ -712,16 +720,38 @@ function buildBlock(keyword, contents, rest) {
           _2: rest
         });
       }
+    case "construct" :
+      if (body) {
+        return Melange__Term.mk({
+          TAG: /* Construct */ 17,
+          _0: body.hd,
+          _1: body.tl,
+          _2: rest
+        });
+      } else if (rest !== undefined) {
+        return rest;
+      } else {
+        return Melange__Term.mk({
+          TAG: /* Construct */ 17,
+          _0: Melange__Term.mk({
+            TAG: /* Hole */ 1,
+            _0: true
+          }),
+          _1: /* [] */ 0,
+          _2: rest
+        });
+      }
+    case "meta" :
+      return Melange__Term.mk({
+        TAG: /* Meta */ 16,
+        _0: body,
+        _1: rest
+      });
     case "postulate" :
       return Melange__Term.mk({
         TAG: /* Postulate */ 15,
         _0: body,
         _1: rest
-      });
-    case "schema" :
-      return Melange__Term.mk({
-        TAG: /* Schema */ 16,
-        _0: rest
       });
     default:
       return Melange__Term.mk(/* BuilderError */ 0);

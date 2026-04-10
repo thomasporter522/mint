@@ -1,0 +1,43 @@
+{
+  "name": "mint-lang",
+  "displayName": "Mint",
+  "description": "Syntax highlighting for the Mint proof assistant",
+  "version": "0.1.0",
+  "engines": { "vscode": "^1.80.0" },
+  "categories": ["Programming Languages"],
+  "contributes": {
+    "languages": [{
+      "id": "mint",
+      "aliases": ["Mint"],
+      "extensions": [".mint"],
+      "configuration": "./language-configuration.json"
+    }],
+    "grammars": [{
+      "language": "mint",
+      "scopeName": "source.mint",
+      "path": "./syntaxes/mint.tmLanguage.json"
+    }],
+    "configurationDefaults": {
+      "editor.tokenColorCustomizations": {
+        "textMateRules": [
+          {
+            "scope": "variable.other.mint",
+            "settings": { "foreground": "#FFFFFF" }
+          },
+          {
+            "scope": "constant.other.hole.mint",
+            "settings": { "foreground": "#E261C0" }
+          },
+          {
+            "scope": "keyword.control.mint",
+            "settings": { "foreground": "#28DCE5" }
+          },
+          {
+            "scope": "keyword.operator.mint",
+            "settings": { "foreground": "#28DCE5" }
+          }
+        ]
+      }
+    }
+  }
+}

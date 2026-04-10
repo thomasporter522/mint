@@ -9,6 +9,9 @@ module Check = Melange__Check
 (** @canonical Melange.Error *)
 module Error = Melange__Error
 
+(** @canonical Melange.Eval *)
+module Eval = Melange__Eval
+
 (** @canonical Melange.Grammar *)
 module Grammar = Melange__Grammar
 
@@ -20,9 +23,6 @@ module LytrGrammar = Melange__LytrGrammar
 
 (** @canonical Melange.Lytr_api *)
 module Lytr_api = Melange__Lytr_api
-
-(** @canonical Melange.MLCheck *)
-module MLCheck = Melange__MLCheck
 
 (** @canonical Melange.MLType *)
 module MLType = Melange__MLType

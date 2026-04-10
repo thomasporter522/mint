@@ -47,8 +47,10 @@ let contextToJsMap = (ctx: context): jsMap => {
   StringMap.iter(
     (k, v) =>
       switch (v) {
-      | Some(ft) => jsMapSet(m, k, displayTerm(k, ft))
-      | None => ()
+      | OL(Some(ft)) => jsMapSet(m, k, displayTerm(k, ft))
+      | ML(ty) => jsMapSet(m, k, displayTerm(k, ([], mlTypeToTerm(ty))))
+      | SchemaBinding(_) | MetaLet(_) => ()
+      | OL(None) => ()
       },
     ctx,
   );
@@ -125,12 +127,11 @@ external makeMLResult:
 
 let checkSchemaCode = (code: string): jsMLResult => {
   let ast = build(parse(g, lex(g, code)));
-  switch (MLCheck.checkSchema(MLCheck.StringMap.empty, ast)) {
-  | Ok () => makeMLResult(~ok=true, ~error="", ~from=0, ~to_=0)
-  | Err(TypeError(msg, from, to_)) =>
-    makeMLResult(~ok=false, ~error=msg, ~from, ~to_)
-  | Err(Unimplemented(msg, from, to_)) =>
-    makeMLResult(~ok=false, ~error="UNIMPLEMENTED: " ++ msg, ~from, ~to_)
+  let info = checkSchema(StringMap.empty, ast);
+  switch (info.errors) {
+  | [] => makeMLResult(~ok=true, ~error="", ~from=0, ~to_=0)
+  | [{message, from, to_, _}, ..._] =>
+    makeMLResult(~ok=false, ~error=message, ~from, ~to_)
   };
 };
 
@@ -139,6 +140,21 @@ let parseAndPrint = (code: string): string =>
 
 let parseAndDebug = (code: string): string =>
   Print.debugTerm(build(parse(g, lex(g, code))));
+
+/* ML evaluation */
+type jsEvalResult;
+
+[@mel.obj]
+external makeEvalResult:
+  (~ok: bool, ~value: string, ~error: string) => jsEvalResult = "";
+
+let evalCode = (code: string): jsEvalResult => {
+  let ast = build(parse(g, lex(g, code)));
+  switch (Eval.evalExpr(Eval.StringMap.empty, ast)) {
+  | Ok(v) => makeEvalResult(~ok=true, ~value=Print.printTerm(Eval.termOf(v)), ~error="")
+  | Err(msg) => makeEvalResult(~ok=false, ~value="", ~error=msg)
+  };
+};
 
 /* === Token data for CodeMirror tree === */
 

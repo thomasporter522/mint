@@ -6,7 +6,7 @@ import * as Stdlib__List from "melange/list.js";
 const blockKeywords = {
   hd: "postulate",
   tl: {
-    hd: "schema",
+    hd: "meta",
     tl: {
       hd: "construct",
       tl: /* [] */ 0
@@ -14,10 +14,28 @@ const blockKeywords = {
   }
 };
 
-const g = Melange__Grammar.addToken("_", {
+const g = Melange__Grammar.addMatch({
+  TAG: /* MatchPair */ 0,
+  _0: "construct",
+  _1: "by"
+}, Melange__Grammar.addToken("by", {
+  kind: {
+    TAG: /* Keyword */ 0,
+    _0: "by"
+  },
+  leftPrec: /* Interior */ 0,
+  rightPrec: /* Interior */ 0
+}, Melange__Grammar.addToken("_", {
   kind: {
     TAG: /* Symbol */ 1,
     _0: "_"
+  },
+  leftPrec: /* Uninterested */ 1,
+  rightPrec: /* Uninterested */ 1
+}, Melange__Grammar.addToken("schema", {
+  kind: {
+    TAG: /* Keyword */ 0,
+    _0: "schema"
   },
   leftPrec: /* Uninterested */ 1,
   rightPrec: /* Uninterested */ 1
@@ -76,9 +94,17 @@ const g = Melange__Grammar.addToken("_", {
   leftPrec: /* Uninterested */ 1,
   rightPrec: /* Interior */ 0
 }, Melange__Grammar.addMatch({
-  TAG: /* MatchPair */ 0,
+  TAG: /* MatchPairMorph */ 1,
   _0: "fun",
-  _1: "=>"
+  _1: "=>",
+  _2: "=>f"
+}, Melange__Grammar.addToken("=>f", {
+  kind: /* AtomIdent */ 1,
+  leftPrec: /* Interior */ 0,
+  rightPrec: {
+    TAG: /* Precedence */ 0,
+    _0: 0.5
+  }
 }, Melange__Grammar.addToken("fun", {
   kind: {
     TAG: /* Keyword */ 0,
@@ -227,7 +253,7 @@ const g = Melange__Grammar.addToken("_", {
   },
   leftPrec: /* Uninterested */ 1,
   rightPrec: /* Interior */ 0
-}, Melange__Grammar.empty)))))))))))))))))))))))))))))))))))))))))))));
+}, Melange__Grammar.empty)))))))))))))))))))))))))))))))))))))))))))))))));
 
 const g$1 = Stdlib__List.fold_left((function (g, kw) {
   const g$1 = Melange__Grammar.addBlock(kw, "end", g);
@@ -240,7 +266,25 @@ const g$1 = Stdlib__List.fold_left((function (g, kw) {
   }), g$1, blockKeywords);
 }), g, blockKeywords);
 
-const grammar = g$1;
+const g$2 = Melange__Grammar.addMatch({
+  TAG: /* MatchBlockBlock */ 3,
+  _0: "by",
+  _1: "construct"
+}, Melange__Grammar.addMatch({
+  TAG: /* MatchBlockBlock */ 3,
+  _0: "by",
+  _1: "meta"
+}, Melange__Grammar.addMatch({
+  TAG: /* MatchBlockBlock */ 3,
+  _0: "by",
+  _1: "postulate"
+}, Melange__Grammar.addMatch({
+  TAG: /* MatchBlockEnd */ 2,
+  _0: "by",
+  _1: "end"
+}, g$1))));
+
+const grammar = g$2;
 
 export {
   blockKeywords,

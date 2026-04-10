@@ -22,27 +22,24 @@ function printType(t) {
       case /* MPair */ 2 :
         return "(" + (printType(t._0) + (", " + (printType(t._1) + ")")));
       case /* MArrow */ 3 :
-        return printTypeAtom(t._0) + (" -> " + printType(t._1));
+        return printTypeAtom(t._0) + (" -> " + printTypeAtom(t._1));
     }
   }
 }
 
 function printTypeAtom(t) {
-  if (!/* tag */ (typeof t === "number" || typeof t === "string")) {
-    if (t.TAG === /* MPair */ 2) {
-      return printType(t);
-    } else {
-      return "(" + (printType(t) + ")");
-    }
+  if (/* tag */ typeof t === "number" || typeof t === "string") {
+    return printType(t);
   }
-  switch (t) {
-    case /* MTerm */ 0 :
-    case /* MSort */ 1 :
-    case /* MString */ 3 :
-      return printType(t);
+  switch (t.TAG) {
+    case /* MList */ 0 :
+    case /* MResult */ 1 :
+    case /* MArrow */ 3 :
+      break;
     default:
-      return "(" + (printType(t) + ")");
+      return printType(t);
   }
+  return "(" + (printType(t) + ")");
 }
 
 function eqType(_a, _b) {

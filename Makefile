@@ -18,6 +18,12 @@ test:
 		if grep -q 'is not exported by' /tmp/vite-build.log; then echo "BUILD ERROR: unresolved imports"; exit 1; fi
 	cd web && npx vitest run
 
+.PHONY: check try debug
+
+check:
+	$(MAKE) reason
+	@node --no-warnings cli/check.mjs $(FILE)
+
 .PHONY: try debug
 try:
 	$(MAKE) reason

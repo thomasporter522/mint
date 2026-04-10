@@ -21,7 +21,7 @@ type cTerm =
   | If(term, term, term)                     /* if cond then thenBr else elseBr */
   | Let(term, term)                          /* let binding in body */
   | Postulate(list(term), option(term))
-  | Schema(option(term))
+  | Meta(list(term), option(term))
   | Construct(term, list(term), option(term))
   | BuilderError
 and term = {

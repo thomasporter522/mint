@@ -75,17 +75,30 @@ function lex(g, s) {
         }
       }, start, start + 1 | 0);
       i.contents = i.contents + 1 | 0;
-    } else if (c === /* '"' */34) {
-      let j = i.contents + 1 | 0;
-      while (j < len && Caml_string.get(s, j) !== /* '"' */34) {
+    } else if (c === /* '-' */45 && (i.contents + 1 | 0) < len && Caml_string.get(s, i.contents + 1 | 0) === /* '-' */45) {
+      let j = i.contents + 2 | 0;
+      while (j < len && Caml_string.get(s, j) !== /* '\n' */10) {
         j = j + 1 | 0;
       };
+      emit({
+        TAG: /* Secondary */ 1,
+        _0: {
+          TAG: /* Whitespace */ 0,
+          _0: Stdlib__String.sub(s, start, j - start | 0)
+        }
+      }, start, j);
+      i.contents = j;
+    } else if (c === /* '"' */34) {
+      let j$1 = i.contents + 1 | 0;
+      while (j$1 < len && Caml_string.get(s, j$1) !== /* '"' */34) {
+        j$1 = j$1 + 1 | 0;
+      };
       let content;
-      if (j < len) {
-        j = j + 1 | 0;
-        content = Stdlib__String.sub(s, i.contents + 1 | 0, (j - i.contents | 0) - 2 | 0);
+      if (j$1 < len) {
+        j$1 = j$1 + 1 | 0;
+        content = Stdlib__String.sub(s, i.contents + 1 | 0, (j$1 - i.contents | 0) - 2 | 0);
       } else {
-        content = Stdlib__String.sub(s, i.contents + 1 | 0, (j - i.contents | 0) - 1 | 0);
+        content = Stdlib__String.sub(s, i.contents + 1 | 0, (j$1 - i.contents | 0) - 1 | 0);
       }
       emit({
         TAG: /* Primary */ 0,
@@ -96,14 +109,14 @@ function lex(g, s) {
             _0: content
           }
         }
-      }, start, j);
-      i.contents = j;
+      }, start, j$1);
+      i.contents = j$1;
     } else if (isLetter(c)) {
-      let j$1 = i.contents;
-      while (j$1 < len && isAlphanum(Caml_string.get(s, j$1))) {
-        j$1 = j$1 + 1 | 0;
+      let j$2 = i.contents;
+      while (j$2 < len && isAlphanum(Caml_string.get(s, j$2))) {
+        j$2 = j$2 + 1 | 0;
       };
-      const word = Stdlib__String.sub(s, i.contents, j$1 - i.contents | 0);
+      const word = Stdlib__String.sub(s, i.contents, j$2 - i.contents | 0);
       const name = Curry._2(Melange__Grammar.StringMap.find_opt, word, g.keywordMap);
       const tok = name !== undefined ? ({
           TAG: /* Primary */ 0,
@@ -121,15 +134,15 @@ function lex(g, s) {
             }
           }
         });
-      emit(tok, i.contents, j$1);
-      i.contents = j$1;
+      emit(tok, i.contents, j$2);
+      i.contents = j$2;
     } else if (c === /* '?' */63) {
       if ((i.contents + 1 | 0) < len && isLetter(Caml_string.get(s, i.contents + 1 | 0))) {
-        let j$2 = i.contents + 1 | 0;
-        while (j$2 < len && isAlphanum(Caml_string.get(s, j$2))) {
-          j$2 = j$2 + 1 | 0;
+        let j$3 = i.contents + 1 | 0;
+        while (j$3 < len && isAlphanum(Caml_string.get(s, j$3))) {
+          j$3 = j$3 + 1 | 0;
         };
-        const name$1 = Stdlib__String.sub(s, i.contents + 1 | 0, (j$2 - i.contents | 0) - 1 | 0);
+        const name$1 = Stdlib__String.sub(s, i.contents + 1 | 0, (j$3 - i.contents | 0) - 1 | 0);
         emit({
           TAG: /* Primary */ 0,
           _0: {
@@ -139,8 +152,8 @@ function lex(g, s) {
               _0: "?" + name$1
             }
           }
-        }, start, j$2);
-        i.contents = j$2;
+        }, start, j$3);
+        i.contents = j$3;
       } else {
         emit({
           TAG: /* Primary */ 0,

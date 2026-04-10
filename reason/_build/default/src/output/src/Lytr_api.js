@@ -3,9 +3,9 @@
 import * as Curry from "melange.js/curry.js";
 import * as Melange__Builder from "./Builder.js";
 import * as Melange__Check from "./Check.js";
+import * as Melange__Eval from "./Eval.js";
 import * as Melange__Lexer from "./Lexer.js";
 import * as Melange__LytrGrammar from "./LytrGrammar.js";
-import * as Melange__MLCheck from "./MLCheck.js";
 import * as Melange__Parser from "./Parser.js";
 import * as Melange__Print from "./Print.js";
 import * as Melange__Term from "./Term.js";
@@ -68,11 +68,25 @@ function displayTerm(name, ft) {
 function contextToJsMap(ctx) {
   const m = new Map();
   Curry._2(Melange__Check.StringMap.iter, (function (k, v) {
-    if (v !== undefined) {
-      m.set(k, displayTerm(k, v));
-      return;
+    switch (v.TAG) {
+      case /* OL */ 0 :
+        const ft = v._0;
+        if (ft !== undefined) {
+          m.set(k, displayTerm(k, ft));
+          return;
+        } else {
+          return;
+        }
+      case /* ML */ 1 :
+        m.set(k, displayTerm(k, [
+          /* [] */ 0,
+          Melange__Check.mlTypeToTerm(v._0)
+        ]));
+        return;
+      case /* SchemaBinding */ 2 :
+      case /* MetaLet */ 3 :
+        return;
     }
-    
   }), ctx);
   return m;
 }
@@ -107,8 +121,9 @@ const printTerm = Melange__Print.printTerm;
 
 function checkSchemaCode(code) {
   const ast = Melange__Builder.build(Melange__Parser.parse(Melange__LytrGrammar.grammar, Melange__Lexer.lex(Melange__LytrGrammar.grammar, code)));
-  const match = Melange__MLCheck.checkSchema(Melange__MLCheck.StringMap.empty, ast);
-  if (match.TAG === /* Ok */ 0) {
+  const info = Melange__Check.checkSchema(Melange__Check.StringMap.empty, ast);
+  const match = info.errors;
+  if (!match) {
     return {
       ok: true,
       error: "",
@@ -116,22 +131,13 @@ function checkSchemaCode(code) {
       to: 0
     };
   }
-  const match$1 = match._0;
-  if (match$1.TAG === /* TypeError */ 0) {
-    return {
-      ok: false,
-      error: match$1._0,
-      from: match$1._1,
-      to: match$1._2
-    };
-  } else {
-    return {
-      ok: false,
-      error: "UNIMPLEMENTED: " + match$1._0,
-      from: match$1._1,
-      to: match$1._2
-    };
-  }
+  const match$1 = match.hd;
+  return {
+    ok: false,
+    error: match$1.message,
+    from: match$1.from,
+    to: match$1.to_
+  };
 }
 
 function parseAndPrint(code) {
@@ -140,6 +146,24 @@ function parseAndPrint(code) {
 
 function parseAndDebug(code) {
   return Melange__Print.debugTerm(Melange__Builder.build(Melange__Parser.parse(Melange__LytrGrammar.grammar, Melange__Lexer.lex(Melange__LytrGrammar.grammar, code))));
+}
+
+function evalCode(code) {
+  const ast = Melange__Builder.build(Melange__Parser.parse(Melange__LytrGrammar.grammar, Melange__Lexer.lex(Melange__LytrGrammar.grammar, code)));
+  const v = Melange__Eval.evalExpr(Melange__Eval.StringMap.empty, ast);
+  if (v.TAG === /* Ok */ 0) {
+    return {
+      ok: true,
+      value: Melange__Print.printTerm(Melange__Eval.termOf(v._0)),
+      error: ""
+    };
+  } else {
+    return {
+      ok: false,
+      value: "",
+      error: v._0
+    };
+  }
 }
 
 function lexToTokens(code) {
@@ -208,6 +232,7 @@ export {
   checkSchemaCode,
   parseAndPrint,
   parseAndDebug,
+  evalCode,
   lexToTokens,
 }
 /* Melange__Check Not a pure module */

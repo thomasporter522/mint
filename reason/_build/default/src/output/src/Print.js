@@ -65,8 +65,8 @@ function debugTerm(t) {
       return "Let(" + (debugTerm(ins._0) + ("," + (debugTerm(ins._1) + ")")));
     case /* Postulate */ 15 :
       return "Post([" + (Stdlib__String.concat(",", Stdlib__List.map(debugTerm, ins._0)) + "])");
-    case /* Schema */ 16 :
-      return "Schema";
+    case /* Meta */ 16 :
+      return "Meta";
     case /* Construct */ 17 :
       return "Construct";
   }
@@ -132,11 +132,11 @@ function printTerm(t) {
           rest !== undefined ? " " + printTerm(rest) : ""
         )));
         break;
-      case /* Schema */ 16 :
-        const rest$1 = token._0;
-        inner = "schema" + (
+      case /* Meta */ 16 :
+        const rest$1 = token._1;
+        inner = "meta " + (Stdlib__String.concat("\n", Stdlib__List.map(printTerm, token._0)) + (" end" + (
           rest$1 !== undefined ? " " + printTerm(rest$1) : ""
-        );
+        )));
         break;
       case /* Construct */ 17 :
         const rest$2 = token._2;

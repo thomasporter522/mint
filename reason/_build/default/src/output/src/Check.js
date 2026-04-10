@@ -2,9 +2,10 @@
 
 import * as Caml from "melange.js/caml.js";
 import * as Caml_obj from "melange.js/caml_obj.js";
-import * as Caml_option from "melange.js/caml_option.js";
 import * as Curry from "melange.js/curry.js";
 import * as Melange__Error from "./Error.js";
+import * as Melange__Eval from "./Eval.js";
+import * as Melange__MLType from "./MLType.js";
 import * as Melange__Print from "./Print.js";
 import * as Melange__Term from "./Term.js";
 import * as Stdlib from "melange/stdlib.js";
@@ -38,7 +39,7 @@ const emptyInfo = {
 
 function mergeBindings(c1, c2) {
   return Curry._3(StringMap.union, (function (_key, _v1, v2) {
-    return Caml_option.some(v2);
+    return v2;
   }), c1, c2);
 }
 
@@ -70,6 +71,8 @@ function withBindings(info, ctx) {
 }
 
 const emptyEnv = StringMap.empty;
+
+const emptyWitnessEnv = StringMap.empty;
 
 function resolve(env, t) {
   if (Curry._1(StringMap.is_empty, env)) {
@@ -209,13 +212,16 @@ function resolve(env, t) {
         },
         meta: t.meta
       };
-    case /* Schema */ 16 :
+    case /* Meta */ 16 :
       return {
         value: {
-          TAG: /* Schema */ 16,
-          _0: Stdlib__Option.map((function (param) {
+          TAG: /* Meta */ 16,
+          _0: Stdlib__List.map((function (param) {
             return resolve(env, param);
-          }), v._0)
+          }), v._0),
+          _1: Stdlib__Option.map((function (param) {
+            return resolve(env, param);
+          }), v._1)
         },
         meta: t.meta
       };
@@ -230,6 +236,181 @@ function resolve(env, t) {
           _2: Stdlib__Option.map((function (param) {
             return resolve(env, param);
           }), v._2)
+        },
+        meta: t.meta
+      };
+    default:
+      return t;
+  }
+}
+
+function resolveWithParams(wenv, t) {
+  if (Curry._1(StringMap.is_empty, wenv)) {
+    return t;
+  }
+  const v = t.value;
+  if (/* tag */ typeof v === "number" || typeof v === "string") {
+    return t;
+  }
+  switch (v.TAG) {
+    case /* Identifier */ 2 :
+      const match = Curry._2(StringMap.find_opt, v._0, wenv);
+      if (match !== undefined && !match[0]) {
+        return match[1];
+      } else {
+        return t;
+      }
+    case /* Asc */ 4 :
+      return {
+        value: {
+          TAG: /* Asc */ 4,
+          _0: resolveWithParams(wenv, v._0),
+          _1: resolveWithParams(wenv, v._1)
+        },
+        meta: t.meta
+      };
+    case /* Arrow */ 5 :
+      return {
+        value: {
+          TAG: /* Arrow */ 5,
+          _0: resolveWithParams(wenv, v._0),
+          _1: resolveWithParams(wenv, v._1)
+        },
+        meta: t.meta
+      };
+    case /* Eq */ 6 :
+      return {
+        value: {
+          TAG: /* Eq */ 6,
+          _0: resolveWithParams(wenv, v._0),
+          _1: resolveWithParams(wenv, v._1)
+        },
+        meta: t.meta
+      };
+    case /* Comma */ 7 :
+      return {
+        value: {
+          TAG: /* Comma */ 7,
+          _0: resolveWithParams(wenv, v._0),
+          _1: resolveWithParams(wenv, v._1)
+        },
+        meta: t.meta
+      };
+    case /* BinOp */ 8 :
+      return {
+        value: {
+          TAG: /* BinOp */ 8,
+          _0: v._0,
+          _1: resolveWithParams(wenv, v._1),
+          _2: resolveWithParams(wenv, v._2)
+        },
+        meta: t.meta
+      };
+    case /* Ap */ 9 :
+      const f = v._0;
+      const v$1 = f.value;
+      if (!/* tag */ (typeof v$1 === "number" || typeof v$1 === "string") && v$1.TAG === /* Identifier */ 2) {
+        const args = v._1;
+        const match$1 = Curry._2(StringMap.find_opt, v$1._0, wenv);
+        let exit = 0;
+        if (match$1 !== undefined) {
+          const paramNames = match$1[0];
+          if (Stdlib__List.length(paramNames) > 0) {
+            const resolvedArgs = Stdlib__List.map((function (param) {
+              return resolveWithParams(wenv, param);
+            }), args);
+            if (Stdlib__List.length(paramNames) !== Stdlib__List.length(resolvedArgs)) {
+              return {
+                value: {
+                  TAG: /* Ap */ 9,
+                  _0: f,
+                  _1: resolvedArgs
+                },
+                meta: t.meta
+              };
+            }
+            const paramEnv = Stdlib__List.fold_left2((function (acc, pname, arg) {
+              return Curry._3(StringMap.add, pname, arg, acc);
+            }), StringMap.empty, paramNames, resolvedArgs);
+            return resolve(paramEnv, match$1[1]);
+          }
+          exit = 2;
+        } else {
+          exit = 2;
+        }
+        if (exit === 2) {
+          return {
+            value: {
+              TAG: /* Ap */ 9,
+              _0: resolveWithParams(wenv, f),
+              _1: Stdlib__List.map((function (param) {
+                return resolveWithParams(wenv, param);
+              }), args)
+            },
+            meta: t.meta
+          };
+        }
+        
+      }
+      return {
+        value: {
+          TAG: /* Ap */ 9,
+          _0: resolveWithParams(wenv, f),
+          _1: Stdlib__List.map((function (param) {
+            return resolveWithParams(wenv, param);
+          }), v._1)
+        },
+        meta: t.meta
+      };
+    case /* List */ 10 :
+      return {
+        value: {
+          TAG: /* List */ 10,
+          _0: Stdlib__List.map((function (param) {
+            return resolveWithParams(wenv, param);
+          }), v._0)
+        },
+        meta: t.meta
+      };
+    case /* Fun */ 11 :
+      return {
+        value: {
+          TAG: /* Fun */ 11,
+          _0: resolveWithParams(wenv, v._0),
+          _1: resolveWithParams(wenv, v._1)
+        },
+        meta: t.meta
+      };
+    case /* Match */ 12 :
+      return {
+        value: {
+          TAG: /* Match */ 12,
+          _0: resolveWithParams(wenv, v._0),
+          _1: Stdlib__List.map((function (param) {
+            return [
+              resolveWithParams(wenv, param[0]),
+              resolveWithParams(wenv, param[1])
+            ];
+          }), v._1)
+        },
+        meta: t.meta
+      };
+    case /* If */ 13 :
+      return {
+        value: {
+          TAG: /* If */ 13,
+          _0: resolveWithParams(wenv, v._0),
+          _1: resolveWithParams(wenv, v._1),
+          _2: resolveWithParams(wenv, v._2)
+        },
+        meta: t.meta
+      };
+    case /* Let */ 14 :
+      return {
+        value: {
+          TAG: /* Let */ 14,
+          _0: resolveWithParams(wenv, v._0),
+          _1: resolveWithParams(wenv, v._1)
         },
         meta: t.meta
       };
@@ -256,46 +437,150 @@ function stringOfMode(param) {
   }
 }
 
-function consistent(t1, t2) {
-  let exit = 0;
-  if (t1 === undefined) {
-    return true;
-  }
-  if (t2 === undefined) {
-    return true;
-  }
-  let tmp = t2.value;
-  if (/* tag */ typeof tmp === "number" || typeof tmp === "string") {
-    exit = 1;
-  } else {
-    if (tmp.TAG === /* Hole */ 1) {
+function termConsistent(_a, _b) {
+  while (true) {
+    const b = _b;
+    const a = _a;
+    const match = a.value;
+    const match$1 = b.value;
+    if (!/* tag */ (typeof match === "number" || typeof match === "string")) {
+      switch (match.TAG) {
+        case /* Hole */ 1 :
+          return true;
+        case /* Identifier */ 2 :
+          if (/* tag */ typeof match$1 === "number" || typeof match$1 === "string") {
+            return false;
+          }
+          switch (match$1.TAG) {
+            case /* Hole */ 1 :
+              break;
+            case /* Identifier */ 2 :
+              return match._0 === match$1._0;
+            default:
+              return false;
+          }
+          break;
+        case /* StringLit */ 3 :
+          if (/* tag */ typeof match$1 === "number" || typeof match$1 === "string") {
+            return false;
+          }
+          switch (match$1.TAG) {
+            case /* Hole */ 1 :
+              break;
+            case /* StringLit */ 3 :
+              return match._0 === match$1._0;
+            default:
+              return false;
+          }
+          break;
+        case /* Asc */ 4 :
+          if (/* tag */ typeof match$1 === "number" || typeof match$1 === "string") {
+            return false;
+          }
+          switch (match$1.TAG) {
+            case /* Hole */ 1 :
+              break;
+            case /* Asc */ 4 :
+              if (!termConsistent(match._0, match$1._0)) {
+                return false;
+              }
+              _b = match$1._1;
+              _a = match._1;
+              continue;
+            default:
+              return false;
+          }
+          break;
+        case /* Arrow */ 5 :
+          if (/* tag */ typeof match$1 === "number" || typeof match$1 === "string") {
+            return false;
+          }
+          switch (match$1.TAG) {
+            case /* Hole */ 1 :
+              break;
+            case /* Arrow */ 5 :
+              if (!termConsistent(match._0, match$1._0)) {
+                return false;
+              }
+              _b = match$1._1;
+              _a = match._1;
+              continue;
+            default:
+              return false;
+          }
+          break;
+        case /* Comma */ 7 :
+          if (/* tag */ typeof match$1 === "number" || typeof match$1 === "string") {
+            return false;
+          }
+          switch (match$1.TAG) {
+            case /* Hole */ 1 :
+              break;
+            case /* Comma */ 7 :
+              if (!termConsistent(match._0, match$1._0)) {
+                return false;
+              }
+              _b = match$1._1;
+              _a = match._1;
+              continue;
+            default:
+              return false;
+          }
+          break;
+        case /* Ap */ 9 :
+          const args1 = match._1;
+          if (/* tag */ typeof match$1 === "number" || typeof match$1 === "string") {
+            return false;
+          }
+          switch (match$1.TAG) {
+            case /* Hole */ 1 :
+              break;
+            case /* Ap */ 9 :
+              const args2 = match$1._1;
+              if (termConsistent(match._0, match$1._0) && Stdlib__List.length(args1) === Stdlib__List.length(args2)) {
+                return Stdlib__List.for_all2(termConsistent, args1, args2);
+              } else {
+                return false;
+              }
+            default:
+              return false;
+          }
+          break;
+        case /* List */ 10 :
+          const a$1 = match._0;
+          if (/* tag */ typeof match$1 === "number" || typeof match$1 === "string") {
+            return false;
+          }
+          switch (match$1.TAG) {
+            case /* Hole */ 1 :
+              break;
+            case /* List */ 10 :
+              const b$1 = match$1._0;
+              if (Stdlib__List.length(a$1) === Stdlib__List.length(b$1)) {
+                return Stdlib__List.for_all2(termConsistent, a$1, b$1);
+              } else {
+                return false;
+              }
+            default:
+              return false;
+          }
+          break;
+      }
+    }
+    if (/* tag */ typeof match$1 === "number" || typeof match$1 === "string" || match$1.TAG !== /* Hole */ 1) {
+      return false;
+    } else {
       return true;
     }
-    exit = 1;
+  };
+}
+
+function consistent(t1, t2) {
+  if (t1 !== undefined && t2 !== undefined) {
+    return termConsistent(t1, t2);
+  } else {
+    return true;
   }
-  if (exit === 1) {
-    let exit$1 = 0;
-    let tmp$1 = t1.value;
-    if (/* tag */ typeof tmp$1 === "number" || typeof tmp$1 === "string") {
-      exit$1 = 2;
-    } else {
-      if (tmp$1.TAG === /* Hole */ 1) {
-        return true;
-      }
-      exit$1 = 2;
-    }
-    if (exit$1 === 2) {
-      const match = t1.value;
-      const match$1 = t2.value;
-      if (/* tag */ typeof match === "number" || typeof match === "string" || !(match.TAG === /* Identifier */ 2 && !(/* tag */ typeof match$1 === "number" || typeof match$1 === "string" || match$1.TAG !== /* Identifier */ 2))) {
-        return false;
-      } else {
-        return match._0 === match$1._0;
-      }
-    }
-    
-  }
-  
 }
 
 const sortTerm = Melange__Term.mk({
@@ -313,11 +598,11 @@ function lookupCtx(ctx, x) {
       ]
     };
   }
-  const ft = Curry._2(StringMap.find_opt, x, ctx);
-  if (ft !== undefined) {
+  const match = Curry._2(StringMap.find_opt, x, ctx);
+  if (match !== undefined && match.TAG === /* OL */ 0) {
     return {
       TAG: /* Found */ 0,
-      _0: Caml_option.valFromOption(ft)
+      _0: match._0
     };
   } else {
     return /* NotFound */ 0;
@@ -331,7 +616,7 @@ function subsume(expected, inferred, from, to_) {
     }) : /* [] */ 0;
   const inferredOut = inferred !== undefined ? inferred[1] : undefined;
   const inconsistency = !consistent(expected, inferredOut) && expected !== undefined && inferredOut !== undefined ? ({
-      hd: Melange__Error.mark("Inconsitency (expected " + (Melange__Print.printTerm(expected) + (", got " + (Melange__Print.printTerm(inferredOut) + ")"))), from, to_),
+      hd: Melange__Error.mark("Inconsistency (expected " + (Melange__Print.printTerm(expected) + (", got " + (Melange__Print.printTerm(inferredOut) + ")"))), from, to_),
       tl: /* [] */ 0
     }) : /* [] */ 0;
   return Stdlib.$at(tooFewArgs, inconsistency);
@@ -354,7 +639,7 @@ function ensureMode(allowed, mode, from, to_) {
   }
   const allowedStr = Stdlib__String.concat(",", allowed);
   return {
-    hd: Melange__Error.mark("Sort error (expected " + (stringOfMode(mode) + (", found " + (allowedStr + ")"))), from, to_),
+    hd: Melange__Error.mark("Sort error (expected " + (allowedStr + (", found " + (stringOfMode(mode) + ")"))), from, to_),
     tl: /* [] */ 0
   };
 }
@@ -384,38 +669,338 @@ function extractParams(args) {
   }), args);
 }
 
-function lineBinding(left, right) {
-  const x = left.value;
-  if (/* tag */ typeof x === "number" || typeof x === "string") {
-    return StringMap.empty;
+function addParens(t) {
+  const match = t.value;
+  if (!/* tag */ (typeof match === "number" || typeof match === "string") && match.TAG === /* Identifier */ 2) {
+    return t;
   }
-  switch (x.TAG) {
+  const init = t.meta;
+  return {
+    value: t.value,
+    meta: {
+      parens: true,
+      start: init.start,
+      end_: init.end_
+    }
+  };
+}
+
+function mlTypeToTerm(t) {
+  if (/* tag */ typeof t === "number" || typeof t === "string") {
+    switch (t) {
+      case /* MTerm */ 0 :
+        return Melange__Term.mk({
+          TAG: /* Identifier */ 2,
+          _0: "Term"
+        });
+      case /* MSort */ 1 :
+        return Melange__Term.mk({
+          TAG: /* Identifier */ 2,
+          _0: "Sort"
+        });
+      case /* MBool */ 2 :
+        return Melange__Term.mk({
+          TAG: /* Identifier */ 2,
+          _0: "Bool"
+        });
+      case /* MString */ 3 :
+        return Melange__Term.mk({
+          TAG: /* Identifier */ 2,
+          _0: "String"
+        });
+    }
+  } else {
+    switch (t.TAG) {
+      case /* MList */ 0 :
+        return Melange__Term.mk({
+          TAG: /* Ap */ 9,
+          _0: Melange__Term.mk({
+            TAG: /* Identifier */ 2,
+            _0: "List"
+          }),
+          _1: {
+            hd: addParens(mlTypeToTerm(t._0)),
+            tl: /* [] */ 0
+          }
+        });
+      case /* MResult */ 1 :
+        return Melange__Term.mk({
+          TAG: /* Ap */ 9,
+          _0: Melange__Term.mk({
+            TAG: /* Identifier */ 2,
+            _0: "Result"
+          }),
+          _1: {
+            hd: addParens(mlTypeToTerm(t._0)),
+            tl: /* [] */ 0
+          }
+        });
+      case /* MPair */ 2 :
+        const t$1 = Melange__Term.mk({
+          TAG: /* Comma */ 7,
+          _0: mlTypeToTerm(t._0),
+          _1: mlTypeToTerm(t._1)
+        });
+        const init = t$1.meta;
+        return {
+          value: t$1.value,
+          meta: {
+            parens: true,
+            start: init.start,
+            end_: init.end_
+          }
+        };
+      case /* MArrow */ 3 :
+        return Melange__Term.mk({
+          TAG: /* Arrow */ 5,
+          _0: addParens(mlTypeToTerm(t._0)),
+          _1: addParens(mlTypeToTerm(t._1))
+        });
+    }
+  }
+}
+
+function mlInferred(ty) {
+  return [
+    /* [] */ 0,
+    mlTypeToTerm(ty)
+  ];
+}
+
+function mlSubsume(expected, got, from, to_) {
+  if (Melange__MLType.eqType(expected, got)) {
+    return /* [] */ 0;
+  } else {
+    return {
+      hd: Melange__Error.mark("Expected " + (Melange__MLType.printType(expected) + (", got " + Melange__MLType.printType(got))), from, to_),
+      tl: /* [] */ 0
+    };
+  }
+}
+
+function termToMlType(t) {
+  const match = t.value;
+  if (/* tag */ typeof match === "number" || typeof match === "string") {
+    return;
+  }
+  switch (match.TAG) {
     case /* Identifier */ 2 :
-      return Curry._2(StringMap.singleton, x._0, [
-        /* [] */ 0,
-        right
-      ]);
-    case /* Ap */ 9 :
-      const x$1 = x._0.value;
-      if (/* tag */ typeof x$1 === "number" || typeof x$1 === "string" || x$1.TAG !== /* Identifier */ 2) {
-        return StringMap.empty;
+      switch (match._0) {
+        case "Bool" :
+          return /* MBool */ 2;
+        case "Signature" :
+          return {
+            TAG: /* MPair */ 2,
+            _0: /* MTerm */ 0,
+            _1: {
+              TAG: /* MPair */ 2,
+              _0: {
+                TAG: /* MList */ 0,
+                _0: {
+                  TAG: /* MPair */ 2,
+                  _0: /* MString */ 3,
+                  _1: /* MTerm */ 0
+                }
+              },
+              _1: /* MTerm */ 0
+            }
+          };
+        case "Sort" :
+          return /* MSort */ 1;
+        case "String" :
+          return /* MString */ 3;
+        case "Term" :
+          return /* MTerm */ 0;
+        default:
+          return;
+      }
+    case /* Arrow */ 5 :
+      const match$1 = termToMlType(match._0);
+      const match$2 = termToMlType(match._1);
+      if (match$1 !== undefined && match$2 !== undefined) {
+        return {
+          TAG: /* MArrow */ 3,
+          _0: match$1,
+          _1: match$2
+        };
       } else {
-        return Curry._2(StringMap.singleton, x$1._0, [
-          extractParams(x._1),
-          right
-        ]);
+        return;
+      }
+    case /* Comma */ 7 :
+      const match$3 = termToMlType(match._0);
+      const match$4 = termToMlType(match._1);
+      if (match$3 !== undefined && match$4 !== undefined) {
+        return {
+          TAG: /* MPair */ 2,
+          _0: match$3,
+          _1: match$4
+        };
+      } else {
+        return;
+      }
+    case /* Ap */ 9 :
+      const match$5 = match._0.value;
+      if (/* tag */ typeof match$5 === "number" || typeof match$5 === "string") {
+        return;
+      }
+      if (match$5.TAG !== /* Identifier */ 2) {
+        return;
+      }
+      switch (match$5._0) {
+        case "List" :
+          const match$6 = match._1;
+          if (!match$6) {
+            return;
+          }
+          if (match$6.tl) {
+            return;
+          }
+          const t$1 = termToMlType(match$6.hd);
+          if (t$1 !== undefined) {
+            return {
+              TAG: /* MList */ 0,
+              _0: t$1
+            };
+          } else {
+            return;
+          }
+        case "Result" :
+          const match$7 = match._1;
+          if (!match$7) {
+            return;
+          }
+          if (match$7.tl) {
+            return;
+          }
+          const t$2 = termToMlType(match$7.hd);
+          if (t$2 !== undefined) {
+            return {
+              TAG: /* MResult */ 1,
+              _0: t$2
+            };
+          } else {
+            return;
+          }
+        default:
+          return;
       }
     default:
-      return StringMap.empty;
+      return;
   }
+}
+
+function getInferredMlType(info) {
+  const match = info.inferred;
+  if (match === undefined) {
+    return /* MTerm */ 0;
+  }
+  if (match[0]) {
+    return /* MTerm */ 0;
+  }
+  const ty = termToMlType(match[1]);
+  if (ty !== undefined) {
+    return ty;
+  } else {
+    return /* MTerm */ 0;
+  }
+}
+
+function hasOLBindings(ctx) {
+  return Curry._2(StringMap.exists, (function (param, v) {
+    if (v.TAG === /* OL */ 0) {
+      return true;
+    } else {
+      return false;
+    }
+  }), ctx);
+}
+
+const signatureType = {
+  TAG: /* MPair */ 2,
+  _0: /* MTerm */ 0,
+  _1: {
+    TAG: /* MPair */ 2,
+    _0: {
+      TAG: /* MList */ 0,
+      _0: {
+        TAG: /* MPair */ 2,
+        _0: /* MString */ 3,
+        _1: /* MTerm */ 0
+      }
+    },
+    _1: /* MTerm */ 0
+  }
+};
+
+const schemaType_0 = {
+  TAG: /* MList */ 0,
+  _0: signatureType
+};
+
+const schemaType_1 = {
+  TAG: /* MResult */ 1,
+  _0: {
+    TAG: /* MList */ 0,
+    _0: /* MTerm */ 0
+  }
+};
+
+const schemaType = {
+  TAG: /* MArrow */ 3,
+  _0: schemaType_0,
+  _1: schemaType_1
+};
+
+function checkDecls(ctx, body) {
+  return Stdlib__List.fold_left((function (param) {
+    const accCtx = param[1];
+    const accInfo = param[0];
+    return function (line) {
+      const lineInfo = checkTerm(accCtx, /* Line */ 1, line);
+      const newCtx = mergeBindings(accCtx, lineInfo.bindings);
+      return [
+        mergeInfos(accInfo, lineInfo),
+        newCtx
+      ];
+    };
+  }), [
+    emptyInfo,
+    ctx
+  ], body);
 }
 
 function checkTerm(ctx, mode, t) {
   const v = t.value;
   if (/* tag */ typeof v === "number" || typeof v === "string") {
-    return emptyInfo;
+    if (t.meta.start >= 0) {
+      return {
+        errors: {
+          hd: Melange__Error.mark("Syntax error", t.meta.start, t.meta.end_),
+          tl: /* [] */ 0
+        },
+        holes: /* [] */ 0,
+        inferred: undefined,
+        bindings: StringMap.empty
+      };
+    } else {
+      return emptyInfo;
+    }
   }
   switch (v.TAG) {
+    case /* Shard */ 0 :
+      if (t.meta.start >= 0) {
+        return {
+          errors: {
+            hd: Melange__Error.mark("Unexpected token", t.meta.start, t.meta.end_),
+            tl: /* [] */ 0
+          },
+          holes: /* [] */ 0,
+          inferred: undefined,
+          bindings: StringMap.empty
+        };
+      } else {
+        return emptyInfo;
+      }
     case /* Hole */ 1 :
       if (/* tag */ typeof mode === "number" || typeof mode === "string") {
         return {
@@ -507,25 +1092,23 @@ function checkTerm(ctx, mode, t) {
             } else {
               switch (x.TAG) {
                 case /* Identifier */ 2 :
-                  const match = right.value;
-                  let ty;
-                  if (/* tag */ typeof match === "number" || typeof match === "string" || match.TAG !== /* Ap */ 9) {
-                    ty = right;
-                  } else {
-                    const match$1 = rightInfo.inferred;
-                    ty = match$1 !== undefined ? match$1[1] : right;
-                  }
-                  bindings = Curry._2(StringMap.singleton, x._0, [
-                    /* [] */ 0,
-                    ty
-                  ]);
+                  bindings = Curry._2(StringMap.singleton, x._0, {
+                    TAG: /* OL */ 0,
+                    _0: [
+                      /* [] */ 0,
+                      right
+                    ]
+                  });
                   break;
                 case /* Ap */ 9 :
                   const x$1 = x._0.value;
-                  bindings = /* tag */ typeof x$1 === "number" || typeof x$1 === "string" || x$1.TAG !== /* Identifier */ 2 ? StringMap.empty : Curry._2(StringMap.singleton, x$1._0, [
-                      extractParams(x._1),
-                      right
-                    ]);
+                  bindings = /* tag */ typeof x$1 === "number" || typeof x$1 === "string" || x$1.TAG !== /* Identifier */ 2 ? StringMap.empty : Curry._2(StringMap.singleton, x$1._0, {
+                      TAG: /* OL */ 0,
+                      _0: [
+                        extractParams(x._1),
+                        right
+                      ]
+                    });
                   break;
                 default:
                   bindings = StringMap.empty;
@@ -551,10 +1134,13 @@ function checkTerm(ctx, mode, t) {
             if (/* tag */ typeof x$2 === "number" || typeof x$2 === "string" || x$2.TAG !== /* Identifier */ 2) {
               return info$1;
             } else {
-              return withBindings(info$1, Curry._2(StringMap.singleton, x$2._0, [
-                /* [] */ 0,
-                right
-              ]));
+              return withBindings(info$1, Curry._2(StringMap.singleton, x$2._0, {
+                TAG: /* OL */ 0,
+                _0: [
+                  /* [] */ 0,
+                  right
+                ]
+              }));
             }
         }
       }
@@ -633,14 +1219,14 @@ function checkTerm(ctx, mode, t) {
           TAG: /* Expression */ 0,
           _0: undefined
         }, f);
-        const match$2 = funInfo$2.inferred;
-        if (match$2 === undefined) {
+        const match = funInfo$2.inferred;
+        if (match === undefined) {
           return funInfo$2;
         }
-        const params = match$2[0];
+        const params = match[0];
         const arityErrors = checkArity(Stdlib__List.length(params), Stdlib__List.length(args), f.meta.start, f.meta.end_);
         const minLen = Caml.caml_int_min(Stdlib__List.length(params), Stdlib__List.length(args));
-        const match$3 = Stdlib__List.fold_left((function (param) {
+        const match$1 = Stdlib__List.fold_left((function (param) {
           const env = param[1];
           const accInfos = param[0];
           return function (i) {
@@ -666,8 +1252,8 @@ function checkTerm(ctx, mode, t) {
         ], Stdlib__List.init(minLen, (function (i) {
           return i;
         })));
-        const info$3 = Stdlib__List.fold_left(mergeInfos, funInfo$2, match$3[0]);
-        const retType = resolve(match$3[1], match$2[1]);
+        const info$3 = Stdlib__List.fold_left(mergeInfos, funInfo$2, match$1[0]);
+        const retType = resolve(match$1[1], match[1]);
         const inferred$2 = Stdlib__List.length(params) === Stdlib__List.length(args) ? [
             /* [] */ 0,
             retType
@@ -685,31 +1271,929 @@ function checkTerm(ctx, mode, t) {
       }
     case /* Postulate */ 15 :
       const rest = v._1;
-      const match$4 = Stdlib__List.fold_left((function (param) {
-        const accCtx = param[1];
-        const accInfo = param[0];
-        return function (line) {
-          const lineInfo = checkTerm(accCtx, /* Line */ 1, line);
-          const newCtx = mergeBindings(accCtx, lineInfo.bindings);
-          return [
-            mergeInfos(accInfo, lineInfo),
-            newCtx
-          ];
-        };
-      }), [
-        emptyInfo,
-        ctx
-      ], v._0);
-      const finalCtx = match$4[1];
-      const info$4 = withBindings(match$4[0], finalCtx);
+      const match$2 = checkDecls(ctx, v._0);
+      const finalCtx = match$2[1];
+      const info$4 = withBindings(match$2[0], finalCtx);
       const info$5 = rest !== undefined ? mergeInfos(info$4, checkTerm(finalCtx, /* Program */ 0, rest)) : info$4;
       return withErrors(info$5, ensureMode({
+        hd: "program",
+        tl: /* [] */ 0
+      }, mode, t.meta.start, t.meta.end_));
+    case /* Meta */ 16 :
+      const rest$1 = v._1;
+      const processMeta = function (_accInfo, _accCtx, _items) {
+        while (true) {
+          const items = _items;
+          const accCtx = _accCtx;
+          const accInfo = _accInfo;
+          if (!items) {
+            return [
+              accInfo,
+              accCtx
+            ];
+          }
+          const item = items.hd;
+          const match = item.value;
+          if (!/* tag */ (typeof match === "number" || typeof match === "string")) {
+            switch (match.TAG) {
+              case /* Identifier */ 2 :
+                if (match._0 === "schema") {
+                  const match$1 = items.tl;
+                  if (match$1) {
+                    const match$2 = match$1.hd.value;
+                    if (!/* tag */ (typeof match$2 === "number" || typeof match$2 === "string") && match$2.TAG === /* Eq */ 6) {
+                      const rhs = match$2._1;
+                      const s = match$2._0.value;
+                      let match$3;
+                      if (/* tag */ typeof s === "number" || typeof s === "string") {
+                        match$3 = [
+                          undefined,
+                          /* [] */ 0
+                        ];
+                      } else {
+                        switch (s.TAG) {
+                          case /* Identifier */ 2 :
+                            match$3 = [
+                              s._0,
+                              /* [] */ 0
+                            ];
+                            break;
+                          case /* Asc */ 4 :
+                            const s$1 = s._0.value;
+                            if (/* tag */ typeof s$1 === "number" || typeof s$1 === "string" || s$1.TAG !== /* Identifier */ 2) {
+                              match$3 = [
+                                undefined,
+                                /* [] */ 0
+                              ];
+                            } else {
+                              const typeAnnot = s._1;
+                              const annotTy = termToMlType(typeAnnot);
+                              const errs = annotTy !== undefined ? (
+                                  Melange__MLType.eqType(annotTy, schemaType) ? /* [] */ 0 : ({
+                                      hd: Melange__Error.mark("Schema type mismatch: annotated " + (Melange__MLType.printType(annotTy) + (", expected " + Melange__MLType.printType(schemaType))), typeAnnot.meta.start, typeAnnot.meta.end_),
+                                      tl: /* [] */ 0
+                                    })
+                                ) : ({
+                                  hd: Melange__Error.mark("Invalid type annotation", typeAnnot.meta.start, typeAnnot.meta.end_),
+                                  tl: /* [] */ 0
+                                });
+                              match$3 = [
+                                s$1._0,
+                                errs
+                              ];
+                            }
+                            break;
+                          default:
+                            match$3 = [
+                              undefined,
+                              /* [] */ 0
+                            ];
+                        }
+                      }
+                      const n = match$3[0];
+                      const schemaInfo = checkExpr(accCtx, schemaType, rhs);
+                      const info = withErrors(mergeInfos(accInfo, schemaInfo), match$3[1]);
+                      const newCtx = n !== undefined ? Curry._3(StringMap.add, n, {
+                          TAG: /* SchemaBinding */ 2,
+                          _0: rhs
+                        }, accCtx) : accCtx;
+                      _items = match$1.tl;
+                      _accCtx = newCtx;
+                      _accInfo = info;
+                      continue;
+                    }
+                    
+                  }
+                  
+                }
+                break;
+              case /* Eq */ 6 :
+                const n$1 = match._0.value;
+                if (!/* tag */ (typeof n$1 === "number" || typeof n$1 === "string") && n$1.TAG === /* Identifier */ 2) {
+                  const rhs$1 = match._1;
+                  const bodyInfo = inferExpr(accCtx, rhs$1);
+                  const newCtx$1 = Curry._3(StringMap.add, n$1._0, {
+                    TAG: /* MetaLet */ 3,
+                    _0: rhs$1
+                  }, accCtx);
+                  _items = items.tl;
+                  _accCtx = newCtx$1;
+                  _accInfo = mergeInfos(accInfo, bodyInfo);
+                  continue;
+                }
+                break;
+            }
+          }
+          const itemInfo = inferExpr(accCtx, item);
+          _items = items.tl;
+          _accInfo = mergeInfos(accInfo, itemInfo);
+          continue;
+        };
+      };
+      const match$3 = processMeta(emptyInfo, ctx, v._0);
+      const metaInfo = match$3[0];
+      const info$6 = rest$1 !== undefined ? mergeInfos(metaInfo, checkTerm(match$3[1], /* Program */ 0, rest$1)) : metaInfo;
+      return withErrors(info$6, ensureMode({
+        hd: "program",
+        tl: /* [] */ 0
+      }, mode, t.meta.start, t.meta.end_));
+    case /* Construct */ 17 :
+      const rest$2 = v._2;
+      const body = v._1;
+      const by = v._0;
+      const match$4 = checkDecls(ctx, body);
+      const finalCtx$1 = match$4[1];
+      const schemaName = by.value;
+      let witnessErrors;
+      if (/* tag */ typeof schemaName === "number" || typeof schemaName === "string" || schemaName.TAG !== /* Identifier */ 2) {
+        witnessErrors = /* [] */ 0;
+      } else {
+        const schemaName$1 = schemaName._0;
+        const match$5 = Curry._2(StringMap.find_opt, schemaName$1, ctx);
+        if (match$5 !== undefined) {
+          if (match$5.TAG === /* SchemaBinding */ 2) {
+            const evalEnv = Curry._3(StringMap.fold, (function (name, binding, acc) {
+              if (binding.TAG !== /* MetaLet */ 3) {
+                return acc;
+              }
+              const v = Melange__Eval.evalExpr(acc, binding._0);
+              if (v.TAG === /* Ok */ 0) {
+                return Curry._3(Melange__Eval.StringMap.add, name, v._0, acc);
+              } else {
+                return acc;
+              }
+            }), ctx, Melange__Eval.StringMap.empty);
+            const schemaVal = Melange__Eval.evalExpr(evalEnv, match$5._0);
+            if (schemaVal.TAG === /* Ok */ 0) {
+              const witnesses = Melange__Eval.runSchema(schemaVal._0, body);
+              if (witnesses.TAG === /* Witnesses */ 0) {
+                const witnesses$1 = witnesses._0;
+                if (Stdlib__List.length(witnesses$1) !== Stdlib__List.length(body)) {
+                  witnessErrors = {
+                    hd: Melange__Error.mark("Schema produced " + (String(Stdlib__List.length(witnesses$1)) + (" witnesses but construct has " + (String(Stdlib__List.length(body)) + " declarations"))), by.meta.start, by.meta.end_),
+                    tl: /* [] */ 0
+                  };
+                } else {
+                  const match$6 = Stdlib__List.fold_left2((function (param) {
+                    const substEnv = param[1];
+                    const accErrs = param[0];
+                    return function (decl, witness) {
+                      const match = decl.value;
+                      if (/* tag */ typeof match === "number" || typeof match === "string") {
+                        return [
+                          accErrs,
+                          substEnv
+                        ];
+                      }
+                      if (match.TAG !== /* Asc */ 4) {
+                        return [
+                          accErrs,
+                          substEnv
+                        ];
+                      }
+                      const lhs = match._0;
+                      const n = lhs.value;
+                      let declName;
+                      if (/* tag */ typeof n === "number" || typeof n === "string") {
+                        declName = undefined;
+                      } else {
+                        switch (n.TAG) {
+                          case /* Identifier */ 2 :
+                            declName = n._0;
+                            break;
+                          case /* Ap */ 9 :
+                            const n$1 = n._0.value;
+                            declName = /* tag */ typeof n$1 === "number" || typeof n$1 === "string" || n$1.TAG !== /* Identifier */ 2 ? undefined : n$1._0;
+                            break;
+                          default:
+                            declName = undefined;
+                        }
+                      }
+                      const match$1 = lhs.value;
+                      let witnessCtx;
+                      witnessCtx = /* tag */ typeof match$1 === "number" || typeof match$1 === "string" || match$1.TAG !== /* Ap */ 9 ? ctx : Stdlib__List.fold_left((function (acc, arg) {
+                          const match = arg.value;
+                          if (/* tag */ typeof match === "number" || typeof match === "string") {
+                            return acc;
+                          }
+                          if (match.TAG !== /* Asc */ 4) {
+                            return acc;
+                          }
+                          const pname = match._0.value;
+                          if (/* tag */ typeof pname === "number" || typeof pname === "string" || pname.TAG !== /* Identifier */ 2) {
+                            return acc;
+                          } else {
+                            return Curry._3(StringMap.add, pname._0, {
+                              TAG: /* OL */ 0,
+                              _0: [
+                                /* [] */ 0,
+                                match._1
+                              ]
+                            }, acc);
+                          }
+                        }), ctx, match$1._1);
+                      const expectedType = resolveWithParams(substEnv, match._1);
+                      const witnessInfo = checkTerm(witnessCtx, {
+                        TAG: /* Expression */ 0,
+                        _0: expectedType
+                      }, witness);
+                      const match$2 = lhs.value;
+                      let paramNames;
+                      paramNames = /* tag */ typeof match$2 === "number" || typeof match$2 === "string" || match$2.TAG !== /* Ap */ 9 ? /* [] */ 0 : Stdlib__List.map((function (arg) {
+                          const match = arg.value;
+                          if (/* tag */ typeof match === "number" || typeof match === "string") {
+                            return "_";
+                          }
+                          if (match.TAG !== /* Asc */ 4) {
+                            return "_";
+                          }
+                          const n = match._0.value;
+                          if (/* tag */ typeof n === "number" || typeof n === "string" || n.TAG !== /* Identifier */ 2) {
+                            return "_";
+                          } else {
+                            return n._0;
+                          }
+                        }), match$2._1);
+                      const newSubstEnv = declName !== undefined ? Curry._3(StringMap.add, declName, [
+                          paramNames,
+                          witness
+                        ], substEnv) : substEnv;
+                      return [
+                        Stdlib.$at(accErrs, witnessInfo.errors),
+                        newSubstEnv
+                      ];
+                    };
+                  }), [
+                    /* [] */ 0,
+                    emptyWitnessEnv
+                  ], body, witnesses$1);
+                  const witnessErrs = match$6[0];
+                  if (Stdlib__List.length(witnessErrs) > 0) {
+                    const details = Stdlib__String.concat("; ", Stdlib__List.map((function (e) {
+                      return e.message;
+                    }), witnessErrs));
+                    witnessErrors = {
+                      hd: Melange__Error.mark(schemaName$1 + (" matched but generated ill-typed witnesses: " + details), by.meta.start, by.meta.end_),
+                      tl: /* [] */ 0
+                    };
+                  } else {
+                    witnessErrors = /* [] */ 0;
+                  }
+                }
+              } else {
+                witnessErrors = {
+                  hd: Melange__Error.mark("Schema error: " + witnesses._0, by.meta.start, by.meta.end_),
+                  tl: /* [] */ 0
+                };
+              }
+            } else {
+              witnessErrors = {
+                hd: Melange__Error.mark("Schema evaluation failed: " + schemaVal._0, by.meta.start, by.meta.end_),
+                tl: /* [] */ 0
+              };
+            }
+          } else {
+            witnessErrors = {
+              hd: Melange__Error.mark(schemaName$1 + " is not a schema", by.meta.start, by.meta.end_),
+              tl: /* [] */ 0
+            };
+          }
+        } else {
+          witnessErrors = /* [] */ 0;
+        }
+      }
+      const info$7 = withErrors(match$4[0], witnessErrors);
+      const info$8 = withBindings(info$7, finalCtx$1);
+      const info$9 = rest$2 !== undefined ? mergeInfos(info$8, checkTerm(finalCtx$1, /* Program */ 0, rest$2)) : info$8;
+      return withErrors(info$9, ensureMode({
         hd: "program",
         tl: /* [] */ 0
       }, mode, t.meta.start, t.meta.end_));
     default:
       return emptyInfo;
   }
+}
+
+function checkPat(ctx, ty, t) {
+  const name = t.value;
+  if (!/* tag */ (typeof name === "number" || typeof name === "string")) {
+    switch (name.TAG) {
+      case /* Hole */ 1 :
+        return [
+          ctx,
+          emptyInfo
+        ];
+      case /* Identifier */ 2 :
+        const name$1 = name._0;
+        if (name$1 === "_") {
+          return [
+            ctx,
+            emptyInfo
+          ];
+        }
+        const match = Curry._2(StringMap.find_opt, name$1, ctx);
+        let exit = 0;
+        if (match !== undefined) {
+          if (match.TAG === /* ML */ 1) {
+            const errs = mlSubsume(match._0, ty, t.meta.start, t.meta.end_);
+            return [
+              ctx,
+              withErrors(emptyInfo, errs)
+            ];
+          }
+          exit = 2;
+        } else {
+          exit = 2;
+        }
+        if (exit === 2) {
+          return [
+            Curry._3(StringMap.add, name$1, {
+              TAG: /* ML */ 1,
+              _0: ty
+            }, ctx),
+            emptyInfo
+          ];
+        }
+        break;
+      case /* StringLit */ 3 :
+        const errs$1 = mlSubsume(/* MString */ 3, ty, t.meta.start, t.meta.end_);
+        return [
+          ctx,
+          withErrors(emptyInfo, errs$1)
+        ];
+      case /* Comma */ 7 :
+        let exit$1 = 0;
+        if (/* tag */ typeof ty === "number" || typeof ty === "string") {
+          exit$1 = 2;
+        } else {
+          if (ty.TAG === /* MPair */ 2) {
+            const match$1 = checkPat(ctx, ty._0, name._0);
+            const match$2 = checkPat(match$1[0], ty._1, name._1);
+            return [
+              match$2[0],
+              mergeInfos(match$1[1], match$2[1])
+            ];
+          }
+          exit$1 = 2;
+        }
+        if (exit$1 === 2) {
+          return [
+            ctx,
+            withErrors(emptyInfo, {
+              hd: Melange__Error.mark("Pair pattern but expected " + Melange__MLType.printType(ty), t.meta.start, t.meta.end_),
+              tl: /* [] */ 0
+            })
+          ];
+        }
+        break;
+      case /* Ap */ 9 :
+        if (Melange__MLType.eqType(ty, /* MTerm */ 0)) {
+          return checkOLPat(ctx, t);
+        }
+        break;
+      case /* List */ 10 :
+        let exit$2 = 0;
+        if (/* tag */ typeof ty === "number" || typeof ty === "string") {
+          exit$2 = 2;
+        } else {
+          if (ty.TAG === /* MList */ 0) {
+            const elemTy = ty._0;
+            return Stdlib__List.fold_left((function (param) {
+              const accInfo = param[1];
+              const accCtx = param[0];
+              return function (item) {
+                const match = checkPat(accCtx, elemTy, item);
+                return [
+                  match[0],
+                  mergeInfos(accInfo, match[1])
+                ];
+              };
+            }), [
+              ctx,
+              emptyInfo
+            ], name._0);
+          }
+          exit$2 = 2;
+        }
+        if (exit$2 === 2) {
+          return [
+            ctx,
+            withErrors(emptyInfo, {
+              hd: Melange__Error.mark("List pattern but expected " + Melange__MLType.printType(ty), t.meta.start, t.meta.end_),
+              tl: /* [] */ 0
+            })
+          ];
+        }
+        break;
+    }
+  }
+  return [
+    ctx,
+    withErrors(emptyInfo, {
+      hd: Melange__Error.mark("Invalid pattern", t.meta.start, t.meta.end_),
+      tl: /* [] */ 0
+    })
+  ];
+}
+
+function checkOLPat(ctx, t) {
+  const name = t.value;
+  if (/* tag */ typeof name === "number" || typeof name === "string") {
+    return [
+      ctx,
+      emptyInfo
+    ];
+  }
+  switch (name.TAG) {
+    case /* Identifier */ 2 :
+      const name$1 = name._0;
+      const match = Curry._2(StringMap.find_opt, name$1, ctx);
+      if (match !== undefined || name$1 === "Sort" || !hasOLBindings(ctx)) {
+        return [
+          ctx,
+          emptyInfo
+        ];
+      } else {
+        return [
+          Curry._3(StringMap.add, name$1, {
+            TAG: /* ML */ 1,
+            _0: /* MTerm */ 0
+          }, ctx),
+          emptyInfo
+        ];
+      }
+    case /* Ap */ 9 :
+      const match$1 = checkOLPat(ctx, name._0);
+      return Stdlib__List.fold_left((function (param) {
+        const accInfo = param[1];
+        const accCtx = param[0];
+        return function (arg) {
+          const match = checkOLPat(accCtx, arg);
+          return [
+            match[0],
+            mergeInfos(accInfo, match[1])
+          ];
+        };
+      }), [
+        match$1[0],
+        match$1[1]
+      ], name._1);
+    default:
+      return [
+        ctx,
+        emptyInfo
+      ];
+  }
+}
+
+function inferExpr(ctx, _t) {
+  while (true) {
+    const t = _t;
+    const name = t.value;
+    if (!/* tag */ (typeof name === "number" || typeof name === "string")) {
+      switch (name.TAG) {
+        case /* Shard */ 0 :
+          break;
+        case /* Hole */ 1 :
+          return {
+            errors: /* [] */ 0,
+            holes: {
+              hd: [
+                t.meta.start,
+                {
+                  goal: hole,
+                  context: ctx
+                }
+              ],
+              tl: /* [] */ 0
+            },
+            inferred: mlInferred(/* MTerm */ 0),
+            bindings: StringMap.empty
+          };
+        case /* Identifier */ 2 :
+          const name$1 = name._0;
+          const match = Curry._2(StringMap.find_opt, name$1, ctx);
+          if (match !== undefined) {
+            if (match.TAG === /* ML */ 1) {
+              return {
+                errors: /* [] */ 0,
+                holes: /* [] */ 0,
+                inferred: mlInferred(match._0),
+                bindings: StringMap.empty
+              };
+            } else {
+              return {
+                errors: /* [] */ 0,
+                holes: /* [] */ 0,
+                inferred: mlInferred(/* MTerm */ 0),
+                bindings: StringMap.empty
+              };
+            }
+          } else if (name$1 === "Sort" || name$1 === "foldl" || name$1 === "fst" || name$1 === "snd" || !hasOLBindings(ctx)) {
+            return {
+              errors: /* [] */ 0,
+              holes: /* [] */ 0,
+              inferred: mlInferred(/* MTerm */ 0),
+              bindings: StringMap.empty
+            };
+          } else {
+            return withErrors({
+              errors: /* [] */ 0,
+              holes: /* [] */ 0,
+              inferred: mlInferred(/* MTerm */ 0),
+              bindings: StringMap.empty
+            }, {
+              hd: Melange__Error.mark("Unbound variable " + name$1, t.meta.start, t.meta.end_),
+              tl: /* [] */ 0
+            });
+          }
+        case /* StringLit */ 3 :
+          return {
+            errors: /* [] */ 0,
+            holes: /* [] */ 0,
+            inferred: mlInferred(/* MString */ 3),
+            bindings: StringMap.empty
+          };
+        case /* Asc */ 4 :
+          _t = name._0;
+          continue;
+        case /* Arrow */ 5 :
+          return {
+            errors: /* [] */ 0,
+            holes: /* [] */ 0,
+            inferred: mlInferred(/* MSort */ 1),
+            bindings: StringMap.empty
+          };
+        case /* Eq */ 6 :
+          _t = name._1;
+          continue;
+        case /* Comma */ 7 :
+          const leftInfo = inferExpr(ctx, name._0);
+          const rightInfo = inferExpr(ctx, name._1);
+          const leftTy = getInferredMlType(leftInfo);
+          const rightTy = getInferredMlType(rightInfo);
+          const info = mergeInfos(leftInfo, rightInfo);
+          return {
+            errors: info.errors,
+            holes: info.holes,
+            inferred: mlInferred({
+              TAG: /* MPair */ 2,
+              _0: leftTy,
+              _1: rightTy
+            }),
+            bindings: info.bindings
+          };
+        case /* BinOp */ 8 :
+          const right = name._2;
+          const left = name._1;
+          let exit = 0;
+          switch (name._0) {
+            case "!=" :
+            case "==" :
+              exit = 2;
+              break;
+            case "&&" :
+            case "||" :
+              exit = 3;
+              break;
+            default:
+              const leftInfo$1 = checkExpr(ctx, /* MTerm */ 0, left);
+              const rightInfo$1 = checkExpr(ctx, /* MTerm */ 0, right);
+              const info$1 = mergeInfos(leftInfo$1, rightInfo$1);
+              return {
+                errors: info$1.errors,
+                holes: info$1.holes,
+                inferred: mlInferred(/* MTerm */ 0),
+                bindings: info$1.bindings
+              };
+          }
+          switch (exit) {
+            case 2 :
+              const leftInfo$2 = inferExpr(ctx, left);
+              const leftTy$1 = getInferredMlType(leftInfo$2);
+              const rightInfo$2 = checkExpr(ctx, leftTy$1, right);
+              const info$2 = mergeInfos(leftInfo$2, rightInfo$2);
+              return {
+                errors: info$2.errors,
+                holes: info$2.holes,
+                inferred: mlInferred(/* MBool */ 2),
+                bindings: info$2.bindings
+              };
+            case 3 :
+              const leftInfo$3 = checkExpr(ctx, /* MBool */ 2, left);
+              const rightInfo$3 = checkExpr(ctx, /* MBool */ 2, right);
+              const info$3 = mergeInfos(leftInfo$3, rightInfo$3);
+              return {
+                errors: info$3.errors,
+                holes: info$3.holes,
+                inferred: mlInferred(/* MBool */ 2),
+                bindings: info$3.bindings
+              };
+          }
+          break;
+        case /* Ap */ 9 :
+          const f = name._0;
+          const fInfo = inferExpr(ctx, f);
+          const fTy = getInferredMlType(fInfo);
+          const match$1 = Stdlib__List.fold_left((function (param) {
+            const accInfo = param[1];
+            const accTy = param[0];
+            return function (arg) {
+              if (/* tag */ typeof accTy === "number" || typeof accTy === "string") {
+                if (accTy === /* MTerm */ 0) {
+                  const aInfo = inferExpr(ctx, arg);
+                  return [
+                    /* MTerm */ 0,
+                    mergeInfos(accInfo, aInfo)
+                  ];
+                }
+                
+              } else if (accTy.TAG === /* MArrow */ 3) {
+                const aInfo$1 = checkExpr(ctx, accTy._0, arg);
+                return [
+                  accTy._1,
+                  mergeInfos(accInfo, aInfo$1)
+                ];
+              }
+              const errInfo = withErrors(emptyInfo, {
+                hd: Melange__Error.mark("Cannot apply value of type " + Melange__MLType.printType(accTy), f.meta.start, f.meta.end_),
+                tl: /* [] */ 0
+              });
+              return [
+                /* MTerm */ 0,
+                mergeInfos(accInfo, errInfo)
+              ];
+            };
+          }), [
+            fTy,
+            emptyInfo
+          ], name._1);
+          const info$4 = mergeInfos(fInfo, match$1[1]);
+          return {
+            errors: info$4.errors,
+            holes: info$4.holes,
+            inferred: mlInferred(match$1[0]),
+            bindings: info$4.bindings
+          };
+        case /* List */ 10 :
+          const match$2 = name._0;
+          if (!match$2) {
+            return {
+              errors: /* [] */ 0,
+              holes: /* [] */ 0,
+              inferred: mlInferred({
+                TAG: /* MList */ 0,
+                _0: /* MTerm */ 0
+              }),
+              bindings: StringMap.empty
+            };
+          }
+          const firstInfo = inferExpr(ctx, match$2.hd);
+          const elemTy = getInferredMlType(firstInfo);
+          const restInfo = Stdlib__List.fold_left((function (accInfo, item) {
+            return mergeInfos(accInfo, checkExpr(ctx, elemTy, item));
+          }), emptyInfo, match$2.tl);
+          const info$5 = mergeInfos(firstInfo, restInfo);
+          return {
+            errors: info$5.errors,
+            holes: info$5.holes,
+            inferred: mlInferred({
+              TAG: /* MList */ 0,
+              _0: elemTy
+            }),
+            bindings: info$5.bindings
+          };
+        case /* Match */ 12 :
+          const branches = name._1;
+          const scrutInfo = inferExpr(ctx, name._0);
+          const scrutTy = getInferredMlType(scrutInfo);
+          if (!branches) {
+            return withErrors(mergeInfos(scrutInfo, {
+              errors: /* [] */ 0,
+              holes: /* [] */ 0,
+              inferred: mlInferred(/* MTerm */ 0),
+              bindings: StringMap.empty
+            }), {
+              hd: Melange__Error.mark("Empty match", t.meta.start, t.meta.end_),
+              tl: /* [] */ 0
+            });
+          }
+          const match$3 = branches.hd;
+          const match$4 = checkPat(ctx, scrutTy, match$3[0]);
+          const bodyInfo = inferExpr(match$4[0], match$3[1]);
+          const bodyTy = getInferredMlType(bodyInfo);
+          const restInfo$1 = Stdlib__List.fold_left((function (accInfo, param) {
+            const match = checkPat(ctx, scrutTy, param[0]);
+            const bInfo = checkExpr(match[0], bodyTy, param[1]);
+            return mergeInfos(accInfo, mergeInfos(match[1], bInfo));
+          }), emptyInfo, branches.tl);
+          const info$6 = mergeInfos(scrutInfo, mergeInfos(match$4[1], mergeInfos(bodyInfo, restInfo$1)));
+          return {
+            errors: info$6.errors,
+            holes: info$6.holes,
+            inferred: mlInferred(bodyTy),
+            bindings: info$6.bindings
+          };
+        case /* If */ 13 :
+          const condInfo = checkExpr(ctx, /* MBool */ 2, name._0);
+          const thenInfo = inferExpr(ctx, name._1);
+          const thenTy = getInferredMlType(thenInfo);
+          const elseInfo = checkExpr(ctx, thenTy, name._2);
+          const info$7 = mergeInfos(condInfo, mergeInfos(thenInfo, elseInfo));
+          return {
+            errors: info$7.errors,
+            holes: info$7.holes,
+            inferred: mlInferred(thenTy),
+            bindings: info$7.bindings
+          };
+        case /* Let */ 14 :
+          const body = name._1;
+          const match$5 = name._0.value;
+          if (/* tag */ typeof match$5 === "number" || typeof match$5 === "string") {
+            _t = body;
+            continue;
+          }
+          if (match$5.TAG === /* Eq */ 6) {
+            const n = match$5._0.value;
+            if (/* tag */ typeof n === "number" || typeof n === "string") {
+              _t = body;
+              continue;
+            }
+            if (n.TAG === /* Identifier */ 2) {
+              const exprInfo = inferExpr(ctx, match$5._1);
+              const newCtx = Curry._3(StringMap.add, n._0, {
+                TAG: /* ML */ 1,
+                _0: /* MTerm */ 0
+              }, ctx);
+              const bodyInfo$1 = inferExpr(newCtx, body);
+              return mergeInfos(exprInfo, bodyInfo$1);
+            }
+            _t = body;
+            continue;
+          } else {
+            _t = body;
+            continue;
+          }
+        default:
+          return {
+            errors: /* [] */ 0,
+            holes: /* [] */ 0,
+            inferred: mlInferred(/* MTerm */ 0),
+            bindings: StringMap.empty
+          };
+      }
+    }
+    return withErrors({
+      errors: /* [] */ 0,
+      holes: /* [] */ 0,
+      inferred: mlInferred(/* MTerm */ 0),
+      bindings: StringMap.empty
+    }, {
+      hd: Melange__Error.mark("Invalid expression", t.meta.start, t.meta.end_),
+      tl: /* [] */ 0
+    });
+  };
+}
+
+function checkExpr(ctx, _expected, _t) {
+  while (true) {
+    const t = _t;
+    const expected = _expected;
+    const items = t.value;
+    if (!/* tag */ (typeof items === "number" || typeof items === "string")) {
+      switch (items.TAG) {
+        case /* Hole */ 1 :
+          const goal = mlTypeToTerm(expected);
+          return {
+            errors: /* [] */ 0,
+            holes: {
+              hd: [
+                t.meta.start,
+                {
+                  goal: goal,
+                  context: ctx
+                }
+              ],
+              tl: /* [] */ 0
+            },
+            inferred: undefined,
+            bindings: StringMap.empty
+          };
+        case /* Ap */ 9 :
+          const match = items._0.value;
+          if (!/* tag */ (typeof match === "number" || typeof match === "string") && match.TAG === /* Identifier */ 2) {
+            switch (match._0) {
+              case "Error" :
+                const match$1 = items._1;
+                if (match$1 && !match$1.tl) {
+                  let exit = 0;
+                  if (/* tag */ typeof expected === "number" || typeof expected === "string") {
+                    exit = 2;
+                  } else {
+                    if (expected.TAG === /* MResult */ 1) {
+                      _t = match$1.hd;
+                      _expected = /* MString */ 3;
+                      continue;
+                    }
+                    exit = 2;
+                  }
+                  if (exit === 2) {
+                    return withErrors(emptyInfo, {
+                      hd: Melange__Error.mark("Error but expected " + Melange__MLType.printType(expected), t.meta.start, t.meta.end_),
+                      tl: /* [] */ 0
+                    });
+                  }
+                  
+                }
+                break;
+              case "Ok" :
+                const match$2 = items._1;
+                if (match$2 && !match$2.tl) {
+                  let exit$1 = 0;
+                  if (/* tag */ typeof expected === "number" || typeof expected === "string") {
+                    exit$1 = 2;
+                  } else {
+                    if (expected.TAG === /* MResult */ 1) {
+                      _t = match$2.hd;
+                      _expected = expected._0;
+                      continue;
+                    }
+                    exit$1 = 2;
+                  }
+                  if (exit$1 === 2) {
+                    return withErrors(emptyInfo, {
+                      hd: Melange__Error.mark("Ok but expected " + Melange__MLType.printType(expected), t.meta.start, t.meta.end_),
+                      tl: /* [] */ 0
+                    });
+                  }
+                  
+                }
+                break;
+            }
+          }
+          break;
+        case /* List */ 10 :
+          let exit$2 = 0;
+          if (/* tag */ typeof expected === "number" || typeof expected === "string") {
+            exit$2 = 2;
+          } else {
+            if (expected.TAG === /* MList */ 0) {
+              const elemTy = expected._0;
+              return Stdlib__List.fold_left((function (accInfo, item) {
+                return mergeInfos(accInfo, checkExpr(ctx, elemTy, item));
+              }), emptyInfo, items._0);
+            }
+            exit$2 = 2;
+          }
+          if (exit$2 === 2) {
+            const info = inferExpr(ctx, t);
+            const got = getInferredMlType(info);
+            return withErrors(info, mlSubsume(expected, got, t.meta.start, t.meta.end_));
+          }
+          break;
+        case /* Fun */ 11 :
+          let exit$3 = 0;
+          if (/* tag */ typeof expected === "number" || typeof expected === "string") {
+            exit$3 = 2;
+          } else {
+            if (expected.TAG === /* MArrow */ 3) {
+              const match$3 = checkPat(ctx, expected._0, items._0);
+              const bodyInfo = checkExpr(match$3[0], expected._1, items._1);
+              return mergeInfos(match$3[1], bodyInfo);
+            }
+            exit$3 = 2;
+          }
+          if (exit$3 === 2) {
+            return withErrors(emptyInfo, {
+              hd: Melange__Error.mark("Lambda but expected " + Melange__MLType.printType(expected), t.meta.start, t.meta.end_),
+              tl: /* [] */ 0
+            });
+          }
+          break;
+        case /* Match */ 12 :
+          const scrutInfo = inferExpr(ctx, items._0);
+          const scrutTy = getInferredMlType(scrutInfo);
+          const branchInfo = Stdlib__List.fold_left((function (accInfo, param) {
+            const match = checkPat(ctx, scrutTy, param[0]);
+            const bodyInfo = checkExpr(match[0], expected, param[1]);
+            return mergeInfos(accInfo, mergeInfos(match[1], bodyInfo));
+          }), emptyInfo, items._1);
+          return mergeInfos(scrutInfo, branchInfo);
+        case /* If */ 13 :
+          const condInfo = checkExpr(ctx, /* MBool */ 2, items._0);
+          const thenInfo = checkExpr(ctx, expected, items._1);
+          const elseInfo = checkExpr(ctx, expected, items._2);
+          return mergeInfos(condInfo, mergeInfos(thenInfo, elseInfo));
+      }
+    }
+    const info$1 = inferExpr(ctx, t);
+    const got$1 = getInferredMlType(info$1);
+    return withErrors(info$1, mlSubsume(expected, got$1, t.meta.start, t.meta.end_));
+  };
+}
+
+function checkSchema(ctx, body) {
+  return checkExpr(ctx, schemaType, body);
 }
 
 function getStatics(t) {
@@ -726,8 +2210,11 @@ export {
   withErrors,
   withBindings,
   emptyEnv,
+  emptyWitnessEnv,
   resolve,
+  resolveWithParams,
   stringOfMode,
+  termConsistent,
   consistent,
   sortTerm,
   lookupCtx,
@@ -735,8 +2222,22 @@ export {
   checkArity,
   ensureMode,
   extractParams,
-  lineBinding,
+  addParens,
+  mlTypeToTerm,
+  mlInferred,
+  mlSubsume,
+  termToMlType,
+  getInferredMlType,
+  hasOLBindings,
+  signatureType,
+  schemaType,
+  checkDecls,
   checkTerm,
+  checkSchema,
+  checkPat,
+  checkOLPat,
+  inferExpr,
+  checkExpr,
   getStatics,
 }
 /* StringMap Not a pure module */

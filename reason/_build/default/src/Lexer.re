@@ -25,6 +25,14 @@ let lex = (g: grammar, s: string): list(ranged(token)) => {
     if (isWhitespace(c)) {
       emit(Secondary(Whitespace(String.make(1, c))), start, start + 1);
       i := i^ + 1;
+    } else if (c == '-' && i^ + 1 < len && s.[i^ + 1] == '-') {
+      /* Line comment: -- to end of line */
+      let j = ref(i^ + 2);
+      while (j^ < len && s.[j^] != '\n') {
+        j := j^ + 1;
+      };
+      emit(Secondary(Whitespace(String.sub(s, start, j^ - start))), start, j^);
+      i := j^;
     } else if (c == '"') {
       /* String literal */
       let j = ref(i^ + 1);

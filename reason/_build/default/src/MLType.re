@@ -20,10 +20,10 @@ let rec printType =
   | MList(t) => "List " ++ printTypeAtom(t)
   | MResult(t) => "Result " ++ printTypeAtom(t)
   | MPair(a, b) => "(" ++ printType(a) ++ ", " ++ printType(b) ++ ")"
-  | MArrow(a, b) => printTypeAtom(a) ++ " -> " ++ printType(b)
+  | MArrow(a, b) => printTypeAtom(a) ++ " -> " ++ printTypeAtom(b)
 and printTypeAtom =
   fun
-  | (MTerm | MSort | MString | MPair(_, _)) as t => printType(t)
+  | (MTerm | MSort | MBool | MString | MPair(_, _)) as t => printType(t)
   | t => "(" ++ printType(t) ++ ")";
 
 let rec eqType = (a: mlType, b: mlType): bool =>
