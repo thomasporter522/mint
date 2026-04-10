@@ -210,9 +210,9 @@ describe('ML type checker: x binding', () => {
     ok('fun s => match s with | [?] => (Ok []) | _ => (Error "bad") end');
   });
 
-  it('name component has type String', () => {
-    // name binds at String (first component of signature triple)
-    ok('fun s => match s with | [(name, params, ret)] => (Error name) | _ => (Error "bad") end');
+  it('name component has type Term', () => {
+    // name binds at Term (first component of signature triple — the OL identifier)
+    ok('fun s => match s with | [(name, params, ret)] => (Ok [name]) | _ => (Error "bad") end');
   });
 
   it('params component has type List (String, Term), not List Term', () => {

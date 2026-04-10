@@ -9,7 +9,9 @@ type fullType = (list((option(string), term)), term);
 
 type binding =
   | OL(option(fullType))
-  | ML(mlType);
+  | ML(mlType)
+  | SchemaBinding(term)   /* unevaluated schema body, stored for Construct to evaluate */
+  | MetaLet(term);        /* unevaluated let body, stored for schema evaluation */
 
 type context = StringMap.t(binding);
 
@@ -48,6 +50,12 @@ let withBindings = (info, ctx) => {...info, bindings: mergeBindings(info.binding
 type env = StringMap.t(term);
 let emptyEnv: env = StringMap.empty;
 
+/* Witness substitution: maps names to (param_names, witness_body).
+   For parameterless decls, param_names is [].
+   For (f (x:A)) with witness w, resolving (f arg) gives w[x:=arg]. */
+type witnessEnv = StringMap.t((list(string), term));
+let emptyWitnessEnv: witnessEnv = StringMap.empty;
+
 let rec resolve = (env: env, t: term): term =>
   if (StringMap.is_empty(env)) {
     t;
@@ -64,8 +72,8 @@ let rec resolve = (env: env, t: term): term =>
       {...t, value: Ap(resolve(env, f), List.map(resolve(env), args))}
     | Postulate(body, rest) =>
       {...t, value: Postulate(List.map(resolve(env), body), Option.map(resolve(env), rest))}
-    | Schema(body, rest) =>
-      {...t, value: Schema(List.map(resolve(env), body), Option.map(resolve(env), rest))}
+    | Meta(body, rest) =>
+      {...t, value: Meta(List.map(resolve(env), body), Option.map(resolve(env), rest))}
     | Construct(by, body, rest) =>
       {...t, value: Construct(resolve(env, by), List.map(resolve(env), body), Option.map(resolve(env), rest))}
     | Arrow(l, r) => {...t, value: Arrow(resolve(env, l), resolve(env, r))}
@@ -79,6 +87,54 @@ let rec resolve = (env: env, t: term): term =>
     | Let(b, body) => {...t, value: Let(resolve(env, b), resolve(env, body))}
     | If(c, th, el) => {...t, value: If(resolve(env, c), resolve(env, th), resolve(env, el))}
     | StringLit(_) | Hole(_) | Shard(_) | BuilderError => t
+    };
+  }
+
+and resolveWithParams = (wenv: witnessEnv, t: term): term =>
+  if (StringMap.is_empty(wenv)) {
+    t;
+  } else {
+    switch (t.value) {
+    | Identifier(v) =>
+      switch (StringMap.find_opt(v, wenv)) {
+      | Some(([], witness)) => witness  /* parameterless: direct substitution */
+      | _ => t
+      }
+    | Ap({value: Identifier(v), _} as f, args) =>
+      switch (StringMap.find_opt(v, wenv)) {
+      | Some((paramNames, witness)) when List.length(paramNames) > 0 =>
+        /* Parameterized: substitute param names with resolved args in witness */
+        let resolvedArgs = List.map(resolveWithParams(wenv), args);
+        if (List.length(paramNames) == List.length(resolvedArgs)) {
+          let paramEnv = List.fold_left2(
+            (acc, pname, arg) => StringMap.add(pname, arg, acc),
+            StringMap.empty,
+            paramNames,
+            resolvedArgs,
+          );
+          resolve(paramEnv, witness);
+        } else {
+          {...t, value: Ap(f, resolvedArgs)}
+        }
+      | _ =>
+        {...t, value: Ap(resolveWithParams(wenv, f), List.map(resolveWithParams(wenv), args))}
+      }
+    | Asc(l, r) =>
+      {...t, value: Asc(resolveWithParams(wenv, l), resolveWithParams(wenv, r))}
+    | Ap(f, args) =>
+      {...t, value: Ap(resolveWithParams(wenv, f), List.map(resolveWithParams(wenv), args))}
+    | Arrow(l, r) => {...t, value: Arrow(resolveWithParams(wenv, l), resolveWithParams(wenv, r))}
+    | Eq(l, r) => {...t, value: Eq(resolveWithParams(wenv, l), resolveWithParams(wenv, r))}
+    | Comma(l, r) => {...t, value: Comma(resolveWithParams(wenv, l), resolveWithParams(wenv, r))}
+    | BinOp(op, l, r) => {...t, value: BinOp(op, resolveWithParams(wenv, l), resolveWithParams(wenv, r))}
+    | List(items) => {...t, value: List(List.map(resolveWithParams(wenv), items))}
+    | Fun(pat, body) => {...t, value: Fun(resolveWithParams(wenv, pat), resolveWithParams(wenv, body))}
+    | Match(scrut, branches) =>
+      {...t, value: Match(resolveWithParams(wenv, scrut),
+        List.map(((p, b)) => (resolveWithParams(wenv, p), resolveWithParams(wenv, b)), branches))}
+    | Let(b, body) => {...t, value: Let(resolveWithParams(wenv, b), resolveWithParams(wenv, body))}
+    | If(c, th, el) => {...t, value: If(resolveWithParams(wenv, c), resolveWithParams(wenv, th), resolveWithParams(wenv, el))}
+    | _ => t
     };
   };
 
@@ -103,15 +159,32 @@ let stringOfMode =
 
 /* --- Type consistency --- */
 
+/* Structural consistency: like equality but holes match anything */
+let rec termConsistent = (a: term, b: term): bool =>
+  switch (a.value, b.value) {
+  | (Hole(_), _) | (_, Hole(_)) => true
+  | (Identifier(x), Identifier(y)) => x == y
+  | (StringLit(x), StringLit(y)) => x == y
+  | (Ap(f1, args1), Ap(f2, args2)) =>
+    termConsistent(f1, f2)
+    && List.length(args1) == List.length(args2)
+    && List.for_all2(termConsistent, args1, args2)
+  | (List(a), List(b)) =>
+    List.length(a) == List.length(b)
+    && List.for_all2(termConsistent, a, b)
+  | (Comma(a1, b1), Comma(a2, b2)) =>
+    termConsistent(a1, a2) && termConsistent(b1, b2)
+  | (Arrow(a1, b1), Arrow(a2, b2)) =>
+    termConsistent(a1, a2) && termConsistent(b1, b2)
+  | (Asc(a1, b1), Asc(a2, b2)) =>
+    termConsistent(a1, a2) && termConsistent(b1, b2)
+  | _ => false
+  };
+
 let consistent = (t1: option(term), t2: option(term)): bool =>
   switch (t1, t2) {
   | (None, _) | (_, None) => true
-  | (Some({value: Hole(_), _}), _) | (_, Some({value: Hole(_), _})) => true
-  | (Some(a), Some(b)) =>
-    switch (a.value, b.value) {
-    | (Identifier(v1), Identifier(v2)) => v1 == v2
-    | _ => false
-    }
+  | (Some(a), Some(b)) => termConsistent(a, b)
   };
 
 /* --- Context lookup (OL mode) --- */
@@ -128,7 +201,7 @@ let lookupCtx = (ctx: context, x: string): lookupResult =>
   } else {
     switch (StringMap.find_opt(x, ctx)) {
     | Some(OL(ft)) => Found(ft)
-    | Some(ML(_)) => NotFound
+    | Some(ML(_)) | Some(SchemaBinding(_)) | Some(MetaLet(_)) => NotFound
     | None => NotFound
     };
   };
@@ -251,7 +324,7 @@ let rec termToMlType = (t: term): option(mlType) =>
   | Identifier("Sort") => Some(MSort)
   | Identifier("Bool") => Some(MBool)
   | Identifier("String") => Some(MString)
-  | Identifier("Signature") => Some(MPair(MString, MPair(MList(MPair(MString, MTerm)), MTerm)))
+  | Identifier("Signature") => Some(MPair(MTerm, MPair(MList(MPair(MString, MTerm)), MTerm)))
   | Ap({value: Identifier("List"), _}, [arg]) =>
     switch (termToMlType(arg)) {
     | Some(t) => Some(MList(t))
@@ -278,10 +351,10 @@ let rec termToMlType = (t: term): option(mlType) =>
 /* --- OL scope checking: strict when OL bindings exist, permissive otherwise --- */
 
 let hasOLBindings = (ctx: context): bool =>
-  StringMap.exists((_, v) => switch (v) { | OL(_) => true | ML(_) => false }, ctx);
+  StringMap.exists((_, v) => switch (v) { | OL(_) => true | ML(_) | SchemaBinding(_) | MetaLet(_) => false }, ctx);
 
-/* Signature = (String, List (String, Term), Term) — name, params, return type */
-let signatureType = MPair(MString, MPair(MList(MPair(MString, MTerm)), MTerm));
+/* Signature = (Term, List (String, Term), Term) — name (as OL identifier), params, return type */
+let signatureType = MPair(MTerm, MPair(MList(MPair(MString, MTerm)), MTerm));
 
 /* Schema type: List Signature -> Result (List Term) */
 let schemaType = MArrow(MList(signatureType), MResult(MList(MTerm)));
@@ -323,43 +396,183 @@ and checkTerm = (ctx: context, mode: checkingMode, t: term): staticInfo =>
       };
     withErrors(info, ensureMode(["program"], mode, t.meta.start, t.meta.end_));
 
-  | Schema(body, rest) =>
-    let schemaExpr = combineBody(body);
-    let (toCheck, annotErrors) =
-      switch (schemaExpr.value) {
-      | Eq({value: Asc(_name, typeAnnot), _}, rhs) =>
-        switch (termToMlType(typeAnnot)) {
-        | Some(annotTy) =>
-          let errs =
-            if (eqType(annotTy, schemaType)) { [] }
-            else {
-              [mark(
-                "Schema type mismatch: annotated "
-                ++ printType(annotTy)
-                ++ ", expected "
-                ++ printType(schemaType),
-                typeAnnot.meta.start, typeAnnot.meta.end_,
-              )];
-            };
-          (rhs, errs);
-        | None =>
-          (rhs, [mark("Invalid type annotation", typeAnnot.meta.start, typeAnnot.meta.end_)])
-        }
-      | Eq(_, rhs) => (rhs, [])
-      | _ => (schemaExpr, [])
+  | Meta(body, rest) =>
+    /* Process definitions in the meta block.
+       Parser produces separate items: keyword atoms ("let"/"schema")
+       followed by Eq(name, body) definitions. We scan for these pairs. */
+    let rec processMeta = (accInfo, accCtx, items) =>
+      switch (items) {
+      | [] => (accInfo, accCtx)
+      /* schema name = body  OR  schema name : type = body */
+      | [{value: Identifier("schema"), _},
+         {value: Eq(name, rhs), _},
+         ...rest] =>
+        let (n, annotErrors) = switch (name.value) {
+          | Identifier(s) => (Some(s), [])
+          | Asc({value: Identifier(s), _}, typeAnnot) =>
+            let errs = switch (termToMlType(typeAnnot)) {
+              | Some(annotTy) =>
+                if (eqType(annotTy, schemaType)) { [] }
+                else {
+                  [mark(
+                    "Schema type mismatch: annotated "
+                    ++ printType(annotTy)
+                    ++ ", expected "
+                    ++ printType(schemaType),
+                    typeAnnot.meta.start, typeAnnot.meta.end_,
+                  )];
+                }
+              | None =>
+                [mark("Invalid type annotation", typeAnnot.meta.start, typeAnnot.meta.end_)]
+              };
+            (Some(s), errs)
+          | _ => (None, [])
+          };
+        let schemaInfo = checkSchema(accCtx, rhs);
+        let info = withErrors(mergeInfos(accInfo, schemaInfo), annotErrors);
+        let newCtx =
+          switch (n) {
+          | Some(name) => StringMap.add(name, SchemaBinding(rhs), accCtx)
+          | None => accCtx
+          };
+        processMeta(info, newCtx, rest);
+      /* Bare name = body — treat as let definition (let keyword is optional/cosmetic) */
+      | [{value: Eq({value: Identifier(n), _}, rhs), _}, ...rest] =>
+        let bodyInfo = inferExpr(accCtx, rhs);
+        let newCtx = StringMap.add(n, MetaLet(rhs), accCtx);
+        processMeta(mergeInfos(accInfo, bodyInfo), newCtx, rest);
+      /* Skip unrecognized items */
+      | [item, ...rest] =>
+        let itemInfo = inferExpr(accCtx, item);
+        processMeta(mergeInfos(accInfo, itemInfo), accCtx, rest);
       };
-    let schemaInfo = checkSchema(ctx, toCheck);
-    let info = withErrors(schemaInfo, annotErrors);
+    let (metaInfo, metaCtx) = processMeta(emptyInfo, ctx, body);
     let info =
       switch (rest) {
-      | Some(r) => mergeInfos(info, checkTerm(ctx, Program, r))
-      | None => info
+      | Some(r) => mergeInfos(metaInfo, checkTerm(metaCtx, Program, r))
+      | None => metaInfo
       };
     withErrors(info, ensureMode(["program"], mode, t.meta.start, t.meta.end_));
 
-  | Construct(_by, body, rest) =>
+  | Construct(by, body, rest) =>
     let (bodyInfo, finalCtx) = checkDecls(ctx, body);
-    let info = withBindings(bodyInfo, finalCtx);
+    /* Run the schema on the construct declarations and type-check witnesses */
+    let witnessErrors =
+      switch (by.value) {
+      | Identifier(schemaName) =>
+        switch (StringMap.find_opt(schemaName, ctx)) {
+        | Some(SchemaBinding(schemaBody)) =>
+          /* Build eval env from MetaLet bindings for schema evaluation */
+          let evalEnv = StringMap.fold(
+            (name, binding, acc) =>
+              switch (binding) {
+              | MetaLet(body) =>
+                switch (Eval.evalExpr(acc, body)) {
+                | Eval.Ok(v) => Eval.StringMap.add(name, v, acc)
+                | Eval.Err(_) => acc
+                }
+              | _ => acc
+              },
+            ctx,
+            Eval.StringMap.empty,
+          );
+          switch (Eval.evalExpr(evalEnv, schemaBody)) {
+          | Eval.Ok(schemaVal) =>
+            switch (Eval.runSchema(schemaVal, body)) {
+            | Eval.Witnesses(witnesses) =>
+              /* Check witness count matches declaration count */
+              if (List.length(witnesses) != List.length(body)) {
+                [mark(
+                  "Schema produced " ++ string_of_int(List.length(witnesses))
+                  ++ " witnesses but construct has " ++ string_of_int(List.length(body))
+                  ++ " declarations",
+                  by.meta.start, by.meta.end_,
+                )];
+              } else {
+                /* Substitute witnesses for declared constants and type-check.
+                   For each declaration (name : type), the witness must have that type
+                   in the context where previous witnesses have been substituted. */
+                let (witnessErrs, _) = List.fold_left2(
+                  ((accErrs, substEnv), decl, witness) => {
+                    switch (decl.value) {
+                    | Asc(lhs, retType) =>
+                      let declName =
+                        switch (lhs.value) {
+                        | Identifier(n) => Some(n)
+                        | Ap({value: Identifier(n), _}, _) => Some(n)
+                        | _ => None
+                        };
+                      /* Add declaration parameters to context for witness checking */
+                      let witnessCtx =
+                        switch (lhs.value) {
+                        | Ap(_, args) =>
+                          List.fold_left(
+                            (acc, arg) =>
+                              switch (arg.value) {
+                              | Asc({value: Identifier(pname), _}, pty) =>
+                                StringMap.add(pname, OL(Some(([], pty))), acc)
+                              | _ => acc
+                              },
+                            ctx,
+                            args,
+                          )
+                        | _ => ctx
+                        };
+                      let expectedType = resolveWithParams(substEnv, retType);
+                      let witnessInfo = checkTerm(witnessCtx, Expression(Some(expectedType)), witness);
+                      /* For parameterized decls, store (name, params, witness) for
+                         application-level substitution in subsequent types */
+                      let paramNames =
+                        switch (lhs.value) {
+                        | Ap(_, args) =>
+                          List.map(
+                            (arg: term) =>
+                              switch (arg.value) {
+                              | Asc({value: Identifier(n), _}, _) => n
+                              | _ => "_"
+                              },
+                            args,
+                          )
+                        | _ => []
+                        };
+                      let newSubstEnv =
+                        switch (declName) {
+                        | Some(n) =>
+                          StringMap.add(n, (paramNames, witness), substEnv)
+                        | None => substEnv
+                        };
+                      (accErrs @ witnessInfo.errors, newSubstEnv);
+                    | _ => (accErrs, substEnv)
+                    };
+                  },
+                  ([], emptyWitnessEnv),
+                  body,
+                  witnesses,
+                );
+                if (List.length(witnessErrs) > 0) {
+                  let details = String.concat("; ", List.map((e: error) => e.message, witnessErrs));
+                  [mark(
+                    schemaName ++ " matched but generated ill-typed witnesses: " ++ details,
+                    by.meta.start, by.meta.end_,
+                  )];
+                } else {
+                  [];
+                };
+              }
+            | Eval.SchemaError(msg) =>
+              [mark("Schema error: " ++ msg, by.meta.start, by.meta.end_)]
+            }
+          | Eval.Err(msg) =>
+            [mark("Schema evaluation failed: " ++ msg, by.meta.start, by.meta.end_)]
+          }
+        | Some(_) =>
+          [mark(schemaName ++ " is not a schema", by.meta.start, by.meta.end_)]
+        | None => [] /* Schema not found — permissive for now */
+        }
+      | _ => []
+      };
+    let info = withErrors(bodyInfo, witnessErrors);
+    let info = withBindings(info, finalCtx);
     let info =
       switch (rest) {
       | Some(r) => mergeInfos(info, checkTerm(finalCtx, Program, r))
@@ -399,16 +612,7 @@ and checkTerm = (ctx: context, mode: checkingMode, t: term): staticInfo =>
       let bindings =
         switch (left.value) {
         | Identifier(x) =>
-          let ty =
-            switch (right.value) {
-            | Ap(_, _) =>
-              switch (rightInfo.inferred) {
-              | Some((_, t)) => t
-              | None => right
-              }
-            | _ => right
-            };
-          StringMap.singleton(x, OL(Some(([], ty))));
+          StringMap.singleton(x, OL(Some(([], right))));
         | Ap(f, args) =>
           switch (f.value) {
           | Identifier(x) =>
@@ -641,9 +845,10 @@ and inferExpr = (ctx: context, t: term): staticInfo =>
   | Identifier(name) =>
     switch (StringMap.find_opt(name, ctx)) {
     | Some(ML(ty)) => {...emptyInfo, inferred: mlInferred(ty)}
-    | Some(OL(_)) => {...emptyInfo, inferred: mlInferred(MTerm)}
+    | Some(OL(_)) | Some(SchemaBinding(_)) | Some(MetaLet(_)) => {...emptyInfo, inferred: mlInferred(MTerm)}
     | None =>
-      if (name == "Sort" || !hasOLBindings(ctx)) {
+      if (name == "Sort" || name == "foldl" || name == "fst" || name == "snd"
+          || !hasOLBindings(ctx)) {
         {...emptyInfo, inferred: mlInferred(MTerm)}
       } else {
         withErrors({...emptyInfo, inferred: mlInferred(MTerm)},
@@ -676,7 +881,9 @@ and inferExpr = (ctx: context, t: term): staticInfo =>
             let aInfo = checkExpr(ctx, paramTy, arg);
             (retTy, mergeInfos(accInfo, aInfo));
           | MTerm =>
-            let aInfo = checkExpr(ctx, MTerm, arg);
+            /* MTerm function: infer args (don't check against MTerm,
+               which would reject lambdas and structured values) */
+            let aInfo = inferExpr(ctx, arg);
             (MTerm, mergeInfos(accInfo, aInfo));
           | ty =>
             let errInfo = withErrors(emptyInfo,
@@ -697,12 +904,16 @@ and inferExpr = (ctx: context, t: term): staticInfo =>
   | Eq(_name, body) => inferExpr(ctx, body)
 
   | Fun(_, _) =>
-    withErrors({...emptyInfo, inferred: mlInferred(MTerm)},
-      [mark("Cannot infer type of fun without context", t.meta.start, t.meta.end_)])
-
+    {...emptyInfo, inferred: mlInferred(MTerm)}
   | Let(binding, body) =>
-    ignore(binding);
-    inferExpr(ctx, body)
+    switch (binding.value) {
+    | Eq({value: Identifier(n), _}, expr) =>
+      let exprInfo = inferExpr(ctx, expr);
+      let newCtx = StringMap.add(n, ML(MTerm), ctx);
+      let bodyInfo = inferExpr(newCtx, body);
+      mergeInfos(exprInfo, bodyInfo);
+    | _ => inferExpr(ctx, body)
+    }
 
   | Match(scrut, branches) =>
     let scrutInfo = inferExpr(ctx, scrut);
@@ -788,7 +999,7 @@ and inferExpr = (ctx: context, t: term): staticInfo =>
     let info = mergeInfos(firstInfo, restInfo);
     {...info, inferred: mlInferred(MList(elemTy))};
 
-  | Postulate(_, _) | Schema(_, _) | Construct(_, _, _) =>
+  | Postulate(_, _) | Meta(_, _) | Construct(_, _, _) =>
     {...emptyInfo, inferred: mlInferred(MTerm)}
 
   | BinOp(op, left, right) =>

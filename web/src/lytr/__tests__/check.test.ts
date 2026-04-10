@@ -150,13 +150,14 @@ describe('type consistency', () => {
 /* ------------------------------------------------------------------ */
 
 describe('return type substitution', () => {
-  it('return type is substituted with the argument value (identity fn)', () => {
-    // f : (a : Sort) -> a.  (f Sort) should have type Sort (= a[a:=Sort]).
-    // g : (f Sort) should therefore be well-typed with g : Sort.
-    // Then (f g) should also be fine: g has type Sort, return = a[a:=g] = g.
-    expect(errors(
+  it('declared type is the annotation, not the return type of an application', () => {
+    // f : (a : Sort) -> a.  g : (f Sort).
+    // g has type (f Sort), NOT Sort. (f Sort) ≠ Sort — they are different terms.
+    // So (f g) should fail: f expects type Sort, but g has type (f Sort).
+    const msgs = errorMessages(
       'postulate\nx : Sort\n(f (a : Sort)) : a\ng : (f Sort)\na : (f g)\nend'
-    )).toEqual([]);
+    );
+    expect(msgs).toContainEqual(expect.stringContaining('Inconsitency'));
   });
 
   it('return type substitution with non-dependent return type is harmless', () => {
@@ -248,6 +249,22 @@ describe('holes', () => {
     const goal = printTerm(h[0][1].goal);
     expect(goal).toBe('x');
   });
+
+  it('return type with holes is consistent when structure matches', () => {
+    // (trans D ? ? ? ? ?) has return type (eq D D ? ?) which is consistent with (eq D D x y)
+    expect(errors(
+      'postulate\nU : Sort\n(eq (A : U) (B : U) (a : A) (b : B)) : U\n(trans (A : U) (a : A) (b : A) (c : A) (e1 : (eq A A a b)) (e2 : (eq A A b c))) : (eq A A a c)\nD : U\nx : D\ny : (eq D D x x)\nz : (eq (eq D D x x) (eq D D x x) y (trans D ? ? ? ? ?))\nend'
+    )).toEqual([]);
+  });
+
+  it('expression with holes is inconsistent when structure differs', () => {
+    // (eq (eq ? ? ? ?) (eq ? ? ? ?) ? ?) is NOT consistent with (eq D D x y)
+    // because the first args are eq-applications vs D
+    const msgs = errorMessages(
+      'postulate\nU : Sort\n(eq (A : U) (B : U) (a : A) (b : B)) : U\n(trans (A : U) (a : A) (b : A) (c : A) (e1 : (eq A A a b)) (e2 : (eq A A b c))) : (eq A A a c)\nD : U\nx : D\ny : (eq D D x x)\nz : (eq (eq D D x x) (eq D D x x) y (trans (eq ? ? ? ?) ? ? ? ? ?))\nend'
+    );
+    expect(msgs.length).toBeGreaterThan(0);
+  });
 });
 
 /* ------------------------------------------------------------------ */
@@ -259,10 +276,11 @@ describe('schema blocks', () => {
     const code = [
       'postulate',
       'x : Sort',
-      'schema',
-      'foo = fun s => match s with | _ => (Ok []) end',
-      'construct by foo',
       'y : x',
+      'meta',
+      'schema foo = fun s => match s with | [(name, [], ret)] => (Ok [y]) | _ => (Error "bad") end',
+      'construct by foo',
+      'z : x',
       'end',
     ].join('\n');
     expect(errors(code)).toEqual([]);
@@ -272,8 +290,8 @@ describe('schema blocks', () => {
     const code = [
       'postulate',
       'x : Sort',
-      'schema',
-      'foo = fun s => match s with | _ => "wrong" end',
+      'meta',
+      'schema foo = fun s => match s with | _ => "wrong" end',
       'construct by foo',
       'y : x',
       'end',
@@ -286,8 +304,8 @@ describe('schema blocks', () => {
     const code = [
       'postulate',
       'x : Sort',
-      'schema',
-      'foo = fun s => match s with | _ => x end',
+      'meta',
+      'schema foo = fun s => match s with | _ => x end',
       'construct by foo',
       'y : x',
       'end',
@@ -300,25 +318,28 @@ describe('schema blocks', () => {
     const code = [
       'postulate',
       'x : Sort',
-      'schema',
-      'foo = fun s => match s with | [(name, [(a, t)], ret)] => (Ok [t]) | _ => (Error "bad") end',
-      'construct by foo',
       'y : x',
+      'meta',
+      'schema foo = fun s => match s with | [(name, [], ret)] => (Ok [y]) | _ => (Error "bad") end',
+      'construct by foo',
+      'z : x',
       'end',
     ].join('\n');
+    // Schema returns y as witness for z:x. y has type x, which matches z:x.
     expect(errors(code)).toEqual([]);
   });
 
-  it('reports error for bare identifier in schema (no = body)', () => {
+  it('schema definition with non-function body produces type error', () => {
     const msgs = errorMessages(
-      'postulate\nx : Sort\nschema\nx\nend'
+      'postulate\nx : Sort\nmeta\nschema foo = x\nend'
     );
+    // x is not a function (schema type), so this should error
     expect(msgs.length).toBeGreaterThan(0);
   });
 
   it('reports type annotation mismatch', () => {
     const msgs = errorMessages(
-      'schema\ndeclaration : Bool = ?\nend'
+      'meta\nschema declaration : Bool = ?\nend'
     );
     expect(msgs).toContainEqual(expect.stringContaining('Schema type mismatch'));
   });
@@ -327,10 +348,11 @@ describe('schema blocks', () => {
     const code = [
       'postulate',
       'x : Sort',
-      'schema',
-      'foo : ((List Signature) -> (Result (List Term))) = fun s => match s with | _ => (Ok []) end',
-      'construct by foo',
       'y : x',
+      'meta',
+      'schema foo : ((List Signature) -> (Result (List Term))) = fun s => match s with | [(name, [], ret)] => (Ok [y]) | _ => (Error "bad") end',
+      'construct by foo',
+      'z : x',
       'end',
     ].join('\n');
     expect(errors(code)).toEqual([]);
@@ -338,7 +360,7 @@ describe('schema blocks', () => {
 
   it('accepts correct type annotation written out fully', () => {
     expect(errors(
-      'schema\ndeclaration : ((List (String, (List (String, Term)), Term)) -> (Result (List Term))) = ?\nend'
+      'meta\nschema declaration : ((List (Term, (List (String, Term)), Term)) -> (Result (List Term))) = ?\nend'
     )).toEqual([]);
   });
 
@@ -348,8 +370,8 @@ describe('schema blocks', () => {
       'postulate',
       'U : Sort',
       '(eq (A : U) (B : U) (a : A) (b : B)) : U',
-      'schema',
-      'foo = fun s => match s with',
+      'meta',
+      'schema foo = fun s => match s with',
       '  | [(f, [], eq2 ret ret f body)] => (Ok [body])',
       '  | _ => (Error "bad")',
       '  end',
@@ -360,7 +382,7 @@ describe('schema blocks', () => {
   });
 
   it('schema errors do not leak into surrounding blocks', () => {
-    const code = 'postulate\nU : Sort\nschema\ndeclaration = fun x => ?\nend';
+    const code = 'postulate\nU : Sort\nmeta\nschema declaration = fun x => ?\nend';
     const errs = errors(code);
     // Should have schema body errors but NOT postulate errors
     const unboundU = errs.filter((e: Error) => e.message.includes('Unbound variable U'));
@@ -400,10 +422,11 @@ describe('construct blocks', () => {
       'postulate',
       'x : Sort',
       'y : x',
-      'schema',
-      'foo = fun s => match s with | _ => (Ok []) end',
-      'construct by foo',
       'z : y',
+      'meta',
+      'schema foo = fun s => match s with | [(name, [], ret)] => (Ok [z]) | _ => (Error "bad") end',
+      'construct by foo',
+      'w : y',
       'end',
     ].join('\n');
     expect(errors(code)).toEqual([]);
@@ -434,8 +457,8 @@ describe('construct blocks', () => {
       '(ap (f : D) (a : D)) : D',
       '(ap-K (x : D) (y : D)) : (eq D D (ap (ap K x) y) x)',
       '(ap-S (x : D) (y : D) (z : D)) : (eq D D (ap (ap (ap S x) y) z) (ap (ap x z) (ap y z)))',
-      'schema',
-      'definition =',
+      'meta',
+      'schema definition =',
       '  fun s => match s with',
       '  | [(f, [], ret),',
       '     (f_eq, [], eq ret ret f body)]',
@@ -448,6 +471,364 @@ describe('construct blocks', () => {
       'end',
     ].join('\n');
     expect(errors(code)).toEqual([]);
+  });
+
+  it('full equational proof: ap-I reduction via trans/ap-cong', () => {
+    const code = [
+      'postulate',
+      'U : Sort',
+      '(eq (A : U) (B : U) (a : A) (b : B)) : U',
+      '(refl (A : U) (a : A)) : (eq A A a a)',
+      '(trans (A : U) (a : A) (b : A) (c : A) (e1 : (eq A A a b)) (e2 : (eq A A b c))) : (eq A A a c)',
+      '',
+      'D : U',
+      'K : D',
+      'S : D',
+      '(ap (f : D) (a : D)) : D',
+      '(ap-K (x : D) (y : D)) : (eq D D (ap (ap K x) y) x)',
+      '(ap-S (x : D) (y : D) (z : D)) : (eq D D (ap (ap (ap S x) y) z) (ap (ap x z) (ap y z)))',
+      '(ap-cong (f : D) (g : D) (x : D) (e : (eq D D f g))) : (eq D D (ap f x) (ap g x))',
+      'meta',
+      'schema definition =',
+      '  fun s => match s with',
+      '  | [(f, [], ret), (f_eq, [], eq ret ret f body)]',
+      '      => (Ok [body, (refl ret body)])',
+      '  | _ => (Error "invalid definition")',
+      '  end',
+      'construct by definition',
+      'I : D',
+      'I-eq : (eq D D I (ap (ap S K) K))',
+      'meta',
+      'schema arg-definition = fun s => match s with | [(f, params, ret), (f_eq, params, eq ret ret applied body)] => if applied == (foldl (fun acc => fun p => match p with | (x, t) => (acc x) end) f params) then (Ok [body, (refl ret body)]) else (Error "LHS mismatch") end | _ => (Error "invalid") end',
+      'construct by arg-definition',
+      '(ap-I (x : D)) : (eq D D (ap I x) x)',
+      '(ap-I-pf (x : D)) : (eq (eq D D (ap I x) x) (eq D D (ap I x) x) (ap-I x) (',
+      '  trans D',
+      '  (ap I x) (ap (ap (ap S K) K) x) x',
+      '  (ap-cong I (ap (ap S K) K) x I-eq)',
+      '  (trans D (ap (ap (ap S K) K) x) (ap (ap K x) (ap K x)) x',
+      '  (ap-S K K x)',
+      '  (ap-K x (ap K x)))))',
+      'end',
+    ].join('\n');
+    // Type-checker warnings about foldl are OK, but no OL or witness errors
+    expect(errors(code)).toEqual([]);
+  });
+
+  it('both schemas in single meta block with full proof', () => {
+    const code = [
+      'postulate',
+      'U : Sort',
+      '(eq (A : U) (B : U) (a : A) (b : B)) : U',
+      '(refl (A : U) (a : A)) : (eq A A a a)',
+      '(trans (A : U) (a : A) (b : A) (c : A) (e1 : (eq A A a b)) (e2 : (eq A A b c))) : (eq A A a c)',
+      '',
+      'D : U',
+      'K : D',
+      'S : D',
+      '(ap (f : D) (a : D)) : D',
+      '(ap-K (x : D) (y : D)) : (eq D D (ap (ap K x) y) x)',
+      '(ap-S (x : D) (y : D) (z : D)) : (eq D D (ap (ap (ap S x) y) z) (ap (ap x z) (ap y z)))',
+      '(ap-cong (f : D) (g : D) (x : D) (e : (eq D D f g))) : (eq D D (ap f x) (ap g x))',
+      'meta',
+      'schema definition =',
+      '  fun s => match s with',
+      '  | [(f, [], ret),',
+      '     (f_eq, [], eq ret ret f body)]',
+      '      => (Ok [body, (refl ret body)])',
+      '  | _ => (Error "invalid definition")',
+      '  end',
+      'schema arg-definition = fun s => match s with | [(f, params, ret), (f_eq, params, eq ret ret applied body)] => if applied == (foldl (fun acc => fun p => match p with | (x, t) => (acc x) end) f params) then (Ok [body, (refl ret body)]) else (Error "LHS mismatch") end | _ => (Error "invalid arg-definition") end',
+      'construct by definition',
+      'I : D',
+      'I-eq : (eq D D I (ap (ap S K) K))',
+      'construct by arg-definition',
+      '(ap-I (x : D)) : (eq D D (ap I x) x)',
+      '(ap-I-pf (x : D)) : (eq (eq D D (ap I x) x) (eq D D (ap I x) x) (ap-I x) (',
+      '  trans D',
+      '  (ap I x) (ap (ap (ap S K) K) x) x',
+      '  (ap-cong I (ap (ap S K) K) x I-eq)',
+      '  (trans D (ap (ap (ap S K) K) x) (ap (ap K x) (ap K x)) x',
+      '  (ap-S K K x)',
+      '  (ap-K x (ap K x)))))',
+      'end',
+    ].join('\n');
+    expect(errors(code)).toEqual([]);
+  });
+
+  it('arg-definition schema produces correct witnesses for parameterized declarations', () => {
+    const code = [
+      'postulate',
+      'U : Sort',
+      '(eq (A : U) (B : U) (a : A) (b : B)) : U',
+      '(refl (A : U) (a : A)) : (eq A A a a)',
+      '(trans (A : U) (a : A) (b : A) (c : A) (e1 : (eq A A a b)) (e2 : (eq A A b c))) : (eq A A a c)',
+      '',
+      'D : U',
+      'K : D',
+      'S : D',
+      '(ap (f : D) (a : D)) : D',
+      '(ap-K (x : D) (y : D)) : (eq D D (ap (ap K x) y) x)',
+      '(ap-S (x : D) (y : D) (z : D)) : (eq D D (ap (ap (ap S x) y) z) (ap (ap x z) (ap y z)))',
+      '(ap-cong (f : D) (g : D) (x : D) (e : (eq D D f g))) : (eq D D (ap f x) (ap g x))',
+      'meta',
+      'schema definition =',
+      '  fun s => match s with',
+      '  | [(f, [], ret), (f_eq, [], eq ret ret f body)]',
+      '      => (Ok [body, (refl ret body)])',
+      '  | _ => (Error "invalid definition")',
+      '  end',
+      'construct by definition',
+      'I : D',
+      'I-eq : (eq D D I (ap (ap S K) K))',
+      'meta',
+      'schema arg-definition = fun s => match s with | [(f, params, ret), (f_eq, params, eq ret ret applied body)] => if applied == (foldl (fun acc => fun p => match p with | (x, t) => (acc x) end) f params) then (Ok [body, (refl ret body)]) else (Error "LHS mismatch") end | _ => (Error "invalid arg-definition") end',
+      'construct by arg-definition',
+      '(ap-I (x : D)) : (eq D D (ap I x) x)',
+      '(ap-I-pf (x : D)) : (eq (eq D D (ap I x) x) (eq D D (ap I x) x) (ap-I x) (',
+      '  trans D',
+      '  (ap I x) (ap (ap (ap S K) K) x) x',
+      '  (ap-cong I (ap (ap S K) K) x I-eq)',
+      '  (trans D (ap (ap (ap S K) K) x) (ap (ap K x) (ap K x)) x',
+      '  (ap-S K K x)',
+      '  (ap-K x (ap K x)))))',
+      'end',
+    ].join('\n');
+    expect(errors(code)).toEqual([]);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/*  Witness-and-discard: schema execution on construct blocks          */
+/*  These tests prepare for the implementation of running schemas on   */
+/*  construct declarations and type-checking the produced witnesses.   */
+/* ------------------------------------------------------------------ */
+
+describe('witness-and-discard (future: schema execution)', () => {
+  // Helper: the standard postulate + definition schema preamble
+  const preamble = [
+    'postulate',
+    'U : Sort',
+    '(eq (A : U) (B : U) (a : A) (b : B)) : U',
+    '(refl (A : U) (a : A)) : (eq A A a a)',
+    '',
+    'D : U',
+    'K : D',
+    'S : D',
+    '(ap (f : D) (a : D)) : D',
+    '(ap-K (x : D) (y : D)) : (eq D D (ap (ap K x) y) x)',
+    '(ap-S (x : D) (y : D) (z : D)) : (eq D D (ap (ap (ap S x) y) z) (ap (ap x z) (ap y z)))',
+    'meta',
+    'schema definition =',
+    '  fun s => match s with',
+    '  | [(f, [], ret),',
+    '     (f_eq, [], eq ret ret f body)]',
+    '      => (Ok [body, (refl ret body)])',
+    '  | _ => (Error "invalid definition")',
+    '  end',
+  ];
+
+  it('correct construct block matching definition schema has no errors', () => {
+    const code = [
+      ...preamble,
+      'construct by definition',
+      'I : D',
+      'I-eq : (eq D D I (ap (ap S K) K))',
+      'end',
+    ].join('\n');
+    expect(errors(code)).toEqual([]);
+  });
+
+  // --- Circular / self-referential witnesses ---
+
+  it('should fail: equation I = I produces circular witness', () => {
+    const code = [
+      ...preamble,
+      'construct by definition',
+      'I : D',
+      // eq D D I I means "I = I" — the body IS I, making the witness self-referential
+      'I-eq : (eq D D I I)',
+      'end',
+    ].join('\n');
+    const errs = errors(code);
+    expect(errs.length).toBe(1);
+    expect(errs[0].message).toContain('ill-typed witnesses');
+  });
+
+  // --- Construct block structural mismatches ---
+
+  it('should fail: three declarations instead of two', () => {
+    const code = [
+      ...preamble,
+      'construct by definition',
+      'I : D',
+      'I-eq : (eq D D I (ap (ap S K) K))',
+      'extra : D',
+      'end',
+    ].join('\n');
+    expect(errors(code).length).toBeGreaterThan(0);
+  });
+
+  it('should fail: one declaration instead of two', () => {
+    const code = [
+      ...preamble,
+      'construct by definition',
+      'I : D',
+      'end',
+    ].join('\n');
+    expect(errors(code).length).toBeGreaterThan(0);
+  });
+
+  it('should fail: equation sides swapped in construct block', () => {
+    const code = [
+      ...preamble,
+      'construct by definition',
+      'I : D',
+      'I-eq : (eq D D (ap (ap S K) K) I)',
+      'end',
+    ].join('\n');
+    // Pattern matches but with f=(ap (ap S K) K) and body=I,
+    // producing wrong witnesses that won't type-check
+    expect(errors(code).length).toBeGreaterThan(0);
+  });
+
+  it('should fail: second declaration is not an equation', () => {
+    const code = [
+      ...preamble,
+      'construct by definition',
+      'I : D',
+      'I-val : D',
+      'end',
+    ].join('\n');
+    expect(errors(code).length).toBeGreaterThan(0);
+  });
+
+  it('should fail: declarations have parameters but schema expects []', () => {
+    const code = [
+      ...preamble,
+      'construct by definition',
+      '(I (x : D)) : D',
+      'I-eq : (eq D D (I K) (ap (ap S K) K))',
+      'end',
+    ].join('\n');
+    expect(errors(code).length).toBeGreaterThan(0);
+  });
+
+  // --- Schema produces ill-typed witnesses ---
+
+  it('should fail: schema produces witness of wrong type', () => {
+    const code = [
+      'postulate',
+      'U : Sort',
+      '(eq (A : U) (B : U) (a : A) (b : B)) : U',
+      '(refl (A : U) (a : A)) : (eq A A a a)',
+      'D : U',
+      'K : D',
+      'meta',
+      'schema bad-schema =',
+      '  fun s => match s with',
+      '  | _ => (Ok [K, K])',
+      '  end',
+      'construct by bad-schema',
+      'I : D',
+      'I-eq : (eq D D I K)',
+      'end',
+    ].join('\n');
+    // K : D but I-eq needs type (eq D D I K) — substituting K for I-eq is ill-typed
+    expect(errors(code).length).toBeGreaterThan(0);
+  });
+
+  it('should fail: schema returns wrong number of witnesses', () => {
+    const code = [
+      'postulate',
+      'U : Sort',
+      'D : U',
+      'K : D',
+      'meta',
+      'schema too-few =',
+      '  fun s => match s with',
+      '  | _ => (Ok [K])',
+      '  end',
+      'construct by too-few',
+      'I : D',
+      'J : D',
+      'end',
+    ].join('\n');
+    expect(errors(code).length).toBeGreaterThan(0);
+  });
+
+  it('should fail: schema returns Error for valid-looking input', () => {
+    const code = [
+      'postulate',
+      'U : Sort',
+      'D : U',
+      'K : D',
+      'meta',
+      'schema always-fail =',
+      '  fun s => match s with',
+      '  | _ => (Error "nope")',
+      '  end',
+      'construct by always-fail',
+      'I : D',
+      'end',
+    ].join('\n');
+    expect(errors(code).length).toBeGreaterThan(0);
+  });
+
+  // --- Schema itself has subtle errors ---
+
+  it('should fail: schema pattern binds wrong component as equation', () => {
+    const code = [
+      'postulate',
+      'U : Sort',
+      '(eq (A : U) (B : U) (a : A) (b : B)) : U',
+      '(refl (A : U) (a : A)) : (eq A A a a)',
+      'D : U',
+      'K : D',
+      'S : D',
+      '(ap (f : D) (a : D)) : D',
+      'meta',
+      'schema buggy-def =',
+      '  fun s => match s with',
+      '  | [(f, [], ret),',
+      '     (f_eq, [], eq ret ret f body)]',
+      '      => (Ok [body, (refl body body)])',
+      '  | _ => (Error "invalid")',
+      '  end',
+      'construct by buggy-def',
+      'I : D',
+      'I-eq : (eq D D I (ap (ap S K) K))',
+      'end',
+    ].join('\n');
+    // (refl body body) produces wrong type — witness for I-eq is ill-typed
+    expect(errors(code).length).toBeGreaterThan(0);
+  });
+
+  it('should fail: schema swaps witness order', () => {
+    const code = [
+      'postulate',
+      'U : Sort',
+      '(eq (A : U) (B : U) (a : A) (b : B)) : U',
+      '(refl (A : U) (a : A)) : (eq A A a a)',
+      'D : U',
+      'K : D',
+      'S : D',
+      '(ap (f : D) (a : D)) : D',
+      'meta',
+      'schema swapped-def =',
+      '  fun s => match s with',
+      '  | [(f, [], ret),',
+      '     (f_eq, [], eq ret ret f body)]',
+      '      => (Ok [(refl ret body), body])',
+      '  | _ => (Error "invalid")',
+      '  end',
+      'construct by swapped-def',
+      'I : D',
+      'I-eq : (eq D D I (ap (ap S K) K))',
+      'end',
+    ].join('\n');
+    // First witness is a proof but I : D expects type D
+    expect(errors(code).length).toBeGreaterThan(0);
   });
 });
 
@@ -493,7 +874,7 @@ describe('OL scope checking in schemas', () => {
   it('known OL name in schema expression is accepted', () => {
     const code = [
       'postulate', 'x : Sort',
-      'schema', 'foo = fun s => (Ok [x])',
+      'meta', 'schema foo = fun s => (Ok [x])',
       'end',
     ].join('\n');
     expect(errors(code)).toEqual([]);
@@ -502,7 +883,7 @@ describe('OL scope checking in schemas', () => {
   it('unknown name in schema expression errors', () => {
     const code = [
       'postulate', 'x : Sort',
-      'schema', 'foo = fun s => (Ok [unknown_thing])',
+      'meta', 'schema foo = fun s => (Ok [unknown_thing])',
       'end',
     ].join('\n');
     const msgs = errorMessages(code);
@@ -511,14 +892,14 @@ describe('OL scope checking in schemas', () => {
 
   it('Sort is always in scope in schemas', () => {
     expect(errors(
-      'schema\nfoo = fun s => (Ok [Sort])\nend'
+      'meta\nschema foo = fun s => (Ok [Sort])\nend'
     )).toEqual([]);
   });
 
   it('construct declarations not visible in preceding schema', () => {
     const code = [
       'postulate', 'x : Sort',
-      'schema', 'foo = fun s => (Ok [y])',
+      'meta', 'schema foo = fun s => (Ok [y])',
       'construct by foo', 'y : x',
       'end',
     ].join('\n');
@@ -529,8 +910,8 @@ describe('OL scope checking in schemas', () => {
   it('?-prefixed variables in OL patterns are not scope-checked', () => {
     const code = [
       'postulate', 'x : Sort',
-      'schema',
-      'foo = fun s => match s with',
+      'meta',
+      'schema foo = fun s => match s with',
       '  | [(name, params, anything)] => (Ok [anything])',
       '  | _ => (Error "bad")',
       '  end',
@@ -544,8 +925,8 @@ describe('OL scope checking in schemas', () => {
       'postulate', 'U : Sort',
       '(eq (A : U) (B : U) (a : A) (b : B)) : U',
       '(refl (A : U) (a : A)) : (eq A A a a)',
-      'schema',
-      'foo = fun s => match s with',
+      'meta',
+      'schema foo = fun s => match s with',
       '  | [(f, [], eq ret ret f (refl ret body))]',
       '    => (Ok [body])',
       '  | _ => (Error "bad")',
@@ -557,13 +938,13 @@ describe('OL scope checking in schemas', () => {
 
   it('standalone schema without OL context is permissive', () => {
     // No postulate context → permissive mode, bare identifiers accepted as Term
-    expect(errors('schema\nfoo = fun s => (Ok [x])\nend')).toEqual([]);
+    expect(errors('meta\nschema foo = fun s => (Ok [x])\nend')).toEqual([]);
   });
 
   it('schema with OL context is strict', () => {
     // With postulate → strict mode, unknown identifiers error
     const msgs = errorMessages(
-      'postulate\ny : Sort\nschema\nfoo = fun s => (Ok [x])\nend'
+      'postulate\ny : Sort\nmeta\nschema foo = fun s => (Ok [x])\nend'
     );
     expect(msgs).toContainEqual(expect.stringContaining('Unbound variable x'));
   });
@@ -571,7 +952,7 @@ describe('OL scope checking in schemas', () => {
   it('unbound in expression position errors when OL scope is set', () => {
     const code = [
       'postulate', 'x : Sort',
-      'schema', 'foo = fun s => (Ok [unbound])',
+      'meta', 'schema foo = fun s => (Ok [unbound])',
       'end',
     ].join('\n');
     const msgs = errorMessages(code);
@@ -585,7 +966,7 @@ describe('OL scope checking in schemas', () => {
 
 describe('ML holes', () => {
   it('hole as schema body gets schema type as goal', () => {
-    const h = holes('schema\nfoo = ?\nend');
+    const h = holes('meta\nschema foo = ?\nend');
     expect(h.length).toBe(1);
     const goal = printTerm(h[0][1].goal);
     // Schema type is expanded (no "Signature" shorthand)
@@ -595,7 +976,7 @@ describe('ML holes', () => {
   });
 
   it('multiple holes each get separate info', () => {
-    const code = 'schema\nfoo = fun s => match s with | _ => (Ok [?, ?]) end\nend';
+    const code = 'meta\nschema foo = fun s => match s with | _ => (Ok [?, ?]) end\nend';
     const h = holes(code);
     expect(h.length).toBe(2);
   });
@@ -603,8 +984,8 @@ describe('ML holes', () => {
   it('hole in Error argument gets String as goal', () => {
     const code = [
       'postulate', 'x : Sort',
-      'schema',
-      'foo = fun s => match s with | _ => (Error ?) end',
+      'meta',
+      'schema foo = fun s => match s with | _ => (Error ?) end',
       'construct by foo', 'y : x',
       'end',
     ].join('\n');
@@ -616,7 +997,7 @@ describe('ML holes', () => {
   it('ML hole context includes OL bindings from postulate', () => {
     const code = [
       'postulate', 'x : Sort', 'y : x',
-      'schema', 'foo = ?',
+      'meta', 'schema foo = ?',
       'end',
     ].join('\n');
     const h = holes(code);
@@ -627,15 +1008,15 @@ describe('ML holes', () => {
 
   it('hole in fun parameter is accepted as wildcard', () => {
     expect(errors(
-      'schema\nfoo = fun ? => (Ok [])\nend'
+      'meta\nschema foo = fun ? => (Ok [])\nend'
     )).toEqual([]);
   });
 
   it('hole in function position of application has goal and context', () => {
     const code = [
       'postulate', 'x : Sort',
-      'schema',
-      'foo = fun s => match s with',
+      'meta',
+      'schema foo = fun s => match s with',
       '  | _ => (Ok [(? x)])',
       '  end',
       'end',
@@ -650,7 +1031,7 @@ describe('ML holes', () => {
   });
 
   it('hole as bare expression in Ok list has goal Term', () => {
-    const h = holes('schema\nfoo = fun s => (Ok [?]) end\nend');
+    const h = holes('meta\nschema foo = fun s => (Ok [?]) end\nend');
     expect(h.length).toBe(1);
     expect(printTerm(h[0][1].goal)).toBe('Term');
   });
@@ -658,8 +1039,8 @@ describe('ML holes', () => {
   it('hole in function position of OL application has goal and context', () => {
     const code = [
       'postulate', 'x : Sort',
-      'schema',
-      'foo = fun s => (Ok [(?)])',
+      'meta',
+      'schema foo = fun s => (Ok [(?)])',
       'end',
     ].join('\n');
     const h = holes(code);
@@ -667,13 +1048,13 @@ describe('ML holes', () => {
   });
 
   it('hole in scrutinee of match has goal and context', () => {
-    const code = 'schema\nfoo = fun s => match ? with | _ => (Ok []) end\nend';
+    const code = 'meta\nschema foo = fun s => match ? with | _ => (Ok []) end\nend';
     const h = holes(code);
     expect(h.length).toBeGreaterThanOrEqual(1);
   });
 
   it('hole in condition of if has goal and context', () => {
-    const code = 'schema\nfoo = fun s => (if ? then (Ok []) else (Error "bad") end)\nend';
+    const code = 'meta\nschema foo = fun s => (if ? then (Ok []) else (Error "bad") end)\nend';
     const h = holes(code);
     expect(h.length).toBeGreaterThanOrEqual(1);
   });
@@ -681,8 +1062,8 @@ describe('ML holes', () => {
   it('every ML hole always has a context', () => {
     const code = [
       'postulate', 'x : Sort', 'y : x',
-      'schema',
-      'foo = fun s => match s with',
+      'meta',
+      'schema foo = fun s => match s with',
       '  | [(name, params, ret)] => (Ok [?, (? ret)])',
       '  | _ => (Error ?)',
       '  end',
@@ -705,8 +1086,8 @@ describe('ML total error localization', () => {
   it('reports errors in multiple match branches, not just the first', () => {
     const code = [
       'postulate', 'x : Sort',
-      'schema',
-      'foo = fun s => match s with',
+      'meta',
+      'schema foo = fun s => match s with',
       '  | [] => "wrong1"',
       '  | _ => "wrong2"',
       '  end',
@@ -720,8 +1101,8 @@ describe('ML total error localization', () => {
   it('reports errors in both if branches', () => {
     const code = [
       'postulate', 'x : Sort',
-      'schema',
-      'foo = fun s => (if s == s then "wrong1" else "wrong2" end)',
+      'meta',
+      'schema foo = fun s => (if s == s then "wrong1" else "wrong2" end)',
       'end',
     ].join('\n');
     const errs = errors(code);
@@ -731,8 +1112,8 @@ describe('ML total error localization', () => {
   it('reports hole AND error in same expression', () => {
     const code = [
       'postulate', 'x : Sort',
-      'schema',
-      'foo = fun s => match s with',
+      'meta',
+      'schema foo = fun s => match s with',
       '  | _ => (Ok [?, badvar])',
       '  end',
       'end',
@@ -749,8 +1130,8 @@ describe('ML total error localization', () => {
   it('error in scrutinee does not prevent checking branches', () => {
     const code = [
       'postulate', 'x : Sort',
-      'schema',
-      'foo = fun s => match badvar with',
+      'meta',
+      'schema foo = fun s => match badvar with',
       '  | _ => "also wrong"',
       '  end',
       'end',
@@ -763,8 +1144,8 @@ describe('ML total error localization', () => {
   it('multiple unbound variables each get their own error', () => {
     const code = [
       'postulate', 'x : Sort',
-      'schema',
-      'foo = fun s => (Ok [bad1, bad2, bad3])',
+      'meta',
+      'schema foo = fun s => (Ok [bad1, bad2, bad3])',
       'end',
     ].join('\n');
     const errs = errors(code);
@@ -774,8 +1155,8 @@ describe('ML total error localization', () => {
   it('error in list element does not prevent checking other elements', () => {
     const code = [
       'postulate', 'x : Sort',
-      'schema',
-      'foo = fun s => (Ok [x, badvar, x])',
+      'meta',
+      'schema foo = fun s => (Ok [x, badvar, x])',
       'end',
     ].join('\n');
     const errs = errors(code);
@@ -793,7 +1174,7 @@ describe('context isolation', () => {
   it('schema bindings do NOT leak into construct', () => {
     const code = [
       'postulate', 'x : Sort',
-      'schema', 'foo = fun s => (Ok [])',
+      'meta', 'schema foo = fun s => (Ok [])',
       'construct by foo',
       'y : foo',
       'end',
@@ -814,12 +1195,12 @@ describe('context isolation', () => {
 
   it('standalone schema with no postulate context works', () => {
     expect(errors(
-      'schema\nfoo = fun s => match s with | _ => (Ok []) end\nend'
+      'meta\nschema foo = fun s => match s with | _ => (Ok []) end\nend'
     )).toEqual([]);
   });
 
   it('empty schema body does not crash', () => {
-    expect(() => errors('schema\nend')).not.toThrow();
+    expect(() => errors('meta\nend')).not.toThrow();
   });
 
   it('empty construct body does not crash', () => {
@@ -834,9 +1215,9 @@ describe('context isolation', () => {
 describe('fun morph parser', () => {
   it('fun inside schema does not capture block end', () => {
     const code = [
-      'postulate', 'x : Sort',
-      'schema', 'foo = fun s => (Ok [])',
-      'construct by foo', 'y : x',
+      'postulate', 'x : Sort', 'y : x',
+      'meta', 'schema foo = fun s => match s with | [(name, [], ret)] => (Ok [y]) | _ => (Error "bad") end',
+      'construct by foo', 'z : x',
       'end',
     ].join('\n');
     expect(errors(code)).toEqual([]);
@@ -844,8 +1225,8 @@ describe('fun morph parser', () => {
 
   it('nested fun inside match works', () => {
     const code = [
-      'schema',
-      'foo = fun s => match s with',
+      'meta',
+      'schema foo = fun s => match s with',
       '  | _ => fun x => (Ok []) end',
       'end',
     ].join('\n');
@@ -855,8 +1236,8 @@ describe('fun morph parser', () => {
 
   it('match => inside fun body uses unmorphed =>', () => {
     const code = [
-      'schema',
-      'foo = fun s => match s with | x => (Ok []) | _ => (Error "bad") end',
+      'meta',
+      'schema foo = fun s => match s with | x => (Ok []) | _ => (Error "bad") end',
       'end',
     ].join('\n');
     expect(errors(code)).toEqual([]);
@@ -870,15 +1251,15 @@ describe('fun morph parser', () => {
 describe('schema annotation edge cases', () => {
   it('hole in type annotation is invalid', () => {
     const msgs = errorMessages(
-      'schema\nfoo : (? -> (Result (List Term))) = fun s => (Ok [])\nend'
+      'meta\nschema foo : (? -> (Result (List Term))) = fun s => (Ok [])\nend'
     );
     expect(msgs).toContainEqual(expect.stringContaining('Invalid type annotation'));
   });
 
   it('correct annotation with wrong body reports only body error', () => {
     const code = [
-      'schema',
-      'foo : ((List Signature) -> (Result (List Term))) = fun s => "wrong"',
+      'meta',
+      'schema foo : ((List Signature) -> (Result (List Term))) = fun s => "wrong"',
       'end',
     ].join('\n');
     const msgs = errorMessages(code);
@@ -888,18 +1269,18 @@ describe('schema annotation edge cases', () => {
   });
 
   it('unknown type name in annotation is invalid', () => {
-    const msgs = errorMessages('schema\nfoo : UnknownType = fun s => (Ok [])\nend');
+    const msgs = errorMessages('meta\nschema foo : UnknownType = fun s => (Ok [])\nend');
     expect(msgs).toContainEqual(expect.stringContaining('Invalid type annotation'));
   });
 
   it('Signature shorthand in annotation is accepted', () => {
     expect(errors(
-      'schema\nfoo : ((List Signature) -> (Result (List Term))) = fun s => (Ok [])\nend'
+      'meta\nschema foo : ((List Signature) -> (Result (List Term))) = fun s => (Ok [])\nend'
     )).toEqual([]);
   });
 
   it('pair type annotation errors as schema mismatch', () => {
-    const msgs = errorMessages('schema\nfoo : (Bool, String) = fun s => (Ok [])\nend');
+    const msgs = errorMessages('meta\nschema foo : (Bool, String) = fun s => (Ok [])\nend');
     expect(msgs).toContainEqual(expect.stringContaining('Schema type mismatch'));
   });
 });
@@ -912,7 +1293,7 @@ describe('shared namespace', () => {
   it('OL postulate names are visible inside schema body', () => {
     const code = [
       'postulate', 'U : Sort', '(eq (A : U) (B : U) (a : A) (b : B)) : U',
-      'schema', 'foo = fun s => (Ok [eq U U Sort Sort])',
+      'meta', 'schema foo = fun s => (Ok [eq U U Sort Sort])',
       'end',
     ].join('\n');
     expect(errors(code)).toEqual([]);
@@ -921,7 +1302,7 @@ describe('shared namespace', () => {
   it('OL name not in scope produces error in schema body', () => {
     const code = [
       'postulate', 'x : Sort',
-      'schema', 'foo = fun s => (Ok [nonexistent])',
+      'meta', 'schema foo = fun s => (Ok [nonexistent])',
       'end',
     ].join('\n');
     const msgs = errorMessages(code);
@@ -931,8 +1312,8 @@ describe('shared namespace', () => {
   it('ML pattern variable x usable in schema body expression', () => {
     const code = [
       'postulate', 'x : Sort',
-      'schema',
-      'foo = fun s => match s with',
+      'meta',
+      'schema foo = fun s => match s with',
       '  | [(name, [], ret)] => (Ok [ret])',
       '  | _ => (Error "bad")',
       '  end',
@@ -944,7 +1325,7 @@ describe('shared namespace', () => {
   it('ML hole in schema sees OL context', () => {
     const code = [
       'postulate', 'x : Sort', 'y : x',
-      'schema', 'foo = ?',
+      'meta', 'schema foo = ?',
       'end',
     ].join('\n');
     const h = holes(code);
@@ -958,8 +1339,8 @@ describe('shared namespace', () => {
   it('ML hole in match branch sees pattern bindings AND OL context', () => {
     const code = [
       'postulate', 'x : Sort',
-      'schema',
-      'foo = fun s => match s with',
+      'meta',
+      'schema foo = fun s => match s with',
       '  | [(name, [], ret)] => (Ok [?])',
       '  | _ => (Error "bad")',
       '  end',
@@ -980,8 +1361,8 @@ describe('shared namespace', () => {
       '(refl (A : U) (a : A)) : (eq A A a a)',
       'D : U', 'K : D', 'S : D',
       '(ap (f : D) (a : D)) : D',
-      'schema',
-      'definition = fun s => match s with',
+      'meta',
+      'schema definition = fun s => match s with',
       '  | [(f, [], ret), (f_eq, [], eq ret ret f body)]',
       '      => (Ok [body, (refl ret body)])',
       '  | _ => (Error "invalid")',
@@ -1054,7 +1435,7 @@ describe('ML type display round-trip', () => {
 
   it('schema hole goals round-trip', () => {
     // The actual schema type, displayed via mlTypeToTerm
-    const code = 'schema\nfoo = ?\nend';
+    const code = 'meta\nschema foo = ?\nend';
     const h = holes(code);
     expect(h.length).toBe(1);
     const goalStr = printTerm(h[0][1].goal);

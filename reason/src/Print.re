@@ -29,7 +29,7 @@ let rec debugTerm = (t: term): string => {
   | Let(b, body) => "Let(" ++ debugTerm(b) ++ "," ++ debugTerm(body) ++ ")"
   | If(c, t, e) => "If(" ++ debugTerm(c) ++ "," ++ debugTerm(t) ++ "," ++ debugTerm(e) ++ ")"
   | Postulate(body, _) => "Post([" ++ String.concat(",", List.map(debugTerm, body)) ++ "])"
-  | Schema(_, _) => "Schema"
+  | Meta(_, _) => "Meta"
   | Construct(_, _, _) => "Construct"
   | BuilderError => "ERR"
   };
@@ -77,8 +77,8 @@ let rec printTerm = (t: term): string => {
       ++ String.concat("\n", List.map(printTerm, body))
       ++ " end"
       ++ (switch (rest) { | None => "" | Some(r) => " " ++ printTerm(r) })
-    | Schema(body, rest) =>
-      "schema "
+    | Meta(body, rest) =>
+      "meta "
       ++ String.concat("\n", List.map(printTerm, body))
       ++ " end"
       ++ (switch (rest) { | None => "" | Some(r) => " " ++ printTerm(r) })

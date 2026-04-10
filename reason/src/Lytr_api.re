@@ -49,6 +49,7 @@ let contextToJsMap = (ctx: context): jsMap => {
       switch (v) {
       | OL(Some(ft)) => jsMapSet(m, k, displayTerm(k, ft))
       | ML(ty) => jsMapSet(m, k, displayTerm(k, ([], mlTypeToTerm(ty))))
+      | SchemaBinding(_) | MetaLet(_) => ()
       | OL(None) => ()
       },
     ctx,
@@ -139,6 +140,21 @@ let parseAndPrint = (code: string): string =>
 
 let parseAndDebug = (code: string): string =>
   Print.debugTerm(build(parse(g, lex(g, code))));
+
+/* ML evaluation */
+type jsEvalResult;
+
+[@mel.obj]
+external makeEvalResult:
+  (~ok: bool, ~value: string, ~error: string) => jsEvalResult = "";
+
+let evalCode = (code: string): jsEvalResult => {
+  let ast = build(parse(g, lex(g, code)));
+  switch (Eval.evalExpr(Eval.StringMap.empty, ast)) {
+  | Ok(v) => makeEvalResult(~ok=true, ~value=Print.printTerm(Eval.termOf(v)), ~error="")
+  | Err(msg) => makeEvalResult(~ok=false, ~value="", ~error=msg)
+  };
+};
 
 /* === Token data for CodeMirror tree === */
 

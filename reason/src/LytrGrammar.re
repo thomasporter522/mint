@@ -1,6 +1,6 @@
 open Grammar;
 
-let blockKeywords = ["postulate", "schema", "construct"];
+let blockKeywords = ["postulate", "meta", "construct"];
 
 let grammar = {
   let g =
@@ -53,10 +53,12 @@ let grammar = {
     |> addMatch(MatchPair("if", "then"))
     |> addMatch(MatchPair("then", "else"))
     |> addMatch(MatchPair("else", "end"))
-    /* let...in — matched pair, body after in needs parens */
+    /* let...in for local bindings in expressions */
     |> addToken("let", {kind: Keyword("let"), leftPrec: Uninterested, rightPrec: Interior})
     |> addToken("in",  {kind: Keyword("in"),  leftPrec: Interior,     rightPrec: Precedence(0.1)})
     |> addMatch(MatchPair("let", "in"))
+    /* schema: keyword atom used as definition marker inside meta blocks */
+    |> addToken("schema", {kind: Keyword("schema"), leftPrec: Uninterested, rightPrec: Uninterested})
     |> addToken("_",   {kind: Symbol("_"),    leftPrec: Uninterested, rightPrec: Uninterested})
     /* construct...by — matched pair, by takes over block-end/block-block matching */
     |> addToken("by", {kind: Keyword("by"), leftPrec: Interior, rightPrec: Interior})
@@ -82,7 +84,7 @@ let grammar = {
     g
     |> addMatch(MatchBlockEnd("by", "end"))
     |> addMatch(MatchBlockBlock("by", "postulate"))
-    |> addMatch(MatchBlockBlock("by", "schema"))
+    |> addMatch(MatchBlockBlock("by", "meta"))
     |> addMatch(MatchBlockBlock("by", "construct"));
 
   g;

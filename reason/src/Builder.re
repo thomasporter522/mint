@@ -60,7 +60,7 @@ and buildBlock = (keyword, contents, rest): term => {
   let body = buildItems(contents);
   switch (keyword) {
   | "postulate" => mk(Postulate(body, rest))
-  | "schema" => mk(Schema(body, rest))
+  | "meta" => mk(Meta(body, rest))
   | "construct" =>
     switch (body, rest) {
     | ([], Some(r)) => r  /* construct by ... — real content is in the "by" block */
