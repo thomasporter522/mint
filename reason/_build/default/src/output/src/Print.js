@@ -53,21 +53,23 @@ function debugTerm(t) {
       return p + ("Ap(" + (debugTerm(ins._0) + (",[" + (Stdlib__String.concat(",", Stdlib__List.map(debugTerm, ins._1)) + "])"))));
     case /* List */ 10 :
       return "List([" + (Stdlib__String.concat(",", Stdlib__List.map(debugTerm, ins._0)) + "])");
-    case /* Fun */ 11 :
+    case /* Cons */ 11 :
+      return "Cons([" + (Stdlib__String.concat(",", Stdlib__List.map(debugTerm, ins._0)) + ("]," + (debugTerm(ins._1) + ")")));
+    case /* Fun */ 12 :
       return "Fun(" + (debugTerm(ins._0) + ("," + (debugTerm(ins._1) + ")")));
-    case /* Match */ 12 :
+    case /* Match */ 13 :
       return "Match(" + (debugTerm(ins._0) + (",[" + (Stdlib__String.concat(",", Stdlib__List.map((function (param) {
         return "(" + (debugTerm(param[0]) + ("=>" + (debugTerm(param[1]) + ")")));
       }), ins._1)) + "])")));
-    case /* If */ 13 :
+    case /* If */ 14 :
       return "If(" + (debugTerm(ins._0) + ("," + (debugTerm(ins._1) + ("," + (debugTerm(ins._2) + ")")))));
-    case /* Let */ 14 :
+    case /* Let */ 15 :
       return "Let(" + (debugTerm(ins._0) + ("," + (debugTerm(ins._1) + ")")));
-    case /* Postulate */ 15 :
+    case /* Postulate */ 16 :
       return "Post([" + (Stdlib__String.concat(",", Stdlib__List.map(debugTerm, ins._0)) + "])");
-    case /* Meta */ 16 :
+    case /* Meta */ 17 :
       return "Meta";
-    case /* Construct */ 17 :
+    case /* Construct */ 18 :
       return "Construct";
   }
 }
@@ -112,33 +114,39 @@ function printTerm(t) {
       case /* List */ 10 :
         inner = "[" + (Stdlib__String.concat(", ", Stdlib__List.map(printTerm, token._0)) + "]");
         break;
-      case /* Fun */ 11 :
+      case /* Cons */ 11 :
+        const heads = token._0;
+        inner = "[" + (Stdlib__String.concat(", ", Stdlib__List.map(printTerm, heads)) + ((
+          Stdlib__List.length(heads) > 0 ? ", " : ""
+        ) + ("..." + (printTerm(token._1) + "]"))));
+        break;
+      case /* Fun */ 12 :
         inner = "fun " + (printTerm(token._0) + (" => " + printTerm(token._1)));
         break;
-      case /* Match */ 12 :
+      case /* Match */ 13 :
         inner = "match " + (printTerm(token._0) + (" with" + (Stdlib__String.concat("", Stdlib__List.map((function (param) {
           return " | " + (printTerm(param[0]) + (" => " + printTerm(param[1])));
         }), token._1)) + " end")));
         break;
-      case /* If */ 13 :
+      case /* If */ 14 :
         inner = "if " + (printTerm(token._0) + (" then " + (printTerm(token._1) + (" else " + (printTerm(token._2) + " end")))));
         break;
-      case /* Let */ 14 :
+      case /* Let */ 15 :
         inner = "let " + (printTerm(token._0) + (" in " + printTerm(token._1)));
         break;
-      case /* Postulate */ 15 :
+      case /* Postulate */ 16 :
         const rest = token._1;
         inner = "postulate " + (Stdlib__String.concat("\n", Stdlib__List.map(printTerm, token._0)) + (" end" + (
           rest !== undefined ? " " + printTerm(rest) : ""
         )));
         break;
-      case /* Meta */ 16 :
+      case /* Meta */ 17 :
         const rest$1 = token._1;
         inner = "meta " + (Stdlib__String.concat("\n", Stdlib__List.map(printTerm, token._0)) + (" end" + (
           rest$1 !== undefined ? " " + printTerm(rest$1) : ""
         )));
         break;
-      case /* Construct */ 17 :
+      case /* Construct */ 18 :
         const rest$2 = token._2;
         inner = "construct " + (printTerm(token._0) + (" " + (Stdlib__String.concat("\n", Stdlib__List.map(printTerm, token._1)) + (" end" + (
           rest$2 !== undefined ? " " + printTerm(rest$2) : ""

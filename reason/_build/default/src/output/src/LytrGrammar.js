@@ -25,6 +25,13 @@ const g = Melange__Grammar.addMatch({
   },
   leftPrec: /* Interior */ 0,
   rightPrec: /* Interior */ 0
+}, Melange__Grammar.addToken("...", {
+  kind: {
+    TAG: /* Symbol */ 1,
+    _0: "..."
+  },
+  leftPrec: /* Uninterested */ 1,
+  rightPrec: /* Uninterested */ 1
 }, Melange__Grammar.addToken("_", {
   kind: {
     TAG: /* Symbol */ 1,
@@ -253,7 +260,7 @@ const g = Melange__Grammar.addMatch({
   },
   leftPrec: /* Uninterested */ 1,
   rightPrec: /* Interior */ 0
-}, Melange__Grammar.empty)))))))))))))))))))))))))))))))))))))))))))))))));
+}, Melange__Grammar.empty))))))))))))))))))))))))))))))))))))))))))))))))));
 
 const g$1 = Stdlib__List.fold_left((function (g, kw) {
   const g$1 = Melange__Grammar.addBlock(kw, "end", g);

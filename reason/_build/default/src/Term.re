@@ -16,6 +16,7 @@ type cTerm =
   | BinOp(string, term, term)
   | Ap(term, list(term))
   | List(list(term))
+  | Cons(list(term), term)               /* [h1, h2, ...tail] */
   | Fun(term, term)                          /* fun pat => body */
   | Match(term, list((term, term)))          /* match scrut with branches */
   | If(term, term, term)                     /* if cond then thenBr else elseBr */

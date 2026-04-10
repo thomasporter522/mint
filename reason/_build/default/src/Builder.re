@@ -171,7 +171,16 @@ and buildForm = (form: openForm): term => {
         | [first, ...rest] => mk(Comma(first, buildComma(rest)));
       let t = buildComma(elements);
       {...t, meta: {...t.meta, parens: true}}
-    | ("[", items) => mk(Term.List(items))
+    | ("[", items) =>
+      /* Check if last element is a spread: ...rest */
+      switch (List.rev(items)) {
+      | [{value: Ap({value: Identifier("..."), _}, [tail]), _}, ...revHeads] =>
+        mk(Term.Cons(List.rev(revHeads), tail))
+      | [{value: Identifier("..."), _}, ...revHeads] =>
+        /* bare [...] with no tail identifier — treat as empty spread */
+        mk(Term.Cons(List.rev(revHeads), mk(Term.List([mk(Hole(true))]))))
+      | _ => mk(Term.List(items))
+      }
     | _ => mk(BuilderError)
     };
 

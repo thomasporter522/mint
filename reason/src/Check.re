@@ -487,13 +487,23 @@ and checkTerm = (ctx: context, mode: checkingMode, t: term): staticInfo =>
               },
             ctx, Eval.StringMap.empty,
           );
-          /* Patch closures: replace each closure's env with the full env */
-          let evalEnv = Eval.StringMap.map(
-            fun
-            | Eval.Closure(_, pat, body) => Eval.Closure(rawEnv, pat, body)
-            | v => v,
-            rawEnv,
-          );
+          /* Patch closures: iteratively replace each closure's env with
+             the latest env so that nested function calls (e.g. concat
+             calling append calling reverse) all see the complete env. */
+          let patchClosures = (env) =>
+            Eval.StringMap.map(
+              fun
+              | Eval.Closure(_, pat, body) => Eval.Closure(env, pat, body)
+              | v => v,
+              env,
+            );
+          let evalEnv = {
+            let env = ref(rawEnv);
+            for (_ in 1 to 5) {
+              env := patchClosures(env^);
+            };
+            env^;
+          };
           switch (Eval.evalExpr(evalEnv, schemaBody)) {
           | Eval.Ok(schemaVal) =>
             switch (Eval.runSchema(schemaVal, body)) {

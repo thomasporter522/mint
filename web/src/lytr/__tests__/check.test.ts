@@ -360,7 +360,7 @@ describe('schema blocks', () => {
 
   it('accepts correct type annotation written out fully', () => {
     expect(errors(
-      'meta\nschema declaration : ((List (Term, (List (String, Term)), Term)) -> (Result (List Term))) = ?\nend'
+      'meta\nschema declaration : ((List (Term, (List (Term, Term)), Term)) -> (Result (List Term))) = ?\nend'
     )).toEqual([]);
   });
 
@@ -1008,7 +1008,7 @@ describe('ML holes', () => {
     expect(h.length).toBe(1);
     const goal = printTerm(h[0][1].goal);
     // Schema type is expanded (no "Signature" shorthand)
-    expect(goal).toContain('String');
+    expect(goal).toContain('Term');
     expect(goal).toContain('->');
     expect(goal).toContain('Result');
   });

@@ -194,10 +194,82 @@ function buildForm(form) {
           }
           break;
         case "[" :
-          return Melange__Term.mk({
-            TAG: /* List */ 10,
-            _0: elements
-          });
+          const match$3 = Stdlib__List.rev(elements);
+          if (!match$3) {
+            return Melange__Term.mk({
+              TAG: /* List */ 10,
+              _0: elements
+            });
+          }
+          const match$4 = match$3.hd.value;
+          if (/* tag */ typeof match$4 === "number" || typeof match$4 === "string") {
+            return Melange__Term.mk({
+              TAG: /* List */ 10,
+              _0: elements
+            });
+          }
+          switch (match$4.TAG) {
+            case /* Identifier */ 2 :
+              if (match$4._0 === "...") {
+                return Melange__Term.mk({
+                  TAG: /* Cons */ 11,
+                  _0: Stdlib__List.rev(match$3.tl),
+                  _1: Melange__Term.mk({
+                    TAG: /* List */ 10,
+                    _0: {
+                      hd: Melange__Term.mk({
+                        TAG: /* Hole */ 1,
+                        _0: true
+                      }),
+                      tl: /* [] */ 0
+                    }
+                  })
+                });
+              } else {
+                return Melange__Term.mk({
+                  TAG: /* List */ 10,
+                  _0: elements
+                });
+              }
+            case /* Ap */ 9 :
+              const match$5 = match$4._0.value;
+              if (/* tag */ typeof match$5 === "number" || typeof match$5 === "string") {
+                return Melange__Term.mk({
+                  TAG: /* List */ 10,
+                  _0: elements
+                });
+              }
+              if (match$5.TAG !== /* Identifier */ 2) {
+                return Melange__Term.mk({
+                  TAG: /* List */ 10,
+                  _0: elements
+                });
+              }
+              if (match$5._0 !== "...") {
+                return Melange__Term.mk({
+                  TAG: /* List */ 10,
+                  _0: elements
+                });
+              }
+              const match$6 = match$4._1;
+              if (match$6 && !match$6.tl) {
+                return Melange__Term.mk({
+                  TAG: /* Cons */ 11,
+                  _0: Stdlib__List.rev(match$3.tl),
+                  _1: match$6.hd
+                });
+              } else {
+                return Melange__Term.mk({
+                  TAG: /* List */ 10,
+                  _0: elements
+                });
+              }
+            default:
+              return Melange__Term.mk({
+                TAG: /* List */ 10,
+                _0: elements
+              });
+          }
         default:
           return Melange__Term.mk(/* BuilderError */ 0);
       }
@@ -207,14 +279,14 @@ function buildForm(form) {
   if (exit === 2) {
     if (closed.TAG === /* CHead */ 0) {
       const tok$1 = closed._0;
-      const match$3 = tok$1.value;
-      if (/* tag */ typeof match$3 === "number" || typeof match$3 === "string") {
+      const match$7 = tok$1.value;
+      if (/* tag */ typeof match$7 === "number" || typeof match$7 === "string") {
         return Melange__Term.mk(/* BuilderError */ 0);
       }
-      if (match$3.TAG !== /* TNamed */ 1) {
+      if (match$7.TAG !== /* TNamed */ 1) {
         return Melange__Term.mk(/* BuilderError */ 0);
       }
-      switch (match$3._0) {
+      switch (match$7._0) {
         case "->" :
           return buildInfix((function (l, r) {
             return {
@@ -253,21 +325,21 @@ function buildForm(form) {
       const inner = closed._0;
       let exit$3 = 0;
       if (inner.TAG === /* CHead */ 0) {
-        const match$4 = inner._0.value;
-        if (/* tag */ typeof match$4 === "number" || typeof match$4 === "string" || match$4.TAG !== /* TNamed */ 1) {
+        const match$8 = inner._0.value;
+        if (/* tag */ typeof match$8 === "number" || typeof match$8 === "string" || match$8.TAG !== /* TNamed */ 1) {
           exit$3 = 3;
         } else {
-          switch (match$4._0) {
+          switch (match$8._0) {
             case "fun" :
-              const match$5 = closed._2.value;
-              if (/* tag */ typeof match$5 === "number" || typeof match$5 === "string") {
+              const match$9 = closed._2.value;
+              if (/* tag */ typeof match$9 === "number" || typeof match$9 === "string") {
                 return Melange__Term.mk(/* BuilderError */ 0);
               }
-              if (match$5.TAG !== /* TNamed */ 1) {
+              if (match$9.TAG !== /* TNamed */ 1) {
                 return Melange__Term.mk(/* BuilderError */ 0);
               }
               let exit$4 = 0;
-              switch (match$5._0) {
+              switch (match$9._0) {
                 case "=>" :
                 case "=>f" :
                   exit$4 = 4;
@@ -279,25 +351,25 @@ function buildForm(form) {
                 const pat = combineTerms(Stdlib__List.concat_map(buildSharded, closed._1));
                 const body = buildChild(rightUf, right);
                 return Melange__Term.mk({
-                  TAG: /* Fun */ 11,
+                  TAG: /* Fun */ 12,
                   _0: pat,
                   _1: body
                 });
               }
               break;
             case "let" :
-              const match$6 = closed._2.value;
-              if (/* tag */ typeof match$6 === "number" || typeof match$6 === "string") {
+              const match$10 = closed._2.value;
+              if (/* tag */ typeof match$10 === "number" || typeof match$10 === "string") {
                 return Melange__Term.mk(/* BuilderError */ 0);
               }
-              if (match$6.TAG !== /* TNamed */ 1) {
+              if (match$10.TAG !== /* TNamed */ 1) {
                 return Melange__Term.mk(/* BuilderError */ 0);
               }
-              if (match$6._0 === "in") {
+              if (match$10._0 === "in") {
                 const binding = combineTerms(Stdlib__List.concat_map(buildSharded, closed._1));
                 const body$1 = buildChild(rightUf, right);
                 return Melange__Term.mk({
-                  TAG: /* Let */ 14,
+                  TAG: /* Let */ 15,
                   _0: binding,
                   _1: body$1
                 });
@@ -312,8 +384,8 @@ function buildForm(form) {
         exit$3 = 3;
       }
       if (exit$3 === 3) {
-        const match$7 = closed._2.value;
-        if (/* tag */ typeof match$7 === "number" || typeof match$7 === "string" || !(match$7.TAG === /* TNamed */ 1 && match$7._0 === "end")) {
+        const match$11 = closed._2.value;
+        if (/* tag */ typeof match$11 === "number" || typeof match$11 === "string" || !(match$11.TAG === /* TNamed */ 1 && match$11._0 === "end")) {
           return Melange__Term.mk(/* BuilderError */ 0);
         } else if (isMatchChain(closed)) {
           return buildMatchChain(closed);
@@ -521,7 +593,7 @@ function collectMatchBranches(_cf) {
 function buildMatchChain(cf) {
   const match = collectMatchBranches(cf);
   return Melange__Term.mk({
-    TAG: /* Match */ 12,
+    TAG: /* Match */ 13,
     _0: match[0],
     _1: match[1]
   });
@@ -673,7 +745,7 @@ function buildIfChain(cf) {
     return Melange__Term.mk(/* BuilderError */ 0);
   } else {
     return Melange__Term.mk({
-      TAG: /* If */ 13,
+      TAG: /* If */ 14,
       _0: combineTerms(Stdlib__List.concat_map(buildSharded, match$1._1)),
       _1: combineTerms(Stdlib__List.concat_map(buildSharded, match._1)),
       _2: combineTerms(Stdlib__List.concat_map(buildSharded, cf._1))
@@ -704,14 +776,14 @@ function buildBlock(keyword, contents, rest) {
     case "by" :
       if (body) {
         return Melange__Term.mk({
-          TAG: /* Construct */ 17,
+          TAG: /* Construct */ 18,
           _0: body.hd,
           _1: body.tl,
           _2: rest
         });
       } else {
         return Melange__Term.mk({
-          TAG: /* Construct */ 17,
+          TAG: /* Construct */ 18,
           _0: Melange__Term.mk({
             TAG: /* Hole */ 1,
             _0: true
@@ -723,7 +795,7 @@ function buildBlock(keyword, contents, rest) {
     case "construct" :
       if (body) {
         return Melange__Term.mk({
-          TAG: /* Construct */ 17,
+          TAG: /* Construct */ 18,
           _0: body.hd,
           _1: body.tl,
           _2: rest
@@ -732,7 +804,7 @@ function buildBlock(keyword, contents, rest) {
         return rest;
       } else {
         return Melange__Term.mk({
-          TAG: /* Construct */ 17,
+          TAG: /* Construct */ 18,
           _0: Melange__Term.mk({
             TAG: /* Hole */ 1,
             _0: true
@@ -743,13 +815,13 @@ function buildBlock(keyword, contents, rest) {
       }
     case "meta" :
       return Melange__Term.mk({
-        TAG: /* Meta */ 16,
+        TAG: /* Meta */ 17,
         _0: body,
         _1: rest
       });
     case "postulate" :
       return Melange__Term.mk({
-        TAG: /* Postulate */ 15,
+        TAG: /* Postulate */ 16,
         _0: body,
         _1: rest
       });

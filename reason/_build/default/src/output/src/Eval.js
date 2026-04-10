@@ -2,7 +2,9 @@
 
 import * as Caml_option from "melange.js/caml_option.js";
 import * as Curry from "melange.js/curry.js";
+import * as Melange__Print from "./Print.js";
 import * as Melange__Term from "./Term.js";
+import * as Stdlib from "melange/stdlib.js";
 import * as Stdlib__List from "melange/list.js";
 import * as Stdlib__Map from "melange/map.js";
 import * as Stdlib__String from "melange/string.js";
@@ -259,6 +261,50 @@ function matchPat(_bindings, _pat, _value) {
         } else {
           return;
         }
+      case /* Cons */ 11 :
+        const headPats = name._0;
+        if (value.TAG !== /* Val */ 0) {
+          return;
+        }
+        const vals$2 = value._0.value;
+        if (/* tag */ typeof vals$2 === "number" || typeof vals$2 === "string") {
+          return;
+        }
+        if (vals$2.TAG !== /* List */ 10) {
+          return;
+        }
+        const vals$3 = vals$2._0;
+        if (Stdlib__List.length(vals$3) < Stdlib__List.length(headPats)) {
+          return;
+        }
+        const headVals = Stdlib__List.filteri((function (i, param) {
+          return i < Stdlib__List.length(headPats);
+        }), vals$3);
+        const tailVals = Stdlib__List.filteri((function (i, param) {
+          return i >= Stdlib__List.length(headPats);
+        }), vals$3);
+        const headResult = Stdlib__List.fold_left2((function (acc, p, v) {
+          if (acc !== undefined) {
+            return matchPat(Caml_option.valFromOption(acc), p, {
+              TAG: /* Val */ 0,
+              _0: v
+            });
+          }
+          
+        }), Caml_option.some(bindings), headPats, headVals);
+        if (headResult === undefined) {
+          return;
+        }
+        _value = {
+          TAG: /* Val */ 0,
+          _0: Melange__Term.mk({
+            TAG: /* List */ 10,
+            _0: tailVals
+          })
+        };
+        _pat = name._1;
+        _bindings = Caml_option.valFromOption(headResult);
+        continue;
       default:
         return;
     }
@@ -383,7 +429,58 @@ function evalExpr(_env, _t) {
         }
       case /* List */ 10 :
         return evalList(env, name._0);
-      case /* Fun */ 11 :
+      case /* Cons */ 11 :
+        const e$7 = evalList(env, name._0);
+        if (e$7.TAG !== /* Ok */ 0) {
+          return e$7;
+        }
+        const match = e$7._0;
+        if (match.TAG !== /* Val */ 0) {
+          return {
+            TAG: /* Err */ 1,
+            _0: "Internal: evalList returned non-list"
+          };
+        }
+        const headVals = match._0.value;
+        if (/* tag */ typeof headVals === "number" || typeof headVals === "string") {
+          return {
+            TAG: /* Err */ 1,
+            _0: "Internal: evalList returned non-list"
+          };
+        }
+        if (headVals.TAG !== /* List */ 10) {
+          return {
+            TAG: /* Err */ 1,
+            _0: "Internal: evalList returned non-list"
+          };
+        }
+        const e$8 = evalExpr(env, name._1);
+        if (e$8.TAG !== /* Ok */ 0) {
+          return e$8;
+        }
+        const v$1 = e$8._0;
+        if (v$1.TAG === /* Val */ 0) {
+          const tailVals = v$1._0.value;
+          if (!/* tag */ (typeof tailVals === "number" || typeof tailVals === "string") && tailVals.TAG === /* List */ 10) {
+            return {
+              TAG: /* Ok */ 0,
+              _0: {
+                TAG: /* Val */ 0,
+                _0: Melange__Term.mk({
+                  TAG: /* List */ 10,
+                  _0: Stdlib.$at(headVals._0, tailVals._0)
+                })
+              }
+            };
+          }
+          
+        }
+        return {
+          TAG: /* Err */ 1,
+          _0: "Cons tail is not a list: " + Melange__Print.printTerm(termOf(v$1))
+        };
+        break;
+      case /* Fun */ 12 :
         return {
           TAG: /* Ok */ 0,
           _0: {
@@ -393,39 +490,39 @@ function evalExpr(_env, _t) {
             _2: name._1
           }
         };
-      case /* Match */ 12 :
-        const e$7 = evalExpr(env, name._0);
-        if (e$7.TAG === /* Ok */ 0) {
-          return evalMatch(env, e$7._0, name._1);
+      case /* Match */ 13 :
+        const e$9 = evalExpr(env, name._0);
+        if (e$9.TAG === /* Ok */ 0) {
+          return evalMatch(env, e$9._0, name._1);
         } else {
-          return e$7;
+          return e$9;
         }
-      case /* If */ 13 :
-        const e$8 = evalExpr(env, name._0);
-        if (e$8.TAG !== /* Ok */ 0) {
-          return e$8;
+      case /* If */ 14 :
+        const e$10 = evalExpr(env, name._0);
+        if (e$10.TAG !== /* Ok */ 0) {
+          return e$10;
         }
-        const match = e$8._0;
-        if (match.TAG !== /* Val */ 0) {
+        const match$1 = e$10._0;
+        if (match$1.TAG !== /* Val */ 0) {
           return {
             TAG: /* Err */ 1,
             _0: "if condition is not a boolean"
           };
         }
-        const match$1 = match._0.value;
-        if (/* tag */ typeof match$1 === "number" || typeof match$1 === "string") {
+        const match$2 = match$1._0.value;
+        if (/* tag */ typeof match$2 === "number" || typeof match$2 === "string") {
           return {
             TAG: /* Err */ 1,
             _0: "if condition is not a boolean"
           };
         }
-        if (match$1.TAG !== /* Identifier */ 2) {
+        if (match$2.TAG !== /* Identifier */ 2) {
           return {
             TAG: /* Err */ 1,
             _0: "if condition is not a boolean"
           };
         }
-        switch (match$1._0) {
+        switch (match$2._0) {
           case "false" :
             _t = name._2;
             continue;
@@ -438,25 +535,25 @@ function evalExpr(_env, _t) {
               _0: "if condition is not a boolean"
             };
         }
-      case /* Let */ 14 :
-        const match$2 = name._0.value;
-        if (/* tag */ typeof match$2 === "number" || typeof match$2 === "string") {
+      case /* Let */ 15 :
+        const match$3 = name._0.value;
+        if (/* tag */ typeof match$3 === "number" || typeof match$3 === "string") {
           return {
             TAG: /* Err */ 1,
             _0: "Invalid let binding"
           };
         }
-        if (match$2.TAG !== /* Eq */ 6) {
+        if (match$3.TAG !== /* Eq */ 6) {
           return {
             TAG: /* Err */ 1,
             _0: "Invalid let binding"
           };
         }
-        const e$9 = evalExpr(env, match$2._1);
-        if (e$9.TAG !== /* Ok */ 0) {
-          return e$9;
+        const e$11 = evalExpr(env, match$3._1);
+        if (e$11.TAG !== /* Ok */ 0) {
+          return e$11;
         }
-        const bindings = matchPat(StringMap.empty, match$2._0, e$9._0);
+        const bindings = matchPat(StringMap.empty, match$3._0, e$11._0);
         if (bindings === undefined) {
           return {
             TAG: /* Err */ 1,

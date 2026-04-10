@@ -1,64 +1,147 @@
--- Approach 5: Coproduct-based enums via Arr
---
--- Postulate Void, Unit, binary coproduct (Either), and Arr (function space).
--- Enums as iterated coproducts:
---   falsity = Void
---   unit    = Unit
---   bool    = Either Unit Unit
---
--- For 'either', the case functions are typed using Arr:
---   either : (A:U) -> (B:U) -> (M:U) -> Arr A M -> Arr B M -> Either A B -> M
---
--- We also need lam (to construct case functions) and app + beta
--- (to state the computation rule).
---
--- For the construct blocks, the case witnesses wrap the flat arguments
--- into constant functions via the const combinator.
---
--- Soundness: All postulates are standard categorical constructions
--- (initial/terminal objects, coproducts, function space).
--- Validated by any locally cartesian closed category with finite
--- coproducts. No universal coercion.
---
--- Minimality: Arr + lam + app are needed to type the either cases.
--- This is more postulates than Approach 2, but the decomposition
--- (Void + Unit + Either) is more modular and scales uniformly.
+-- Generic coproduct-based enums via iterated Either
 postulate
 U : Sort
 (eq (A : U) (B : U) (a : A) (b : B)) : U
 (refl (A : U) (a : A)) : (eq A A a a)
 (trans (A : U) (a : A) (b : A) (c : A) (e1 : (eq A A a b)) (e2 : (eq A A b c))) : (eq A A a c)
--- Function space (for typing case functions in either)
 (Arr (A : U) (B : U)) : U
 (app (A : U) (B : U) (f : (Arr A B)) (a : A)) : B
--- Constant function combinator: const A B b is \_ : A. b
 (const (A : U) (B : U) (b : B)) : (Arr A B)
 (const-beta (A : U) (B : U) (b : B) (a : A)) :
   (eq B B (app A B (const A B b) a) b)
--- Void: initial object (0-element type)
 Void : U
 (absurd (M : U) (v : Void)) : M
--- Unit: terminal object (1-element type)
 Unit : U
 star : Unit
 (unit-rec (M : U) (star-case : M) (u : Unit)) : M
 (unit-comp (M : U) (star-case : M)) :
   (eq M M (unit-rec M star-case star) star-case)
--- Either: binary coproduct
 (Either (A : U) (B : U)) : U
 (inl (A : U) (B : U) (a : A)) : (Either A B)
 (inr (A : U) (B : U) (b : B)) : (Either A B)
-(either (A : U) (B : U) (M : U) (f : (Arr A M)) (g : (Arr B M)) (e : (Either A B))) : M
+(either (A : U) (B : U) (M : U) (f : (Arr A M)) (g : (Arr B M))) : (Arr (Either A B) M)
 (either-inl (A : U) (B : U) (M : U) (f : (Arr A M)) (g : (Arr B M)) (a : A)) :
-  (eq M M (either A B M f g (inl A B a)) (app A M f a))
+  (eq M M (app (Either A B) M (either A B M f g) (inl A B a)) (app A M f a))
 (either-inr (A : U) (B : U) (M : U) (f : (Arr A M)) (g : (Arr B M)) (b : B)) :
-  (eq M M (either A B M f g (inr A B b)) (app B M g b))
--- Congruence for app (needed for eq chains)
-(app-cong (A : U) (B : U) (f : (Arr A B)) (g : (Arr A B)) (x : A) (e : (eq (Arr A B) (Arr A B) f g))) : (eq B B (app A B f x) (app A B g x))
+  (eq M M (app (Either A B) M (either A B M f g) (inr A B b)) (app B M g b))
 meta
-schema enum = fun s => 
-  ? -- TODO: operate generically over any number of constructors. The four below are good tests.  
-end
+reverse = fun xs => (foldl (fun acc => fun x => [x, ...acc]) [] xs)
+append = fun xs => fun ys => (foldl (fun acc => fun x => [x, ...acc]) ys (reverse xs))
+concat = fun xss => (foldl (fun acc => fun xs => (append acc xs)) [] xss)
+
+build-injs-and-type = fun rest =>
+  (foldl (fun acc => fun _ =>
+    let prev-injs = (fst acc) in
+    let prev-type = (snd acc) in
+    let cur-type = (Either Unit prev-type) in
+    let wrapped = (reverse (foldl (fun a => fun inj =>
+      [(inr Unit prev-type inj), ...a]) [] prev-injs)) in
+    ([(inl Unit prev-type star), ...wrapped], cur-type)
+  ) ([star], Unit) rest)
+
+build-elim = fun mvar => fun case-vars => fun rest =>
+  let rev-cvs = (reverse case-vars) in
+  match rev-cvs with
+  | [last-cv, ...remaining-cvs] =>
+    (fst (foldl (fun acc => fun cv =>
+      let prev-arr = (fst acc) in
+      let prev-type = (snd acc) in
+      ((either Unit prev-type mvar (const Unit mvar cv) prev-arr),
+       (Either Unit prev-type))
+    ) ((const Unit mvar last-cv), Unit) remaining-cvs))
+  | _ => (const Unit mvar star)
+  end
+
+-- Build equation proofs.
+-- Tracks triples: (proof-term, injection-term, target-tc)
+-- Fold from innermost (last ctor) outward.
+build-proofs = fun mvar => fun case-vars => fun rest =>
+  let rev-cvs = (reverse case-vars) in
+  match rev-cvs with
+  | [last-cv, ...remaining-cvs] =>
+    -- Accumulator: (triples-list, elim-arr, inner-type)
+    -- Each triple: (proof, injection, target-tc)
+    -- Innermost: proof = const-beta, inj = star, tc = last-cv
+    let result = (foldl (fun acc => fun cv =>
+      let prev-triples = (fst (fst acc)) in
+      let prev-elim = (snd (fst acc)) in
+      let prev-type = (snd acc) in
+      let cur-type = (Either Unit prev-type) in
+      let f = (const Unit mvar cv) in
+      let cur-elim = (either Unit prev-type mvar f prev-elim) in
+      -- New triple for inl (this constructor):
+      let inl-proof = (trans mvar
+        (app cur-type mvar cur-elim (inl Unit prev-type star))
+        (app Unit mvar f star)
+        cv
+        (either-inl Unit prev-type mvar f prev-elim star)
+        (const-beta Unit mvar cv star)) in
+      let inl-triple = (inl-proof, (inl Unit prev-type star), cv) in
+      -- Wrap existing triples with inr:
+      let wrapped = (reverse (foldl (fun a => fun triple =>
+        let old-proof = (fst triple) in
+        let old-inj = (fst (snd triple)) in
+        let old-tc = (snd (snd triple)) in
+        let new-proof = (trans mvar
+          (app cur-type mvar cur-elim (inr Unit prev-type old-inj))
+          (app prev-type mvar prev-elim old-inj)
+          old-tc
+          (either-inr Unit prev-type mvar f prev-elim old-inj)
+          old-proof) in
+        [(new-proof, (inr Unit prev-type old-inj), old-tc), ...a]
+      ) [] prev-triples)) in
+      (([inl-triple, ...wrapped], cur-elim), cur-type)
+    ) (([((const-beta Unit mvar last-cv star), star, last-cv)],
+        (const Unit mvar last-cv)), Unit) remaining-cvs) in
+    -- Extract just the proof terms
+    (reverse (foldl (fun acc => fun triple =>
+      [(fst triple), ...acc]) [] (fst (fst result))))
+  | _ => []
+  end
+
+schema enum = fun s => match s with
+  | [(type-name, [], U),
+     (case-name, [(mvar, U), (scrut, type-name)], mvar)]
+    => (Ok [Void, (absurd mvar scrut)])
+  | [(type-name, [], U),
+     (ctor, [], type-name),
+     (case-name, [(mvar, U), (tc, mvar), (scrut, type-name)], mvar),
+     (eq-name, [(mvar2, U), (tc2, mvar2)], _)]
+    => (Ok [Unit, star, (unit-rec mvar tc scrut), (unit-comp mvar2 tc2)])
+  | [(type-name, [], U), ...all-rest] =>
+    let split = (foldl (fun acc => fun entry =>
+      if (fst (fst acc)) == true
+      then match entry with
+        | (name, [], _) => ((true, [entry, ...(snd (fst acc))]), (snd acc))
+        | _ => ((false, (snd (fst acc))), [entry, ...(snd acc)])
+        end
+      else ((false, (snd (fst acc))), [entry, ...(snd acc)])
+      end
+    ) ((true, []), []) all-rest) in
+    let ctors = (reverse (snd (fst split))) in
+    let case-and-eqs = (reverse (snd split)) in
+    match case-and-eqs with
+    | [(case-name, case-params, _), ...eq-decls] =>
+      match case-params with
+      | [(mvar, U), ...tc-and-scrut] =>
+        match (reverse tc-and-scrut) with
+        | [(scrut, _), ...rev-tcs] =>
+          let case-vars = (foldl (fun acc => fun p =>
+            [(fst p), ...acc]) [] rev-tcs) in
+          match ctors with
+          | [_, ...rest-ctors] =>
+            let iat = (build-injs-and-type rest-ctors) in
+            let injs = (fst iat) in
+            let coprod-type = (snd iat) in
+            let elim-arr = (build-elim mvar case-vars rest-ctors) in
+            let case-witness = (app coprod-type mvar elim-arr scrut) in
+            let proofs = (build-proofs mvar case-vars rest-ctors) in
+            (Ok (concat [[coprod-type], injs, [case-witness], proofs]))
+          | _ => (Error "no ctors") end
+        | _ => (Error "bad params") end
+      | _ => (Error "bad params") end
+    | _ => (Error "no case") end
+  | _ => (Error "unrecognized") end
 construct by enum
   falsity : U
   (falsity-case (M : U) (scrutinee : falsity)) : M
@@ -69,19 +152,12 @@ construct by enum
   (unit-case-trivial (M : U) (trivial-case : M)) :
     (eq M M (unit-case M trivial-case trivial) trivial-case)
 construct by enum
-  bool : U
-  true : bool
-  false : bool
-  (bool-case (M : U) (true-case : M) (false-case : M) (scrutinee : bool)) : M
-  (bool-case-true (M : U) (true-case : M) (false-case : M)) :
-    (eq M M (bool-case M true-case false-case true) true-case)
-  (bool-case-false (M : U) (true-case : M) (false-case : M)) :
-    (eq M M (bool-case M true-case false-case false) false-case)
-construct by enum
-  color : U
-  red : color
-  yellow : color
-  green : color
-  blue : color
-  -- TODO
+  mybool : U
+  yes : mybool
+  no : mybool
+  (mybool-case (M : U) (yes-case : M) (no-case : M) (scrutinee : mybool)) : M
+  (mybool-case-yes (M : U) (yes-case : M) (no-case : M)) :
+    (eq M M (mybool-case M yes-case no-case yes) yes-case)
+  (mybool-case-no (M : U) (yes-case : M) (no-case : M)) :
+    (eq M M (mybool-case M yes-case no-case no) no-case)
 end
