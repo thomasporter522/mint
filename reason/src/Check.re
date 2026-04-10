@@ -227,7 +227,7 @@ let subsume =
       switch (expected, inferredOut) {
       | (Some(exp), Some(inf)) =>
         [mark(
-           "Inconsitency (expected "
+           "Inconsistency (expected "
            ++ printTerm(exp)
            ++ ", got "
            ++ printTerm(inf)
@@ -257,9 +257,9 @@ let ensureMode = (allowed, mode, from, to_) =>
     let allowedStr = String.concat(",", allowed);
     [mark(
        "Sort error (expected "
-       ++ stringOfMode(mode)
-       ++ ", found "
        ++ allowedStr
+       ++ ", found "
+       ++ stringOfMode(mode)
        ++ ")",
        from, to_,
      )];
@@ -348,6 +348,17 @@ let rec termToMlType = (t: term): option(mlType) =>
   | _ => None
   };
 
+/* Extract ML type from inferred, defaulting to MTerm */
+let getInferredMlType = (info: staticInfo): mlType =>
+  switch (info.inferred) {
+  | Some(([], t)) =>
+    switch (termToMlType(t)) {
+    | Some(ty) => ty
+    | None => MTerm
+    }
+  | _ => MTerm
+  };
+
 /* --- OL scope checking: strict when OL bindings exist, permissive otherwise --- */
 
 let hasOLBindings = (ctx: context): bool =>
@@ -359,17 +370,6 @@ let signatureType = MPair(MTerm, MPair(MList(MPair(MString, MTerm)), MTerm));
 /* Schema type: List Signature -> Result (List Term) */
 let schemaType = MArrow(MList(signatureType), MResult(MList(MTerm)));
 
-/* --- Combine a list of terms into a single term (mirrors Builder.combineTerms) --- */
-
-let combineBody =
-  fun
-  | [] => mk(Hole(true))
-  | [t] => t
-  | [first, ..._] as ts => {
-      let last = List.nth(ts, List.length(ts) - 1);
-      let t = mk(Ap(first, List.tl(ts)));
-      {...t, meta: {...t.meta, start: first.meta.start, end_: last.meta.end_}};
-    };
 
 /* === Unified checker: OL and ML mutually recursive === */
 
@@ -865,14 +865,7 @@ and inferExpr = (ctx: context, t: term): staticInfo =>
   | Ap(f, args) =>
     let fInfo = inferExpr(ctx, f);
     let fTy =
-      switch (fInfo.inferred) {
-      | Some(([], t)) =>
-        switch (termToMlType(t)) {
-        | Some(ty) => ty
-        | None => MTerm
-        }
-      | _ => MTerm
-      };
+      getInferredMlType(fInfo);
     let (retTy, argInfo) =
       List.fold_left(
         ((accTy, accInfo), arg) =>
@@ -918,11 +911,7 @@ and inferExpr = (ctx: context, t: term): staticInfo =>
   | Match(scrut, branches) =>
     let scrutInfo = inferExpr(ctx, scrut);
     let scrutTy =
-      switch (scrutInfo.inferred) {
-      | Some(([], t)) =>
-        switch (termToMlType(t)) { | Some(ty) => ty | None => MTerm }
-      | _ => MTerm
-      };
+      getInferredMlType(scrutInfo);
     switch (branches) {
     | [] =>
       withErrors(mergeInfos(scrutInfo, {...emptyInfo, inferred: mlInferred(MTerm)}),
@@ -931,11 +920,7 @@ and inferExpr = (ctx: context, t: term): staticInfo =>
       let (patCtx, patInfo) = checkPat(ctx, scrutTy, pat);
       let bodyInfo = inferExpr(patCtx, body);
       let bodyTy =
-        switch (bodyInfo.inferred) {
-        | Some(([], t)) =>
-          switch (termToMlType(t)) { | Some(ty) => ty | None => MTerm }
-        | _ => MTerm
-        };
+        getInferredMlType(bodyInfo);
       let restInfo =
         List.fold_left(
           (accInfo, (p, b)) => {
@@ -954,11 +939,7 @@ and inferExpr = (ctx: context, t: term): staticInfo =>
     let condInfo = checkExpr(ctx, MBool, cond);
     let thenInfo = inferExpr(ctx, thenBr);
     let thenTy =
-      switch (thenInfo.inferred) {
-      | Some(([], t)) =>
-        switch (termToMlType(t)) { | Some(ty) => ty | None => MTerm }
-      | _ => MTerm
-      };
+      getInferredMlType(thenInfo);
     let elseInfo = checkExpr(ctx, thenTy, elseBr);
     let info = mergeInfos(condInfo, mergeInfos(thenInfo, elseInfo));
     {...info, inferred: mlInferred(thenTy)};
@@ -967,17 +948,9 @@ and inferExpr = (ctx: context, t: term): staticInfo =>
     let leftInfo = inferExpr(ctx, left);
     let rightInfo = inferExpr(ctx, right);
     let leftTy =
-      switch (leftInfo.inferred) {
-      | Some(([], t)) =>
-        switch (termToMlType(t)) { | Some(ty) => ty | None => MTerm }
-      | _ => MTerm
-      };
+      getInferredMlType(leftInfo);
     let rightTy =
-      switch (rightInfo.inferred) {
-      | Some(([], t)) =>
-        switch (termToMlType(t)) { | Some(ty) => ty | None => MTerm }
-      | _ => MTerm
-      };
+      getInferredMlType(rightInfo);
     let info = mergeInfos(leftInfo, rightInfo);
     {...info, inferred: mlInferred(MPair(leftTy, rightTy))};
 
@@ -985,11 +958,7 @@ and inferExpr = (ctx: context, t: term): staticInfo =>
   | List([first, ...rest]) =>
     let firstInfo = inferExpr(ctx, first);
     let elemTy =
-      switch (firstInfo.inferred) {
-      | Some(([], t)) =>
-        switch (termToMlType(t)) { | Some(ty) => ty | None => MTerm }
-      | _ => MTerm
-      };
+      getInferredMlType(firstInfo);
     let restInfo =
       List.fold_left(
         (accInfo, item) => mergeInfos(accInfo, checkExpr(ctx, elemTy, item)),
@@ -1007,11 +976,7 @@ and inferExpr = (ctx: context, t: term): staticInfo =>
     | "!=" | "==" =>
       let leftInfo = inferExpr(ctx, left);
       let leftTy =
-        switch (leftInfo.inferred) {
-        | Some(([], t)) =>
-          switch (termToMlType(t)) { | Some(ty) => ty | None => MTerm }
-        | _ => MTerm
-        };
+        getInferredMlType(leftInfo);
       let rightInfo = checkExpr(ctx, leftTy, right);
       let info = mergeInfos(leftInfo, rightInfo);
       {...info, inferred: mlInferred(MBool)};
@@ -1053,11 +1018,7 @@ and checkExpr = (ctx: context, expected: mlType, t: term): staticInfo =>
   | Match(scrut, branches) =>
     let scrutInfo = inferExpr(ctx, scrut);
     let scrutTy =
-      switch (scrutInfo.inferred) {
-      | Some(([], t)) =>
-        switch (termToMlType(t)) { | Some(ty) => ty | None => MTerm }
-      | _ => MTerm
-      };
+      getInferredMlType(scrutInfo);
     let branchInfo =
       List.fold_left(
         (accInfo, (pat, body)) => {
@@ -1103,22 +1064,14 @@ and checkExpr = (ctx: context, expected: mlType, t: term): staticInfo =>
     | _ =>
       let info = inferExpr(ctx, t);
       let got =
-        switch (info.inferred) {
-        | Some(([], t)) =>
-          switch (termToMlType(t)) { | Some(ty) => ty | None => MTerm }
-        | _ => MTerm
-        };
+        getInferredMlType(info);
       withErrors(info, mlSubsume(expected, got, t.meta.start, t.meta.end_));
     }
 
   | _ =>
     let info = inferExpr(ctx, t);
     let got =
-      switch (info.inferred) {
-      | Some(([], t)) =>
-        switch (termToMlType(t)) { | Some(ty) => ty | None => MTerm }
-      | _ => MTerm
-      };
+      getInferredMlType(info);
     withErrors(info, mlSubsume(expected, got, t.meta.start, t.meta.end_));
   };
 

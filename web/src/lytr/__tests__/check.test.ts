@@ -134,14 +134,14 @@ describe('type consistency', () => {
     const msgs = errorMessages(
       'postulate\n(arrow (A : Sort) (B : Sort)) : Sort\n(pi (A : Sort) (B : (arrow A Sort))) : Sort\nx : (pi Sort Sort)\nend'
     );
-    expect(msgs).toContainEqual(expect.stringContaining('Inconsitency'));
+    expect(msgs).toContainEqual(expect.stringContaining('Inconsistency'));
   });
 
   it('reports inconsistency for genuinely wrong types', () => {
     const msgs = errorMessages(
       'postulate\nx : Sort\ny : x\n(f (a : Sort)) : Sort\ng : (f y)\nend'
     );
-    expect(msgs).toContainEqual(expect.stringContaining('Inconsitency'));
+    expect(msgs).toContainEqual(expect.stringContaining('Inconsistency'));
   });
 });
 
@@ -157,7 +157,7 @@ describe('return type substitution', () => {
     const msgs = errorMessages(
       'postulate\nx : Sort\n(f (a : Sort)) : a\ng : (f Sort)\na : (f g)\nend'
     );
-    expect(msgs).toContainEqual(expect.stringContaining('Inconsitency'));
+    expect(msgs).toContainEqual(expect.stringContaining('Inconsistency'));
   });
 
   it('return type substitution with non-dependent return type is harmless', () => {
@@ -184,7 +184,7 @@ describe('return type substitution', () => {
     const msgs = errorMessages(
       'postulate\nx : Sort\ny : x\n(f (a : Sort) (b : a)) : b\ng : (f x x)\nend'
     );
-    expect(msgs).toContainEqual(expect.stringContaining('Inconsitency'));
+    expect(msgs).toContainEqual(expect.stringContaining('Inconsistency'));
   });
 
   it('substitution chains through multiple arguments', () => {
@@ -206,7 +206,7 @@ describe('return type substitution', () => {
       'postulate\nx : Sort\n(f (a : Sort)) : a\ng : x\nh : (f g)\nend'
     );
     // (f g): g has type x, checked against Sort — inconsistency
-    expect(msgs).toContainEqual(expect.stringContaining('Inconsitency'));
+    expect(msgs).toContainEqual(expect.stringContaining('Inconsistency'));
   });
 
   it('non-dependent multi-arg function still works', () => {

@@ -114,7 +114,7 @@ a:hover {
 
 .item {
   display: flex;
-  height: 100vh;
+  height: calc(100vh - 100px);
   width: 100vw;
 }
 
@@ -159,12 +159,14 @@ a:hover {
   flex: 1;
   display: flex;
   flex-direction: column;
+  min-height: 0;
 }
 
 .cm-editor {
   border: 2px solid var(--dark-border-color);
   flex: 1;
-  /* border-radius: 10px; */
+  min-height: 0;
+  overflow: auto;
 }
 
 .CodeMirror-lines {
@@ -181,11 +183,24 @@ a:hover {
 }
 
 .item-info-sidebar {
-  width: 32%;
-  border-width: 0px 0px 0px 3px;
+  /* width set dynamically via style prop */
+  min-width: 10%;
+  border-width: 0px 0px 0px 0px;
   border-style: solid;
   border-color: var(--mint-color);
   position: relative;
+  overflow-y: auto;
+}
+
+.resize-handle {
+  width: 4px;
+  cursor: col-resize;
+  background-color: var(--dark-border-color);
+  flex-shrink: 0;
+}
+
+.resize-handle:hover {
+  background-color: var(--mint-color);
 }
 
 .item-inspector-sidebar {

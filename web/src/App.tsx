@@ -48,6 +48,8 @@ function App() {
   const [semanticErrors, setSemanticErrors] = useState<Error[]>([])
   const [holes, setHoles] = useState<[Number,holeInfo][]>([])
   const [currentHole, setCurrentHole] = useState<holeInfo | undefined>(undefined)
+  const [infoPanelWidth, setInfoPanelWidth] = useState<number>(32)
+  const isDragging = useRef(false)
 
   const setSemanticErrorsRef = useRef(setSemanticErrors)
   setSemanticErrorsRef.current = setSemanticErrors
@@ -126,7 +128,7 @@ function App() {
     loadPage()
   }, [itemId, courseIds])
 
-  const replacements = [["\\->", "⟼"], ["happy", "😊"]]//, ["<", "◁"]]
+  const replacements = [["\\->", "⟼"]]
 
   const autoReplace = EditorState.transactionFilter.of(tr => {
     if (!tr.isUserEvent("input")) return tr;
@@ -151,6 +153,33 @@ function App() {
 
     return changes.length ? [{ changes }] : tr;
   });
+
+  // Drag-to-resize info panel
+  const handleMouseDown = () => {
+    isDragging.current = true
+    document.body.style.cursor = 'col-resize'
+    document.body.style.userSelect = 'none'
+  }
+
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!isDragging.current) return
+      const windowWidth = window.innerWidth
+      const newWidth = ((windowWidth - e.clientX) / windowWidth) * 100
+      setInfoPanelWidth(Math.max(10, Math.min(60, newWidth)))
+    }
+    const handleMouseUp = () => {
+      isDragging.current = false
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+    }
+    document.addEventListener('mousemove', handleMouseMove)
+    document.addEventListener('mouseup', handleMouseUp)
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove)
+      document.removeEventListener('mouseup', handleMouseUp)
+    }
+  }, [])
 
   function urlOfEntry(entry: CourseEntry, entry_id: string) {
     let newUrl = window.location.pathname
@@ -196,6 +225,10 @@ function App() {
               padding: '3px !important',
               margin: '0px !important',
               minHeight: '0px !important'
+            },
+            '.cm-scroller': {
+              overflowY: 'hidden',
+              overflowX: 'auto',
             },
           })
         ]}
@@ -297,7 +330,7 @@ function App() {
   }
 
   function infoDisplay() {
-    var contents = <></>;
+    let contents = <></>;
     if(holes.length + semanticErrors.length === 0) {
       contents = 
         <div className='victory-sidebar'></div>
@@ -313,7 +346,7 @@ function App() {
         </div>
       </div>
     }
-    return <div className='item-info-sidebar'>
+    return <div className='item-info-sidebar' style={{ width: `${infoPanelWidth}%` }}>
         {contents}
       </div>
   }
@@ -368,7 +401,7 @@ function App() {
                         width: '100%',
                       },
                       '.cm-scroller': {
-                        overflow: 'false'  // Enable horizontal scrolling
+                        overflow: 'auto'
                       },
                       '.cm-content': {
                         whiteSpace: 'pre'  // Prevent text wrapping
@@ -395,6 +428,7 @@ function App() {
                 />
               </div>
             </div>
+            <div className='resize-handle' onMouseDown={handleMouseDown} />
             {infoDisplay()}
           </div>
         </div>
