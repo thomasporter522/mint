@@ -93,7 +93,7 @@ describe('ML type checker: pattern matching', () => {
   });
 
   it('accepts match with pair patterns in list', () => {
-    ok('fun s => match s with | [(?params, ?ret)] => (Ok []) | _ => (Error "bad") end');
+    ok('fun s => match s with | [(params, ret)] => (Ok []) | _ => (Error "bad") end');
   });
 
   it('accepts match with multiple branches', () => {
@@ -116,17 +116,15 @@ describe('ML type checker: pattern matching', () => {
 
 describe('ML type checker: OL patterns', () => {
   it('accepts OL constructor pattern with meta-variables', () => {
-    ok('fun s => match s with | [([(?x, ?t)], ?ret)] => (Ok [ret]) | _ => (Error "bad") end');
+    ok('fun s => match s with | [(name, [(x, t)], ret)] => (Ok [ret]) | _ => (Error "bad") end');
   });
 
   it('binds meta-variables for use in body', () => {
-    // ?t is bound in pattern, used in Ok [t] in body
-    ok('fun s => match s with | [([(?x, ?t)], ?ret)] => (Ok [t]) | _ => (Error "bad") end');
+    ok('fun s => match s with | [(name, [(x, t)], ret)] => (Ok [t]) | _ => (Error "bad") end');
   });
 
   it('binds meta-variables from OL application patterns', () => {
-    // eq ?t ?t ?body binds t and body at type Term
-    ok('fun s => match s with | [([(?x, eq ?t ?body)], _)] => (Ok [body, t]) | _ => (Error "bad") end');
+    ok('fun s => match s with | [(name, [(x, eq t body)], _)] => (Ok [body, t]) | _ => (Error "bad") end');
   });
 });
 
@@ -158,7 +156,7 @@ describe('ML type checker: nested structures', () => {
   });
 
   it('nested match', () => {
-    ok('fun s => match s with | [?first] => match first with | _ => (Ok []) end | _ => (Error "bad") end');
+    ok('fun s => match s with | [first] => match first with | _ => (Ok []) end | _ => (Error "bad") end');
   });
 });
 
@@ -170,11 +168,11 @@ describe('ML type checker: full schema example', () => {
   it('type-checks the definition schema', () => {
     const code = [
       'fun s => match s with',
-      '| [([(?x, ?t)], ?ret),',
-      '   ([(?x_eq, eq ?t ?t ?body)], _)]',
-      '    => (Ok [body, (refl t body)])',
+      '| [(f, params, ret),',
+      '   (f_eq, eq_params, eq ret ret (f params) body)]',
+      '    => (Ok [body, (refl ret body)])',
       '| _ =>',
-      '  (Error "invalid declaration")',
+      '  (Error "invalid definition")',
       'end',
     ].join('\n');
     ok(code);
@@ -186,5 +184,66 @@ describe('ML type checker: full schema example', () => {
 
   it('rejects schema that forgets Error wrapper', () => {
     fails('fun s => match s with | _ => "message" end');
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/*  x binding behavior                                                */
+/* ------------------------------------------------------------------ */
+
+describe('ML type checker: x binding', () => {
+  it('x in pattern is usable as x in body', () => {
+    ok('fun s => match s with | [(name, params, ret)] => (Ok [ret]) | _ => (Error "bad") end');
+  });
+
+  it('bare x (no ?) in body does NOT reference x binding', () => {
+    // In standalone mode (olNames=None), bare identifiers are permissive
+    // So this passes — but ret resolves as an OL term, not the pattern-bound ret
+    ok('fun s => match s with | [(name, params, ret)] => (Ok [ret]) | _ => (Error "bad") end');
+  });
+
+  it('repeated x in pattern acts as equality constraint', () => {
+    ok('fun s => match s with | [(n, p, ret), (n2, p2, eq ret ret f body)] => (Ok [body]) | _ => (Error "bad") end');
+  });
+
+  it('bare ? is a wildcard, not a named binding', () => {
+    ok('fun s => match s with | [?] => (Ok []) | _ => (Error "bad") end');
+  });
+
+  it('name component has type String', () => {
+    // name binds at String (first component of signature triple)
+    ok('fun s => match s with | [(name, params, ret)] => (Error name) | _ => (Error "bad") end');
+  });
+
+  it('params component has type List (String, Term), not List Term', () => {
+    // params : List (String, Term), so Ok params fails (Ok wants List Term)
+    fails('fun s => match s with | [(name, params, ret)] => (Ok params) | _ => (Error "bad") end', 'Expected List Term');
+    // And using params where String is expected also fails
+    fails('fun s => match s with | [(name, params, ret)] => (Error params) | _ => (Error "bad") end', 'Expected String');
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/*  Signature type (3-tuple)                                           */
+/* ------------------------------------------------------------------ */
+
+describe('ML type checker: signature type', () => {
+  it('3-tuple pattern matches signature', () => {
+    ok('fun s => match s with | [(name, params, ret)] => (Ok [ret]) | _ => (Error "bad") end');
+  });
+
+  it('old 2-tuple pattern fails on signature', () => {
+    // (params, ret) against (String, (List (String, Term), Term))
+    // params gets String, ret gets (List (String, Term), Term)
+    // Then (Ok [ret]) checks ret against Term but it has pair type
+    fails('fun s => match s with | [(params, ret)] => (Ok [ret]) | _ => (Error "bad") end', 'Expected Term');
+  });
+
+  it('nested param destructuring works', () => {
+    ok('fun s => match s with | [(name, [(pname, pty)], ret)] => (Ok [pty]) | _ => (Error "bad") end');
+  });
+
+  it('empty params list pattern works', () => {
+    ok('fun s => match s with | [(name, [], ret)] => (Ok [ret]) | _ => (Error "bad") end');
   });
 });

@@ -60,10 +60,16 @@ and buildBlock = (keyword, contents, rest): term => {
   let body = buildItems(contents);
   switch (keyword) {
   | "postulate" => mk(Postulate(body, rest))
-  | "schema" => mk(Schema(rest))
+  | "schema" => mk(Schema(body, rest))
   | "construct" =>
+    switch (body, rest) {
+    | ([], Some(r)) => r  /* construct by ... — real content is in the "by" block */
+    | ([by, ...decls], _) => mk(Construct(by, decls, rest))
+    | ([], None) => mk(Construct(mk(Hole(true)), [], rest))
+    }
+  | "by" =>
     switch (body) {
-    | [by, ...decls] => mk(Construct(by, decls, rest))
+    | [name, ...decls] => mk(Construct(name, decls, rest))
     | [] => mk(Construct(mk(Hole(true)), [], rest))
     }
   | _ => mk(BuilderError)
@@ -178,7 +184,7 @@ and buildForm = (form: openForm): term => {
     localize(mk(Term.StringLit(s)), tok)
 
   /* fun(pat)=> — body captured by =>_face's right-precedence */
-  | (_, _, CMatch(CHead({value: TNamed("fun"), _}), patItems, {value: TNamed("=>"), _}), _, _) =>
+  | (_, _, CMatch(CHead({value: TNamed("fun"), _}), patItems, {value: TNamed("=>" | "=>f"), _}), _, _) =>
     let pat = buildTerms(patItems);
     let body = buildChild(rightUf, right);
     mk(Fun(pat, body))
@@ -229,7 +235,7 @@ and buildMatchChain = (cf: closedForm): term => {
 and buildUnform =
   fun
   | USecondary(_) => []
-  | UShard(token) => [mk(Shard(token.value))]
+  | UShard(token) => [localize(mk(Shard(token.value)), token)]
 
 and buildUnforms = unforms => List.concat_map(buildUnform, unforms)
 

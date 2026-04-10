@@ -12,6 +12,7 @@ clean:
 
 .PHONY: test
 test:
+	cp -r ./content ./web/public
 	$(MAKE) reason
 	cd web && npx vite build 2>&1 | tee /tmp/vite-build.log && \
 		if grep -q 'is not exported by' /tmp/vite-build.log; then echo "BUILD ERROR: unresolved imports"; exit 1; fi

@@ -2,7 +2,7 @@
     "item": {
         "title": "Mint",
         "text": "",
-        "type": "postulate\nU : Sort\n(eq (A : U) (B : U) (a : A) (b : B)) : U\n(refl (A : U) (a : A)) : (eq A A a a)\n\nD : U \nK : D\nS : D \n(ap (f : D) (a : D)) : D\n(ap-K (x : D) (y : D)) : (eq D D (ap (ap K x) y) x)\n(ap-S (x : D) (y : D) (z : D)) : (eq D D (ap (ap (ap S x) y) z) (ap (ap x z) (ap y z)))\n\n(point (A : U) (a : A)) : U\n(KSI (x : D)) : (point (eq D D (ap (ap (ap S K) K) x) x) ?)\nend",
+        "type": "postulate\nU : Sort\n(eq (A : U) (B : U) (a : A) (b : B)) : U\n(refl (A : U) (a : A)) : (eq A A a a)\n\nD : U \nK : D\nS : D \n(ap (f : D) (a : D)) : D\n(ap-K (x : D) (y : D)) : (eq D D (ap (ap K x) y) x)\n(ap-S (x : D) (y : D) (z : D)) : (eq D D (ap (ap (ap S x) y) z) (ap (ap x z) (ap y z)))\nschema\ndefinition =\n  fun s => match s with\n  | [(f, [], ret),\n     (f_eq, [], eq ret ret f body)]\n      => (Ok [body, (refl ret body)])\n  | _ => (Error \"invalid definition\")\n  end\nconstruct by definition\nI : D\nI-eq : (eq D D I (ap (ap S K) K))\nend",
         "tags" : ["logic"]
     }
 }
