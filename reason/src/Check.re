@@ -406,9 +406,10 @@ and checkTerm = (ctx: context, mode: checkingMode, t: term): staticInfo =>
     /* Process definitions in the meta block.
        Parser produces separate items: keyword atoms ("let"/"schema")
        followed by Eq(name, body) definitions. We scan for these pairs. */
-    let rec processMeta = (accInfo, accCtx, items) =>
+    /* Process meta definitions, tracking definition order for eval env */
+    let rec processMeta = (accInfo, accCtx, accDefs, items) =>
       switch (items) {
-      | [] => (accInfo, accCtx)
+      | [] => (accInfo, accCtx, accDefs)
       /* schema name = body  OR  schema name : type = body */
       | [{value: Identifier("schema"), _},
          {value: Eq(name, rhs), _},
@@ -441,18 +442,19 @@ and checkTerm = (ctx: context, mode: checkingMode, t: term): staticInfo =>
           | Some(name) => StringMap.add(name, SchemaBinding(rhs), accCtx)
           | None => accCtx
           };
-        processMeta(info, newCtx, rest);
+        processMeta(info, newCtx, accDefs, rest);
       /* Bare name = body — treat as let definition (let keyword is optional/cosmetic) */
       | [{value: Eq({value: Identifier(n), _}, rhs), _}, ...rest] =>
         let bodyInfo = inferExpr(accCtx, rhs);
         let newCtx = StringMap.add(n, MetaLet(rhs), accCtx);
-        processMeta(mergeInfos(accInfo, bodyInfo), newCtx, rest);
+        let newDefs = accDefs @ [(n, rhs)];
+        processMeta(mergeInfos(accInfo, bodyInfo), newCtx, newDefs, rest);
       /* Skip unrecognized items */
       | [item, ...rest] =>
         let itemInfo = inferExpr(accCtx, item);
-        processMeta(mergeInfos(accInfo, itemInfo), accCtx, rest);
+        processMeta(mergeInfos(accInfo, itemInfo), accCtx, accDefs, rest);
       };
-    let (metaInfo, metaCtx) = processMeta(emptyInfo, ctx, body);
+    let (metaInfo, metaCtx, _metaDefs) = processMeta(emptyInfo, ctx, [], body);
     let info =
       switch (rest) {
       | Some(r) => mergeInfos(metaInfo, checkTerm(metaCtx, Program, r))
@@ -469,7 +471,11 @@ and checkTerm = (ctx: context, mode: checkingMode, t: term): staticInfo =>
         switch (StringMap.find_opt(schemaName, ctx)) {
         | Some(SchemaBinding(schemaBody)) =>
           /* Build eval env from MetaLet bindings for schema evaluation */
-          let evalEnv = StringMap.fold(
+          /* Build eval env from MetaLet bindings.
+             First pass: evaluate all bodies (creating closures).
+             Second pass: patch all closures to see the complete env.
+             This handles mutual references regardless of definition order. */
+          let rawEnv = StringMap.fold(
             (name, binding, acc) =>
               switch (binding) {
               | MetaLet(body) =>
@@ -479,8 +485,14 @@ and checkTerm = (ctx: context, mode: checkingMode, t: term): staticInfo =>
                 }
               | _ => acc
               },
-            ctx,
-            Eval.StringMap.empty,
+            ctx, Eval.StringMap.empty,
+          );
+          /* Patch closures: replace each closure's env with the full env */
+          let evalEnv = Eval.StringMap.map(
+            fun
+            | Eval.Closure(_, pat, body) => Eval.Closure(rawEnv, pat, body)
+            | v => v,
+            rawEnv,
           );
           switch (Eval.evalExpr(evalEnv, schemaBody)) {
           | Eval.Ok(schemaVal) =>
@@ -795,34 +807,43 @@ and checkPat = (ctx: context, ty: mlType, t: term): (context, staticInfo) =>
         (ctx, emptyInfo),
         items,
       )
+    | MTerm =>
+      List.fold_left(
+        ((accCtx, accInfo), item) => {
+          let (newCtx, itemInfo) = checkPat(accCtx, MTerm, item);
+          (newCtx, mergeInfos(accInfo, itemInfo));
+        },
+        (ctx, emptyInfo),
+        items,
+      )
     | _ =>
       (ctx, withErrors(emptyInfo,
         [mark("List pattern but expected " ++ printType(ty), t.meta.start, t.meta.end_)]))
     }
 
   | Cons(headPats, tailPat) =>
-    switch (ty) {
-    | MList(elemTy) =>
-      let (headCtx, headInfo) = List.fold_left(
-        ((accCtx, accInfo), pat) => {
-          let (newCtx, patInfo) = checkPat(accCtx, elemTy, pat);
-          (newCtx, mergeInfos(accInfo, patInfo));
-        },
-        (ctx, emptyInfo),
-        headPats,
-      );
-      let (tailCtx, tailInfo) = checkPat(headCtx, MList(elemTy), tailPat);
-      (tailCtx, mergeInfos(headInfo, tailInfo));
-    | _ =>
-      (ctx, withErrors(emptyInfo,
-        [mark("Cons pattern but expected " ++ printType(ty), t.meta.start, t.meta.end_)]))
-    }
+    let elemTy = switch (ty) { | MList(e) => e | _ => MTerm };
+    let listTy = switch (ty) { | MList(_) => ty | _ => MTerm };
+    let (headCtx, headInfo) = List.fold_left(
+      ((accCtx, accInfo), pat) => {
+        let (newCtx, patInfo) = checkPat(accCtx, elemTy, pat);
+        (newCtx, mergeInfos(accInfo, patInfo));
+      },
+      (ctx, emptyInfo),
+      headPats,
+    );
+    let (tailCtx, tailInfo) = checkPat(headCtx, listTy, tailPat);
+    (tailCtx, mergeInfos(headInfo, tailInfo));
 
   | Comma(left, right) =>
     switch (ty) {
     | MPair(tyA, tyB) =>
       let (ctx1, info1) = checkPat(ctx, tyA, left);
       let (ctx2, info2) = checkPat(ctx1, tyB, right);
+      (ctx2, mergeInfos(info1, info2));
+    | MTerm =>
+      let (ctx1, info1) = checkPat(ctx, MTerm, left);
+      let (ctx2, info2) = checkPat(ctx1, MTerm, right);
       (ctx2, mergeInfos(info1, info2));
     | _ =>
       (ctx, withErrors(emptyInfo,
