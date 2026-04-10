@@ -49,7 +49,7 @@ let contextToJsMap = (ctx: context): jsMap => {
       switch (v) {
       | OL(Some(ft)) => jsMapSet(m, k, displayTerm(k, ft))
       | ML(ty) => jsMapSet(m, k, displayTerm(k, ([], mlTypeToTerm(ty))))
-      | SchemaBinding(_) | MetaLet(_) => ()
+      | SchemaBinding(_) | MetaLet(_, _) => ()
       | OL(None) => ()
       },
     ctx,

@@ -1041,39 +1041,49 @@ function inferExpr(ctx, _t) {
         case /* Identifier */ 2 :
           const name$1 = name._0;
           const match = Curry._2(StringMap.find_opt, name$1, ctx);
-          if (match !== undefined) {
-            if (match.TAG === /* ML */ 1) {
-              return {
-                errors: /* [] */ 0,
-                holes: /* [] */ 0,
-                inferred: mlInferred(match._0),
-                bindings: StringMap.empty
-              };
-            } else {
+          if (match === undefined) {
+            if (name$1 === "Sort" || name$1 === "foldl" || name$1 === "fst" || name$1 === "snd" || name$1 === "true" || name$1 === "false" || name$1 === "Ok" || name$1 === "Error" || !hasOLBindings(ctx)) {
               return {
                 errors: /* [] */ 0,
                 holes: /* [] */ 0,
                 inferred: mlInferred(/* MTerm */ 0),
                 bindings: StringMap.empty
               };
+            } else {
+              return withErrors({
+                errors: /* [] */ 0,
+                holes: /* [] */ 0,
+                inferred: mlInferred(/* MTerm */ 0),
+                bindings: StringMap.empty
+              }, {
+                hd: Melange__Error.mark("Unbound variable " + name$1, t.meta.start, t.meta.end_),
+                tl: /* [] */ 0
+              });
             }
-          } else if (name$1 === "Sort" || name$1 === "foldl" || name$1 === "fst" || name$1 === "snd" || !hasOLBindings(ctx)) {
-            return {
-              errors: /* [] */ 0,
-              holes: /* [] */ 0,
-              inferred: mlInferred(/* MTerm */ 0),
-              bindings: StringMap.empty
-            };
-          } else {
-            return withErrors({
-              errors: /* [] */ 0,
-              holes: /* [] */ 0,
-              inferred: mlInferred(/* MTerm */ 0),
-              bindings: StringMap.empty
-            }, {
-              hd: Melange__Error.mark("Unbound variable " + name$1, t.meta.start, t.meta.end_),
-              tl: /* [] */ 0
-            });
+          }
+          switch (match.TAG) {
+            case /* ML */ 1 :
+              return {
+                errors: /* [] */ 0,
+                holes: /* [] */ 0,
+                inferred: mlInferred(match._0),
+                bindings: StringMap.empty
+              };
+            case /* OL */ 0 :
+            case /* SchemaBinding */ 2 :
+              return {
+                errors: /* [] */ 0,
+                holes: /* [] */ 0,
+                inferred: mlInferred(/* MTerm */ 0),
+                bindings: StringMap.empty
+              };
+            case /* MetaLet */ 3 :
+              return {
+                errors: /* [] */ 0,
+                holes: /* [] */ 0,
+                inferred: mlInferred(match._1),
+                bindings: StringMap.empty
+              };
           }
         case /* StringLit */ 3 :
           return {
@@ -1163,50 +1173,98 @@ function inferExpr(ctx, _t) {
           const f = name._0;
           let exit$1 = 0;
           const match$1 = f.value;
-          if (/* tag */ typeof match$1 === "number" || typeof match$1 === "string" || !(match$1.TAG === /* Identifier */ 2 && match$1._0 === "foldl")) {
+          if (/* tag */ typeof match$1 === "number" || typeof match$1 === "string" || match$1.TAG !== /* Identifier */ 2) {
             exit$1 = 2;
           } else {
-            const match$2 = name._1;
-            if (match$2) {
-              const match$3 = match$2.tl;
-              if (match$3) {
-                const match$4 = match$3.tl;
-                if (match$4 && !match$4.tl) {
-                  const initInfo = inferExpr(ctx, match$3.hd);
-                  const listInfo = inferExpr(ctx, match$4.hd);
-                  const initTy = getInferredMlType(initInfo);
-                  const t$1 = getInferredMlType(listInfo);
-                  let elemTy;
-                  elemTy = /* tag */ typeof t$1 === "number" || typeof t$1 === "string" || t$1.TAG !== /* MList */ 0 ? /* MTerm */ 0 : t$1._0;
-                  const fInfo = checkExpr(ctx, {
-                    TAG: /* MArrow */ 3,
-                    _0: initTy,
-                    _1: {
-                      TAG: /* MArrow */ 3,
-                      _0: elemTy,
-                      _1: initTy
+            switch (match$1._0) {
+              case "foldl" :
+                const match$2 = name._1;
+                if (match$2) {
+                  const match$3 = match$2.tl;
+                  if (match$3) {
+                    const match$4 = match$3.tl;
+                    if (match$4 && !match$4.tl) {
+                      const fArg = match$2.hd;
+                      const initInfo = inferExpr(ctx, match$3.hd);
+                      const listInfo = inferExpr(ctx, match$4.hd);
+                      const initTy = getInferredMlType(initInfo);
+                      const t$1 = getInferredMlType(listInfo);
+                      let elemTy;
+                      elemTy = /* tag */ typeof t$1 === "number" || typeof t$1 === "string" || t$1.TAG !== /* MList */ 0 ? /* MTerm */ 0 : t$1._0;
+                      const expectedFTy_1 = {
+                        TAG: /* MArrow */ 3,
+                        _0: elemTy,
+                        _1: initTy
+                      };
+                      const expectedFTy = {
+                        TAG: /* MArrow */ 3,
+                        _0: initTy,
+                        _1: expectedFTy_1
+                      };
+                      const fInfo = checkExpr(ctx, expectedFTy, fArg);
+                      const match$5 = Stdlib__List.length(fInfo.errors) > 0 ? [
+                          inferExpr(ctx, fArg),
+                          initTy
+                        ] : [
+                          fInfo,
+                          initTy
+                        ];
+                      const info$4 = mergeInfos(match$5[0], mergeInfos(initInfo, listInfo));
+                      return {
+                        errors: info$4.errors,
+                        holes: info$4.holes,
+                        inferred: mlInferred(match$5[1]),
+                        bindings: info$4.bindings
+                      };
                     }
-                  }, match$2.hd);
-                  const info$4 = mergeInfos(fInfo, mergeInfos(initInfo, listInfo));
+                    exit$1 = 2;
+                  } else {
+                    exit$1 = 2;
+                  }
+                } else {
+                  exit$1 = 2;
+                }
+                break;
+              case "fst" :
+                const match$6 = name._1;
+                if (match$6 && !match$6.tl) {
+                  const argInfo = inferExpr(ctx, match$6.hd);
+                  const match$7 = getInferredMlType(argInfo);
+                  let retTy;
+                  retTy = /* tag */ typeof match$7 === "number" || typeof match$7 === "string" || match$7.TAG !== /* MPair */ 2 ? /* MTerm */ 0 : match$7._0;
                   return {
-                    errors: info$4.errors,
-                    holes: info$4.holes,
-                    inferred: mlInferred(initTy),
-                    bindings: info$4.bindings
+                    errors: argInfo.errors,
+                    holes: argInfo.holes,
+                    inferred: mlInferred(retTy),
+                    bindings: argInfo.bindings
                   };
                 }
                 exit$1 = 2;
-              } else {
+                break;
+              case "snd" :
+                const match$8 = name._1;
+                if (match$8 && !match$8.tl) {
+                  const argInfo$1 = inferExpr(ctx, match$8.hd);
+                  const match$9 = getInferredMlType(argInfo$1);
+                  let retTy$1;
+                  retTy$1 = /* tag */ typeof match$9 === "number" || typeof match$9 === "string" || match$9.TAG !== /* MPair */ 2 ? /* MTerm */ 0 : match$9._1;
+                  return {
+                    errors: argInfo$1.errors,
+                    holes: argInfo$1.holes,
+                    inferred: mlInferred(retTy$1),
+                    bindings: argInfo$1.bindings
+                  };
+                }
                 exit$1 = 2;
-              }
-            } else {
-              exit$1 = 2;
+                break;
+              default:
+                exit$1 = 2;
             }
           }
           if (exit$1 === 2) {
             const fInfo$1 = inferExpr(ctx, f);
             const fTy = getInferredMlType(fInfo$1);
-            const match$5 = Stdlib__List.fold_left((function (param) {
+            const match$10 = Stdlib__List.fold_left((function (param) {
               const accInfo = param[1];
               const accTy = param[0];
               return function (arg) {
@@ -1220,7 +1278,8 @@ function inferExpr(ctx, _t) {
                   }
                   
                 } else if (accTy.TAG === /* MArrow */ 3) {
-                  const aInfo$1 = checkExpr(ctx, accTy._0, arg);
+                  const paramTy = accTy._0;
+                  const aInfo$1 = Caml_obj.caml_equal(paramTy, /* MTerm */ 0) ? inferExpr(ctx, arg) : checkExpr(ctx, paramTy, arg);
                   return [
                     accTy._1,
                     mergeInfos(accInfo, aInfo$1)
@@ -1239,18 +1298,18 @@ function inferExpr(ctx, _t) {
               fTy,
               emptyInfo
             ], name._1);
-            const info$5 = mergeInfos(fInfo$1, match$5[1]);
+            const info$5 = mergeInfos(fInfo$1, match$10[1]);
             return {
               errors: info$5.errors,
               holes: info$5.holes,
-              inferred: mlInferred(match$5[0]),
+              inferred: mlInferred(match$10[0]),
               bindings: info$5.bindings
             };
           }
           break;
         case /* List */ 10 :
-          const match$6 = name._0;
-          if (!match$6) {
+          const match$11 = name._0;
+          if (!match$11) {
             return {
               errors: /* [] */ 0,
               holes: /* [] */ 0,
@@ -1261,11 +1320,11 @@ function inferExpr(ctx, _t) {
               bindings: StringMap.empty
             };
           }
-          const firstInfo = inferExpr(ctx, match$6.hd);
+          const firstInfo = inferExpr(ctx, match$11.hd);
           const elemTy$1 = getInferredMlType(firstInfo);
           const restInfo = Stdlib__List.fold_left((function (accInfo, item) {
             return mergeInfos(accInfo, checkExpr(ctx, elemTy$1, item));
-          }), emptyInfo, match$6.tl);
+          }), emptyInfo, match$11.tl);
           const info$6 = mergeInfos(firstInfo, restInfo);
           return {
             errors: info$6.errors,
@@ -1298,6 +1357,20 @@ function inferExpr(ctx, _t) {
             }),
             bindings: info$7.bindings
           };
+        case /* Fun */ 12 :
+          const match$12 = checkPat(ctx, /* MTerm */ 0, name._0);
+          const bodyInfo = inferExpr(match$12[0], name._1);
+          const bodyTy = getInferredMlType(bodyInfo);
+          return {
+            errors: /* [] */ 0,
+            holes: /* [] */ 0,
+            inferred: mlInferred({
+              TAG: /* MArrow */ 3,
+              _0: /* MTerm */ 0,
+              _1: bodyTy
+            }),
+            bindings: StringMap.empty
+          };
         case /* Match */ 13 :
           const branches = name._1;
           const scrutInfo = inferExpr(ctx, name._0);
@@ -1313,20 +1386,20 @@ function inferExpr(ctx, _t) {
               tl: /* [] */ 0
             });
           }
-          const match$7 = branches.hd;
-          const match$8 = checkPat(ctx, scrutTy, match$7[0]);
-          const bodyInfo = inferExpr(match$8[0], match$7[1]);
-          const bodyTy = getInferredMlType(bodyInfo);
+          const match$13 = branches.hd;
+          const match$14 = checkPat(ctx, scrutTy, match$13[0]);
+          const bodyInfo$1 = inferExpr(match$14[0], match$13[1]);
+          const bodyTy$1 = getInferredMlType(bodyInfo$1);
           const restInfo$1 = Stdlib__List.fold_left((function (accInfo, param) {
             const match = checkPat(ctx, scrutTy, param[0]);
-            const bInfo = checkExpr(match[0], bodyTy, param[1]);
+            const bInfo = checkExpr(match[0], bodyTy$1, param[1]);
             return mergeInfos(accInfo, mergeInfos(match[1], bInfo));
           }), emptyInfo, branches.tl);
-          const info$8 = mergeInfos(scrutInfo, mergeInfos(match$8[1], mergeInfos(bodyInfo, restInfo$1)));
+          const info$8 = mergeInfos(scrutInfo, mergeInfos(match$14[1], mergeInfos(bodyInfo$1, restInfo$1)));
           return {
             errors: info$8.errors,
             holes: info$8.holes,
-            inferred: mlInferred(bodyTy),
+            inferred: mlInferred(bodyTy$1),
             bindings: info$8.bindings
           };
         case /* If */ 14 :
@@ -1343,25 +1416,26 @@ function inferExpr(ctx, _t) {
           };
         case /* Let */ 15 :
           const body = name._1;
-          const match$9 = name._0.value;
-          if (/* tag */ typeof match$9 === "number" || typeof match$9 === "string") {
+          const match$15 = name._0.value;
+          if (/* tag */ typeof match$15 === "number" || typeof match$15 === "string") {
             _t = body;
             continue;
           }
-          if (match$9.TAG === /* Eq */ 6) {
-            const n = match$9._0.value;
+          if (match$15.TAG === /* Eq */ 6) {
+            const n = match$15._0.value;
             if (/* tag */ typeof n === "number" || typeof n === "string") {
               _t = body;
               continue;
             }
             if (n.TAG === /* Identifier */ 2) {
-              const exprInfo = inferExpr(ctx, match$9._1);
+              const exprInfo = inferExpr(ctx, match$15._1);
+              const exprTy = getInferredMlType(exprInfo);
               const newCtx = Curry._3(StringMap.add, n._0, {
                 TAG: /* ML */ 1,
-                _0: /* MTerm */ 0
+                _0: exprTy
               }, ctx);
-              const bodyInfo$1 = inferExpr(newCtx, body);
-              return mergeInfos(exprInfo, bodyInfo$1);
+              const bodyInfo$2 = inferExpr(newCtx, body);
+              return mergeInfos(exprInfo, bodyInfo$2);
             }
             _t = body;
             continue;
@@ -1519,6 +1593,35 @@ function checkExpr(ctx, _expected, _t) {
           const thenInfo = checkExpr(ctx, expected, items._1);
           const elseInfo = checkExpr(ctx, expected, items._2);
           return mergeInfos(condInfo, mergeInfos(thenInfo, elseInfo));
+        case /* Let */ 15 :
+          const body = items._1;
+          const match$4 = items._0.value;
+          if (/* tag */ typeof match$4 === "number" || typeof match$4 === "string") {
+            _t = body;
+            continue;
+          }
+          if (match$4.TAG === /* Eq */ 6) {
+            const n = match$4._0.value;
+            if (/* tag */ typeof n === "number" || typeof n === "string") {
+              _t = body;
+              continue;
+            }
+            if (n.TAG === /* Identifier */ 2) {
+              const exprInfo = inferExpr(ctx, match$4._1);
+              const exprTy = getInferredMlType(exprInfo);
+              const newCtx = Curry._3(StringMap.add, n._0, {
+                TAG: /* ML */ 1,
+                _0: exprTy
+              }, ctx);
+              const bodyInfo$1 = checkExpr(newCtx, expected, body);
+              return mergeInfos(exprInfo, bodyInfo$1);
+            }
+            _t = body;
+            continue;
+          } else {
+            _t = body;
+            continue;
+          }
       }
     }
     const info$1 = inferExpr(ctx, t);
@@ -2156,9 +2259,11 @@ function checkTerm(ctx, mode, t) {
                   const rhs$1 = match._1;
                   const n$2 = n$1._0;
                   const bodyInfo = inferExpr(accCtx, rhs$1);
+                  const rhsTy = getInferredMlType(bodyInfo);
                   const newCtx$1 = Curry._3(StringMap.add, n$2, {
                     TAG: /* MetaLet */ 3,
-                    _0: rhs$1
+                    _0: rhs$1,
+                    _1: rhsTy
                   }, accCtx);
                   const newDefs = Stdlib.$at(accDefs, {
                     hd: [

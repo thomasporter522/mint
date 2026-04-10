@@ -11,7 +11,7 @@ type binding =
   | OL(option(fullType))
   | ML(mlType)
   | SchemaBinding(term)   /* unevaluated schema body, stored for Construct to evaluate */
-  | MetaLet(term);        /* unevaluated let body, stored for schema evaluation */
+  | MetaLet(term, mlType); /* unevaluated let body + inferred type, for schema evaluation */
 
 type context = StringMap.t(binding);
 
@@ -207,7 +207,7 @@ let lookupCtx = (ctx: context, x: string): lookupResult =>
   } else {
     switch (StringMap.find_opt(x, ctx)) {
     | Some(OL(ft)) => Found(ft)
-    | Some(ML(_)) | Some(SchemaBinding(_)) | Some(MetaLet(_)) => NotFound
+    | Some(ML(_)) | Some(SchemaBinding(_)) | Some(MetaLet(_, _)) => NotFound
     | None => NotFound
     };
   };
@@ -368,7 +368,7 @@ let getInferredMlType = (info: staticInfo): mlType =>
 /* --- OL scope checking: strict when OL bindings exist, permissive otherwise --- */
 
 let hasOLBindings = (ctx: context): bool =>
-  StringMap.exists((_, v) => switch (v) { | OL(_) => true | ML(_) | SchemaBinding(_) | MetaLet(_) => false }, ctx);
+  StringMap.exists((_, v) => switch (v) { | OL(_) => true | ML(_) | SchemaBinding(_) | MetaLet(_, _) => false }, ctx);
 
 /* Signature = (Term, List (Term, Term), Term) — name (as OL identifier), params (name as Identifier term, type), return type */
 let signatureType = MPair(MTerm, MPair(MList(MPair(MTerm, MTerm)), MTerm));
@@ -446,7 +446,8 @@ and checkTerm = (ctx: context, mode: checkingMode, t: term): staticInfo =>
       /* Bare name = body — treat as let definition (let keyword is optional/cosmetic) */
       | [{value: Eq({value: Identifier(n), _}, rhs), _}, ...rest] =>
         let bodyInfo = inferExpr(accCtx, rhs);
-        let newCtx = StringMap.add(n, MetaLet(rhs), accCtx);
+        let rhsTy = getInferredMlType(bodyInfo);
+        let newCtx = StringMap.add(n, MetaLet(rhs, rhsTy), accCtx);
         let newDefs = accDefs @ [(n, rhs)];
         processMeta(mergeInfos(accInfo, bodyInfo), newCtx, newDefs, rest);
       /* Skip unrecognized items */
@@ -478,7 +479,7 @@ and checkTerm = (ctx: context, mode: checkingMode, t: term): staticInfo =>
           let rawEnv = StringMap.fold(
             (name, binding, acc) =>
               switch (binding) {
-              | MetaLet(body) =>
+              | MetaLet(body, _) =>
                 switch (Eval.evalExpr(acc, body)) {
                 | Eval.Ok(v) => Eval.StringMap.add(name, v, acc)
                 | Eval.Err(_) => acc
@@ -903,9 +904,11 @@ and inferExpr = (ctx: context, t: term): staticInfo =>
   | Identifier(name) =>
     switch (StringMap.find_opt(name, ctx)) {
     | Some(ML(ty)) => {...emptyInfo, inferred: mlInferred(ty)}
-    | Some(OL(_)) | Some(SchemaBinding(_)) | Some(MetaLet(_)) => {...emptyInfo, inferred: mlInferred(MTerm)}
+    | Some(OL(_)) | Some(SchemaBinding(_)) => {...emptyInfo, inferred: mlInferred(MTerm)}
+    | Some(MetaLet(_, ty)) => {...emptyInfo, inferred: mlInferred(ty)}
     | None =>
       if (name == "Sort" || name == "foldl" || name == "fst" || name == "snd"
+          || name == "true" || name == "false" || name == "Ok" || name == "Error"
           || !hasOLBindings(ctx)) {
         {...emptyInfo, inferred: mlInferred(MTerm)}
       } else {
@@ -920,6 +923,24 @@ and inferExpr = (ctx: context, t: term): staticInfo =>
     {errors: [], holes: [(t.meta.start, {goal: hole, context: ctx})],
      inferred: mlInferred(MTerm), bindings: StringMap.empty}
 
+  | Ap({value: Identifier("fst"), _}, [arg]) =>
+    let argInfo = inferExpr(ctx, arg);
+    let retTy =
+      switch (getInferredMlType(argInfo)) {
+      | MPair(a, _) => a
+      | _ => MTerm
+      };
+    {...argInfo, inferred: mlInferred(retTy)};
+
+  | Ap({value: Identifier("snd"), _}, [arg]) =>
+    let argInfo = inferExpr(ctx, arg);
+    let retTy =
+      switch (getInferredMlType(argInfo)) {
+      | MPair(_, b) => b
+      | _ => MTerm
+      };
+    {...argInfo, inferred: mlInferred(retTy)};
+
   | Ap({value: Identifier("foldl"), _}, [fArg, initArg, listArg]) =>
     /* Custom typing for foldl: infer init and list types, check f for consistency */
     let initInfo = inferExpr(ctx, initArg);
@@ -930,10 +951,21 @@ and inferExpr = (ctx: context, t: term): staticInfo =>
       | MList(t) => t
       | _ => MTerm
       };
-    /* f should be: initTy -> elemTy -> initTy (curried) */
-    let fInfo = checkExpr(ctx, MArrow(initTy, MArrow(elemTy, initTy)), fArg);
+    /* f should be: initTy -> elemTy -> initTy (curried).
+       If the callback check produces errors (e.g. complex accumulator types
+       that fst/snd can't track), fall back to MTerm inference. */
+    let expectedFTy = MArrow(initTy, MArrow(elemTy, initTy));
+    let fInfo = checkExpr(ctx, expectedFTy, fArg);
+    let (fInfo, resultTy) =
+      if (List.length(fInfo.errors) > 0) {
+        /* Fall back: just infer f, don't enforce the precise callback type,
+           but still return initTy since that's the foldl invariant */
+        (inferExpr(ctx, fArg), initTy);
+      } else {
+        (fInfo, initTy);
+      };
     let info = mergeInfos(fInfo, mergeInfos(initInfo, listInfo));
-    {...info, inferred: mlInferred(initTy)};
+    {...info, inferred: mlInferred(resultTy)};
 
   | Ap(f, args) =>
     let fInfo = inferExpr(ctx, f);
@@ -944,7 +976,11 @@ and inferExpr = (ctx: context, t: term): staticInfo =>
         ((accTy, accInfo), arg) =>
           switch (accTy) {
           | MArrow(paramTy, retTy) =>
-            let aInfo = checkExpr(ctx, paramTy, arg);
+            /* When paramTy is MTerm (unknown, e.g. from Fun inference),
+               just infer the arg — any type is acceptable */
+            let aInfo =
+              if (paramTy == MTerm) { inferExpr(ctx, arg) }
+              else { checkExpr(ctx, paramTy, arg) };
             (retTy, mergeInfos(accInfo, aInfo));
           | MTerm =>
             /* MTerm function: infer args (don't check against MTerm,
@@ -969,13 +1005,20 @@ and inferExpr = (ctx: context, t: term): staticInfo =>
 
   | Eq(_name, body) => inferExpr(ctx, body)
 
-  | Fun(_, _) =>
-    {...emptyInfo, inferred: mlInferred(MTerm)}
+  | Fun(pat, body) =>
+    let (patCtx, _patInfo) = checkPat(ctx, MTerm, pat);
+    let bodyInfo = inferExpr(patCtx, body);
+    let bodyTy = getInferredMlType(bodyInfo);
+    /* Only propagate the inferred type, not errors/holes from inside the body —
+       the body will be properly checked when the function is checked against
+       a concrete expected type via checkExpr. */
+    {...emptyInfo, inferred: mlInferred(MArrow(MTerm, bodyTy))}
   | Let(binding, body) =>
     switch (binding.value) {
     | Eq({value: Identifier(n), _}, expr) =>
       let exprInfo = inferExpr(ctx, expr);
-      let newCtx = StringMap.add(n, ML(MTerm), ctx);
+      let exprTy = getInferredMlType(exprInfo);
+      let newCtx = StringMap.add(n, ML(exprTy), ctx);
       let bodyInfo = inferExpr(newCtx, body);
       mergeInfos(exprInfo, bodyInfo);
     | _ => inferExpr(ctx, body)
@@ -1152,6 +1195,17 @@ and checkExpr = (ctx: context, expected: mlType, t: term): staticInfo =>
       let got =
         getInferredMlType(info);
       withErrors(info, mlSubsume(expected, got, t.meta.start, t.meta.end_));
+    }
+
+  | Let(binding, body) =>
+    switch (binding.value) {
+    | Eq({value: Identifier(n), _}, expr) =>
+      let exprInfo = inferExpr(ctx, expr);
+      let exprTy = getInferredMlType(exprInfo);
+      let newCtx = StringMap.add(n, ML(exprTy), ctx);
+      let bodyInfo = checkExpr(newCtx, expected, body);
+      mergeInfos(exprInfo, bodyInfo);
+    | _ => checkExpr(ctx, expected, body)
     }
 
   | _ =>
