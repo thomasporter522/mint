@@ -99,6 +99,28 @@ let rec matchPat = (bindings: evalEnv, pat: term, value: mlValue): option(evalEn
     | _ => None
     }
 
+  | Cons(headPats, tailPat) =>
+    switch (value) {
+    | Val({value: List(vals), _}) when List.length(vals) >= List.length(headPats) =>
+      let headVals = List.filteri((i, _) => i < List.length(headPats), vals);
+      let tailVals = List.filteri((i, _) => i >= List.length(headPats), vals);
+      let headResult = List.fold_left2(
+        (acc, p, v) =>
+          switch (acc) {
+          | None => None
+          | Some(b) => matchPat(b, p, Val(v))
+          },
+        Some(bindings),
+        headPats,
+        headVals,
+      );
+      switch (headResult) {
+      | None => None
+      | Some(b) => matchPat(b, tailPat, Val(mk(List(tailVals))))
+      }
+    | _ => None
+    }
+
   | Comma(pL, pR) =>
     switch (value) {
     | Val({value: Comma(vL, vR), _}) =>
@@ -147,6 +169,19 @@ let rec evalExpr = (env: evalEnv, t: term): evalResult =>
   | Hole(_) => Ok(Val(t))
 
   | List(items) => evalList(env, items)
+
+  | Cons(heads, tail) =>
+    switch (evalList(env, heads)) {
+    | Err(_) as e => e
+    | Ok(Val({value: List(headVals), _})) =>
+      switch (evalExpr(env, tail)) {
+      | Err(_) as e => e
+      | Ok(Val({value: List(tailVals), _})) =>
+        Ok(Val(mk(List(headVals @ tailVals))))
+      | Ok(v) => Err("Cons tail is not a list: " ++ Print.printTerm(termOf(v)))
+      }
+    | Ok(_) => Err("Internal: evalList returned non-list")
+    }
 
   | Comma(left, right) =>
     switch (evalExpr(env, left)) {

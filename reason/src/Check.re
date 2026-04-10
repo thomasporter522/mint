@@ -81,6 +81,7 @@ let rec resolve = (env: env, t: term): term =>
     | Comma(l, r) => {...t, value: Comma(resolve(env, l), resolve(env, r))}
     | BinOp(op, l, r) => {...t, value: BinOp(op, resolve(env, l), resolve(env, r))}
     | List(items) => {...t, value: List(List.map(resolve(env), items))}
+    | Cons(heads, tail) => {...t, value: Cons(List.map(resolve(env), heads), resolve(env, tail))}
     | Fun(pat, body) => {...t, value: Fun(resolve(env, pat), resolve(env, body))}
     | Match(scrut, branches) =>
       {...t, value: Match(resolve(env, scrut), List.map(((p, b)) => (resolve(env, p), resolve(env, b)), branches))}
@@ -128,6 +129,7 @@ and resolveWithParams = (wenv: witnessEnv, t: term): term =>
     | Comma(l, r) => {...t, value: Comma(resolveWithParams(wenv, l), resolveWithParams(wenv, r))}
     | BinOp(op, l, r) => {...t, value: BinOp(op, resolveWithParams(wenv, l), resolveWithParams(wenv, r))}
     | List(items) => {...t, value: List(List.map(resolveWithParams(wenv), items))}
+    | Cons(heads, tail) => {...t, value: Cons(List.map(resolveWithParams(wenv), heads), resolveWithParams(wenv, tail))}
     | Fun(pat, body) => {...t, value: Fun(resolveWithParams(wenv, pat), resolveWithParams(wenv, body))}
     | Match(scrut, branches) =>
       {...t, value: Match(resolveWithParams(wenv, scrut),
@@ -172,6 +174,10 @@ let rec termConsistent = (a: term, b: term): bool =>
   | (List(a), List(b)) =>
     List.length(a) == List.length(b)
     && List.for_all2(termConsistent, a, b)
+  | (Cons(h1, t1), Cons(h2, t2)) =>
+    List.length(h1) == List.length(h2)
+    && List.for_all2(termConsistent, h1, h2)
+    && termConsistent(t1, t2)
   | (Comma(a1, b1), Comma(a2, b2)) =>
     termConsistent(a1, a2) && termConsistent(b1, b2)
   | (Arrow(a1, b1), Arrow(a2, b2)) =>
@@ -324,7 +330,7 @@ let rec termToMlType = (t: term): option(mlType) =>
   | Identifier("Sort") => Some(MSort)
   | Identifier("Bool") => Some(MBool)
   | Identifier("String") => Some(MString)
-  | Identifier("Signature") => Some(MPair(MTerm, MPair(MList(MPair(MString, MTerm)), MTerm)))
+  | Identifier("Signature") => Some(MPair(MTerm, MPair(MList(MPair(MTerm, MTerm)), MTerm)))
   | Ap({value: Identifier("List"), _}, [arg]) =>
     switch (termToMlType(arg)) {
     | Some(t) => Some(MList(t))
@@ -364,8 +370,8 @@ let getInferredMlType = (info: staticInfo): mlType =>
 let hasOLBindings = (ctx: context): bool =>
   StringMap.exists((_, v) => switch (v) { | OL(_) => true | ML(_) | SchemaBinding(_) | MetaLet(_) => false }, ctx);
 
-/* Signature = (Term, List (String, Term), Term) — name (as OL identifier), params, return type */
-let signatureType = MPair(MTerm, MPair(MList(MPair(MString, MTerm)), MTerm));
+/* Signature = (Term, List (Term, Term), Term) — name (as OL identifier), params (name as Identifier term, type), return type */
+let signatureType = MPair(MTerm, MPair(MList(MPair(MTerm, MTerm)), MTerm));
 
 /* Schema type: List Signature -> Result (List Term) */
 let schemaType = MArrow(MList(signatureType), MResult(MList(MTerm)));
@@ -502,7 +508,9 @@ and checkTerm = (ctx: context, mode: checkingMode, t: term): staticInfo =>
                         | Ap({value: Identifier(n), _}, _) => Some(n)
                         | _ => None
                         };
-                      /* Add declaration parameters to context for witness checking */
+                      /* Add declaration parameters to context for witness checking.
+                         Parameter types must be resolved through substEnv so that
+                         references to earlier declared names get their witnesses. */
                       let witnessCtx =
                         switch (lhs.value) {
                         | Ap(_, args) =>
@@ -510,7 +518,8 @@ and checkTerm = (ctx: context, mode: checkingMode, t: term): staticInfo =>
                             (acc, arg) =>
                               switch (arg.value) {
                               | Asc({value: Identifier(pname), _}, pty) =>
-                                StringMap.add(pname, OL(Some(([], pty))), acc)
+                                let resolvedPty = resolveWithParams(substEnv, pty);
+                                StringMap.add(pname, OL(Some(([], resolvedPty))), acc)
                               | _ => acc
                               },
                             ctx,
@@ -791,6 +800,24 @@ and checkPat = (ctx: context, ty: mlType, t: term): (context, staticInfo) =>
         [mark("List pattern but expected " ++ printType(ty), t.meta.start, t.meta.end_)]))
     }
 
+  | Cons(headPats, tailPat) =>
+    switch (ty) {
+    | MList(elemTy) =>
+      let (headCtx, headInfo) = List.fold_left(
+        ((accCtx, accInfo), pat) => {
+          let (newCtx, patInfo) = checkPat(accCtx, elemTy, pat);
+          (newCtx, mergeInfos(accInfo, patInfo));
+        },
+        (ctx, emptyInfo),
+        headPats,
+      );
+      let (tailCtx, tailInfo) = checkPat(headCtx, MList(elemTy), tailPat);
+      (tailCtx, mergeInfos(headInfo, tailInfo));
+    | _ =>
+      (ctx, withErrors(emptyInfo,
+        [mark("Cons pattern but expected " ++ printType(ty), t.meta.start, t.meta.end_)]))
+    }
+
   | Comma(left, right) =>
     switch (ty) {
     | MPair(tyA, tyB) =>
@@ -861,6 +888,21 @@ and inferExpr = (ctx: context, t: term): staticInfo =>
   | Hole(_) =>
     {errors: [], holes: [(t.meta.start, {goal: hole, context: ctx})],
      inferred: mlInferred(MTerm), bindings: StringMap.empty}
+
+  | Ap({value: Identifier("foldl"), _}, [fArg, initArg, listArg]) =>
+    /* Custom typing for foldl: infer init and list types, check f for consistency */
+    let initInfo = inferExpr(ctx, initArg);
+    let listInfo = inferExpr(ctx, listArg);
+    let initTy = getInferredMlType(initInfo);
+    let elemTy =
+      switch (getInferredMlType(listInfo)) {
+      | MList(t) => t
+      | _ => MTerm
+      };
+    /* f should be: initTy -> elemTy -> initTy (curried) */
+    let fInfo = checkExpr(ctx, MArrow(initTy, MArrow(elemTy, initTy)), fArg);
+    let info = mergeInfos(fInfo, mergeInfos(initInfo, listInfo));
+    {...info, inferred: mlInferred(initTy)};
 
   | Ap(f, args) =>
     let fInfo = inferExpr(ctx, f);
@@ -970,6 +1012,19 @@ and inferExpr = (ctx: context, t: term): staticInfo =>
 
   | Postulate(_, _) | Meta(_, _) | Construct(_, _, _) =>
     {...emptyInfo, inferred: mlInferred(MTerm)}
+
+  | Cons(heads, tail) =>
+    let headInfos = List.map(h => inferExpr(ctx, h), heads);
+    let tailInfo = inferExpr(ctx, tail);
+    let info = List.fold_left(mergeInfos, tailInfo, headInfos);
+    let elemTy =
+      switch (headInfos) {
+      | [first, ..._] => getInferredMlType(first)
+      | [] => getInferredMlType(tailInfo) |> (fun
+        | MList(t) => t
+        | _ => MTerm)
+      };
+    {...info, inferred: mlInferred(MList(elemTy))};
 
   | BinOp(op, left, right) =>
     switch (op) {

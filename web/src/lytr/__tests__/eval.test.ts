@@ -55,6 +55,55 @@ describe('eval: lists', () => {
 });
 
 /* ------------------------------------------------------------------ */
+/*  Cons (list spread)                                                  */
+/* ------------------------------------------------------------------ */
+
+describe('eval: cons', () => {
+  it('cons with literal tail', () => {
+    expect(evalOk('[a, ...[b, c]]')).toBe('[a, b, c]');
+  });
+
+  it('cons with empty tail', () => {
+    expect(evalOk('[a, ...[]]')).toBe('[a]');
+  });
+
+  it('spread of empty list', () => {
+    expect(evalOk('[...[a, b]]')).toBe('[a, b]');
+  });
+
+  it('cons pattern matches head and tail', () => {
+    expect(evalOk('match [a, b, c] with | [h, ...t] => t end')).toBe('[b, c]');
+  });
+
+  it('cons pattern with multiple heads', () => {
+    expect(evalOk('match [a, b, c] with | [x, y, ...t] => (x, y) end')).toBe('(a, b)');
+  });
+
+  it('cons pattern fails on too-short list', () => {
+    expect(evalOk('match [a] with | [x, y, ...t] => no | _ => yes end')).toBe('yes');
+  });
+
+  it('cons pattern with empty tail', () => {
+    expect(evalOk('match [a] with | [h, ...t] => t end')).toBe('[]');
+  });
+
+  it('cons round-trips through pattern and expression', () => {
+    expect(evalOk('match [x, y, z] with | [h, ...t] => [h, ...t] end')).toBe('[x, y, z]');
+  });
+
+  it('reverse via foldl and cons', () => {
+    expect(evalOk('foldl (fun acc => fun x => [x, ...acc]) [] [a, b, c]')).toBe('[c, b, a]');
+  });
+
+  it('prepend all via foldl and cons', () => {
+    // foldl prepends each element, so [a,b] folded onto [c,d] gives [d,c,a,b]
+    expect(evalOk(
+      'foldl (fun acc => fun x => [x, ...acc]) [a, b] [c, d]'
+    )).toBe('[d, c, a, b]');
+  });
+});
+
+/* ------------------------------------------------------------------ */
 /*  Pairs                                                               */
 /* ------------------------------------------------------------------ */
 

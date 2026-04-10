@@ -60,6 +60,7 @@ let grammar = {
     /* schema: keyword atom used as definition marker inside meta blocks */
     |> addToken("schema", {kind: Keyword("schema"), leftPrec: Uninterested, rightPrec: Uninterested})
     |> addToken("_",   {kind: Symbol("_"),    leftPrec: Uninterested, rightPrec: Uninterested})
+    |> addToken("...", {kind: Symbol("..."), leftPrec: Uninterested, rightPrec: Uninterested})
     /* construct...by — matched pair, by takes over block-end/block-block matching */
     |> addToken("by", {kind: Keyword("by"), leftPrec: Interior, rightPrec: Interior})
     |> addMatch(MatchPair("construct", "by"));

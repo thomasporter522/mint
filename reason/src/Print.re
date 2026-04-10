@@ -22,6 +22,7 @@ let rec debugTerm = (t: term): string => {
   | BinOp(op, l, r) => p ++ "BinOp(" ++ op ++ "," ++ debugTerm(l) ++ "," ++ debugTerm(r) ++ ")"
   | Ap(f, args) => p ++ "Ap(" ++ debugTerm(f) ++ ",[" ++ String.concat(",", List.map(debugTerm, args)) ++ "])"
   | List(items) => "List([" ++ String.concat(",", List.map(debugTerm, items)) ++ "])"
+  | Cons(heads, tail) => "Cons([" ++ String.concat(",", List.map(debugTerm, heads)) ++ "]," ++ debugTerm(tail) ++ ")"
   | Fun(pat, body) => "Fun(" ++ debugTerm(pat) ++ "," ++ debugTerm(body) ++ ")"
   | Match(scrut, branches) =>
     "Match(" ++ debugTerm(scrut) ++ ",[" ++
@@ -56,6 +57,10 @@ let rec printTerm = (t: term): string => {
       printTerm(f) ++ " " ++ String.concat(" ", List.map(printTerm, args))
     | List(items) =>
       "[" ++ String.concat(", ", List.map(printTerm, items)) ++ "]"
+    | Cons(heads, tail) =>
+      "[" ++ String.concat(", ", List.map(printTerm, heads))
+      ++ (List.length(heads) > 0 ? ", " : "")
+      ++ "..." ++ printTerm(tail) ++ "]"
     | Fun(pat, body) =>
       "fun " ++ printTerm(pat) ++ " => " ++ printTerm(body)
     | Match(scrut, branches) =>
