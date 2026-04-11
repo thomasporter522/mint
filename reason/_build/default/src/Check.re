@@ -466,6 +466,23 @@ and checkTerm = (ctx: context, mode: checkingMode, t: term): staticInfo =>
           | None => accCtx
           };
         processMeta(info, newCtx, accDefs, rest);
+      /* Annotated: name : type = body — check body against the annotation */
+      | [{value: Eq({value: Asc({value: Identifier(n), _}, typeAnnot), _}, rhs), _}, ...rest] =>
+        let (annotTy, annotErrors) =
+          switch (termToMlType(typeAnnot)) {
+          | Some(ty) => (Some(ty), [])
+          | None => (None, [mark("Invalid type annotation", typeAnnot.meta.start, typeAnnot.meta.end_)])
+          };
+        let (bodyInfo, rhsTy) =
+          switch (annotTy) {
+          | Some(ty) => (checkExpr(accCtx, ty, rhs), ty)
+          | None =>
+            let info = inferExpr(accCtx, rhs);
+            (info, getInferredMlType(info));
+          };
+        let newCtx = StringMap.add(n, MetaLet(rhs, rhsTy), accCtx);
+        let newDefs = accDefs @ [(n, rhs)];
+        processMeta(mergeInfos(accInfo, withErrors(bodyInfo, annotErrors)), newCtx, newDefs, rest);
       /* Bare name = body — treat as let definition (let keyword is optional/cosmetic) */
       | [{value: Eq({value: Identifier(n), _}, rhs), _}, ...rest] =>
         let bodyInfo = inferExpr(accCtx, rhs);
@@ -1027,6 +1044,21 @@ and inferExpr = (ctx: context, t: term): staticInfo =>
     {...emptyInfo, inferred: mlInferred(MArrow(MTerm, bodyTy))}
   | Let(binding, body) =>
     switch (binding.value) {
+    | Eq({value: Asc({value: Identifier(n), _}, typeAnnot), _}, expr) =>
+      switch (termToMlType(typeAnnot)) {
+      | Some(annotTy) =>
+        let exprInfo = checkExpr(ctx, annotTy, expr);
+        let newCtx = StringMap.add(n, ML(annotTy), ctx);
+        let bodyInfo = inferExpr(newCtx, body);
+        mergeInfos(exprInfo, bodyInfo);
+      | None =>
+        let exprInfo = inferExpr(ctx, expr);
+        let exprTy = getInferredMlType(exprInfo);
+        let newCtx = StringMap.add(n, ML(exprTy), ctx);
+        let bodyInfo = inferExpr(newCtx, body);
+        withErrors(mergeInfos(exprInfo, bodyInfo),
+          [mark("Invalid type annotation", typeAnnot.meta.start, typeAnnot.meta.end_)]);
+      }
     | Eq({value: Identifier(n), _}, expr) =>
       let exprInfo = inferExpr(ctx, expr);
       let exprTy = getInferredMlType(exprInfo);
@@ -1211,6 +1243,21 @@ and checkExpr = (ctx: context, expected: mlType, t: term): staticInfo =>
 
   | Let(binding, body) =>
     switch (binding.value) {
+    | Eq({value: Asc({value: Identifier(n), _}, typeAnnot), _}, expr) =>
+      switch (termToMlType(typeAnnot)) {
+      | Some(annotTy) =>
+        let exprInfo = checkExpr(ctx, annotTy, expr);
+        let newCtx = StringMap.add(n, ML(annotTy), ctx);
+        let bodyInfo = checkExpr(newCtx, expected, body);
+        mergeInfos(exprInfo, bodyInfo);
+      | None =>
+        let exprInfo = inferExpr(ctx, expr);
+        let exprTy = getInferredMlType(exprInfo);
+        let newCtx = StringMap.add(n, ML(exprTy), ctx);
+        let bodyInfo = checkExpr(newCtx, expected, body);
+        withErrors(mergeInfos(exprInfo, bodyInfo),
+          [mark("Invalid type annotation", typeAnnot.meta.start, typeAnnot.meta.end_)]);
+      }
     | Eq({value: Identifier(n), _}, expr) =>
       let exprInfo = inferExpr(ctx, expr);
       let exprTy = getInferredMlType(exprInfo);
@@ -1219,6 +1266,21 @@ and checkExpr = (ctx: context, expected: mlType, t: term): staticInfo =>
       mergeInfos(exprInfo, bodyInfo);
     | _ => checkExpr(ctx, expected, body)
     }
+
+  | Ap({value: Identifier("foldl"), _}, [fArg, initArg, listArg]) =>
+    /* When we know the expected type, use it as initTy so that [] gets
+       the right element type instead of defaulting to List Term. */
+    let initInfo = checkExpr(ctx, expected, initArg);
+    let listInfo = inferExpr(ctx, listArg);
+    let elemTy =
+      switch (getInferredMlType(listInfo)) {
+      | MList(t) => t
+      | _ => MTerm
+      };
+    let expectedFTy = MArrow(expected, MArrow(elemTy, expected));
+    let fInfo = checkExpr(ctx, expectedFTy, fArg);
+    let info = mergeInfos(fInfo, mergeInfos(initInfo, listInfo));
+    {...info, inferred: mlInferred(expected)};
 
   | _ =>
     let info = inferExpr(ctx, t);

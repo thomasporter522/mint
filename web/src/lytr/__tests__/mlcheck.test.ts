@@ -320,3 +320,85 @@ describe('ML type checker: Term is not a wildcard', () => {
     fails('fun s => (if true then (Ok []) else [] end)');
   });
 });
+
+/* ------------------------------------------------------------------ */
+/*  Type annotations on let bindings                                   */
+/* ------------------------------------------------------------------ */
+
+describe('ML type checker: let type annotations', () => {
+  /* --- Annotations that should pass --- */
+
+  it('annotated let with Term type', () => {
+    ok('fun s => let x : Term = a in (Ok [x])');
+  });
+
+  it('annotated let with List Term type', () => {
+    ok('fun s => let xs : (List Term) = [a, b] in (Ok xs)');
+  });
+
+  it('annotated let with String type', () => {
+    ok('fun s => let msg : String = "hi" in (Error msg)');
+  });
+
+  it('annotated let with arrow type', () => {
+    ok('fun s => let f : (Term -> Term) = fun x => x in (Ok [(f a)])');
+  });
+
+  it('annotated let with pair type', () => {
+    ok('fun s => let p : (Term, Term) = (a, b) in (Ok [fst p])');
+  });
+
+  it('annotated let body is checked against the annotation', () => {
+    // fun x => x is checked against Term -> Term, binding x as Term
+    ok('fun s => let f : (Term -> Term) = fun x => x in (Ok [(f a)])');
+  });
+
+  it('annotated let with List Term -> List Term', () => {
+    ok('fun s => let rev : ((List Term) -> (List Term)) = fun xs => (foldl (fun acc => fun x => [x, ...acc]) [] xs) in (Ok (rev [a, b]))');
+  });
+
+  it('annotation gives param types to lambda', () => {
+    // Without annotation, f infers as Term -> Term (param is Term).
+    // With annotation (List Term) -> (List Term), param xs gets List Term.
+    // Then foldl can properly type-check the callback.
+    ok('fun s => let rev : ((List Term) -> (List Term)) = fun xs => (foldl (fun acc => fun x => [x, ...acc]) [] xs) in (Ok (rev [a]))');
+  });
+
+  it('annotated let with Result type', () => {
+    ok('fun s => let r : (Result (List Term)) = (Ok [a]) in r');
+  });
+
+  it('annotation propagates through function application', () => {
+    // rev has type (List Term) -> (List Term), so (rev xs) returns List Term
+    // Then (Ok (rev xs)) should pass since Ok wants List Term
+    ok('fun s => let rev : ((List Term) -> (List Term)) = fun xs => (foldl (fun acc => fun x => [x, ...acc]) [] xs) in match s with | _ => (Ok (rev [a, b])) end');
+  });
+
+  /* --- Annotations that should fail --- */
+
+  it('rejects body that does not match annotation', () => {
+    fails('fun s => let x : String = [a, b] in (Error x)', 'Expected String');
+  });
+
+  it('rejects using annotated binding at wrong type', () => {
+    // x : String, but Ok wants List Term
+    fails('fun s => let x : String = "hi" in (Ok [x])', 'Expected Term');
+  });
+
+  it('rejects arrow annotation on non-function', () => {
+    fails('fun s => let f : (Term -> Term) = a in (Ok [(f a)])', 'Expected Term -> Term');
+  });
+
+  it('rejects List annotation on non-list body', () => {
+    fails('fun s => let xs : (List Term) = a in (Ok xs)', 'Expected List');
+  });
+
+  it('rejects pair annotation on non-pair body', () => {
+    fails('fun s => let p : (Term, Term) = a in (Ok [fst p])', 'Expected (Term, Term)');
+  });
+
+  it('annotation mismatch is caught even when body type-checks in isolation', () => {
+    // Body [a, b] is valid as List Term, but annotation says String
+    fails('fun s => let xs : String = [a, b] in (Error xs)', 'Expected String');
+  });
+});

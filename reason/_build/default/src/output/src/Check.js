@@ -1492,28 +1492,81 @@ function checkTerm(ctx, mode, t) {
                 break;
               case /* Eq */ 6 :
                 const n$1 = match._0.value;
-                if (!/* tag */ (typeof n$1 === "number" || typeof n$1 === "string") && n$1.TAG === /* Identifier */ 2) {
-                  const rhs$1 = match._1;
-                  const n$2 = n$1._0;
-                  const bodyInfo = inferExpr(accCtx, rhs$1);
-                  const rhsTy = getInferredMlType(bodyInfo);
-                  const newCtx$1 = Curry._3(StringMap.add, n$2, {
-                    TAG: /* MetaLet */ 4,
-                    _0: rhs$1,
-                    _1: rhsTy
-                  }, accCtx);
-                  const newDefs = Stdlib.$at(accDefs, {
-                    hd: [
-                      n$2,
-                      rhs$1
-                    ],
-                    tl: /* [] */ 0
-                  });
-                  _items = items.tl;
-                  _accDefs = newDefs;
-                  _accCtx = newCtx$1;
-                  _accInfo = mergeInfos(accInfo, bodyInfo);
-                  continue;
+                if (!/* tag */ (typeof n$1 === "number" || typeof n$1 === "string")) {
+                  switch (n$1.TAG) {
+                    case /* Identifier */ 2 :
+                      const rhs$1 = match._1;
+                      const n$2 = n$1._0;
+                      const bodyInfo = inferExpr(accCtx, rhs$1);
+                      const rhsTy = getInferredMlType(bodyInfo);
+                      const newCtx$1 = Curry._3(StringMap.add, n$2, {
+                        TAG: /* MetaLet */ 4,
+                        _0: rhs$1,
+                        _1: rhsTy
+                      }, accCtx);
+                      const newDefs = Stdlib.$at(accDefs, {
+                        hd: [
+                          n$2,
+                          rhs$1
+                        ],
+                        tl: /* [] */ 0
+                      });
+                      _items = items.tl;
+                      _accDefs = newDefs;
+                      _accCtx = newCtx$1;
+                      _accInfo = mergeInfos(accInfo, bodyInfo);
+                      continue;
+                    case /* Asc */ 4 :
+                      const n$3 = n$1._0.value;
+                      if (!/* tag */ (typeof n$3 === "number" || typeof n$3 === "string") && n$3.TAG === /* Identifier */ 2) {
+                        const rhs$2 = match._1;
+                        const typeAnnot$1 = n$1._1;
+                        const n$4 = n$3._0;
+                        const ty = termToMlType(typeAnnot$1);
+                        const match$4 = ty !== undefined ? [
+                            ty,
+                            /* [] */ 0
+                          ] : [
+                            undefined,
+                            {
+                              hd: Melange__Error.mark("Invalid type annotation", typeAnnot$1.meta.start, typeAnnot$1.meta.end_),
+                              tl: /* [] */ 0
+                            }
+                          ];
+                        const annotTy$1 = match$4[0];
+                        let match$5;
+                        if (annotTy$1 !== undefined) {
+                          match$5 = [
+                            checkExpr(accCtx, annotTy$1, rhs$2),
+                            annotTy$1
+                          ];
+                        } else {
+                          const info$1 = inferExpr(accCtx, rhs$2);
+                          match$5 = [
+                            info$1,
+                            getInferredMlType(info$1)
+                          ];
+                        }
+                        const newCtx$2 = Curry._3(StringMap.add, n$4, {
+                          TAG: /* MetaLet */ 4,
+                          _0: rhs$2,
+                          _1: match$5[1]
+                        }, accCtx);
+                        const newDefs$1 = Stdlib.$at(accDefs, {
+                          hd: [
+                            n$4,
+                            rhs$2
+                          ],
+                          tl: /* [] */ 0
+                        });
+                        _items = items.tl;
+                        _accDefs = newDefs$1;
+                        _accCtx = newCtx$2;
+                        _accInfo = mergeInfos(accInfo, withErrors(match$5[0], match$4[1]));
+                        continue;
+                      }
+                      break;
+                  }
                 }
                 break;
             }
@@ -2368,18 +2421,54 @@ function inferExpr(ctx, _t) {
               _t = body;
               continue;
             }
-            if (n.TAG === /* Identifier */ 2) {
-              const exprInfo = inferExpr(ctx, match$14._1);
-              const exprTy = getInferredMlType(exprInfo);
-              const newCtx = Curry._3(StringMap.add, n._0, {
-                TAG: /* ML */ 1,
-                _0: exprTy
-              }, ctx);
-              const bodyInfo$2 = inferExpr(newCtx, body);
-              return mergeInfos(exprInfo, bodyInfo$2);
+            switch (n.TAG) {
+              case /* Identifier */ 2 :
+                const exprInfo = inferExpr(ctx, match$14._1);
+                const exprTy = getInferredMlType(exprInfo);
+                const newCtx = Curry._3(StringMap.add, n._0, {
+                  TAG: /* ML */ 1,
+                  _0: exprTy
+                }, ctx);
+                const bodyInfo$2 = inferExpr(newCtx, body);
+                return mergeInfos(exprInfo, bodyInfo$2);
+              case /* Asc */ 4 :
+                const n$1 = n._0.value;
+                if (/* tag */ typeof n$1 === "number" || typeof n$1 === "string") {
+                  _t = body;
+                  continue;
+                }
+                if (n$1.TAG === /* Identifier */ 2) {
+                  const expr = match$14._1;
+                  const typeAnnot = n._1;
+                  const n$2 = n$1._0;
+                  const annotTy = termToMlType(typeAnnot);
+                  if (annotTy !== undefined) {
+                    const exprInfo$1 = checkExpr(ctx, annotTy, expr);
+                    const newCtx$1 = Curry._3(StringMap.add, n$2, {
+                      TAG: /* ML */ 1,
+                      _0: annotTy
+                    }, ctx);
+                    const bodyInfo$3 = inferExpr(newCtx$1, body);
+                    return mergeInfos(exprInfo$1, bodyInfo$3);
+                  }
+                  const exprInfo$2 = inferExpr(ctx, expr);
+                  const exprTy$1 = getInferredMlType(exprInfo$2);
+                  const newCtx$2 = Curry._3(StringMap.add, n$2, {
+                    TAG: /* ML */ 1,
+                    _0: exprTy$1
+                  }, ctx);
+                  const bodyInfo$4 = inferExpr(newCtx$2, body);
+                  return withErrors(mergeInfos(exprInfo$2, bodyInfo$4), {
+                    hd: Melange__Error.mark("Invalid type annotation", typeAnnot.meta.start, typeAnnot.meta.end_),
+                    tl: /* [] */ 0
+                  });
+                }
+                _t = body;
+                continue;
+              default:
+                _t = body;
+                continue;
             }
-            _t = body;
-            continue;
           } else {
             _t = body;
             continue;
@@ -2479,6 +2568,42 @@ function checkExpr(ctx, _expected, _t) {
                   
                 }
                 break;
+              case "foldl" :
+                const match$3 = items._1;
+                if (match$3) {
+                  const match$4 = match$3.tl;
+                  if (match$4) {
+                    const match$5 = match$4.tl;
+                    if (match$5 && !match$5.tl) {
+                      const initInfo = checkExpr(ctx, expected, match$4.hd);
+                      const listInfo = inferExpr(ctx, match$5.hd);
+                      const t$1 = getInferredMlType(listInfo);
+                      let elemTy;
+                      elemTy = /* tag */ typeof t$1 === "number" || typeof t$1 === "string" || t$1.TAG !== /* MList */ 0 ? /* MTerm */ 0 : t$1._0;
+                      const expectedFTy_1 = {
+                        TAG: /* MArrow */ 3,
+                        _0: elemTy,
+                        _1: expected
+                      };
+                      const expectedFTy = {
+                        TAG: /* MArrow */ 3,
+                        _0: expected,
+                        _1: expectedFTy_1
+                      };
+                      const fInfo = checkExpr(ctx, expectedFTy, match$3.hd);
+                      const info = mergeInfos(fInfo, mergeInfos(initInfo, listInfo));
+                      return {
+                        errors: info.errors,
+                        holes: info.holes,
+                        inferred: mlInferred(expected),
+                        bindings: info.bindings
+                      };
+                    }
+                    
+                  }
+                  
+                }
+                break;
             }
           }
           break;
@@ -2488,17 +2613,17 @@ function checkExpr(ctx, _expected, _t) {
             exit$2 = 2;
           } else {
             if (expected.TAG === /* MList */ 0) {
-              const elemTy = expected._0;
+              const elemTy$1 = expected._0;
               return Stdlib__List.fold_left((function (accInfo, item) {
-                return mergeInfos(accInfo, checkExpr(ctx, elemTy, item));
+                return mergeInfos(accInfo, checkExpr(ctx, elemTy$1, item));
               }), emptyInfo, items._0);
             }
             exit$2 = 2;
           }
           if (exit$2 === 2) {
-            const info = inferExpr(ctx, t);
-            const got = getInferredMlType(info);
-            return withErrors(info, mlSubsume(expected, got, t.meta.start, t.meta.end_));
+            const info$1 = inferExpr(ctx, t);
+            const got = getInferredMlType(info$1);
+            return withErrors(info$1, mlSubsume(expected, got, t.meta.start, t.meta.end_));
           }
           break;
         case /* Fun */ 12 :
@@ -2507,9 +2632,9 @@ function checkExpr(ctx, _expected, _t) {
             exit$3 = 2;
           } else {
             if (expected.TAG === /* MArrow */ 3) {
-              const match$3 = checkPat(ctx, expected._0, items._0);
-              const bodyInfo = checkExpr(match$3[0], expected._1, items._1);
-              return mergeInfos(match$3[1], bodyInfo);
+              const match$6 = checkPat(ctx, expected._0, items._0);
+              const bodyInfo = checkExpr(match$6[0], expected._1, items._1);
+              return mergeInfos(match$6[1], bodyInfo);
             }
             exit$3 = 2;
           }
@@ -2536,38 +2661,74 @@ function checkExpr(ctx, _expected, _t) {
           return mergeInfos(condInfo, mergeInfos(thenInfo, elseInfo));
         case /* Let */ 15 :
           const body = items._1;
-          const match$4 = items._0.value;
-          if (/* tag */ typeof match$4 === "number" || typeof match$4 === "string") {
+          const match$7 = items._0.value;
+          if (/* tag */ typeof match$7 === "number" || typeof match$7 === "string") {
             _t = body;
             continue;
           }
-          if (match$4.TAG === /* Eq */ 6) {
-            const n = match$4._0.value;
+          if (match$7.TAG === /* Eq */ 6) {
+            const n = match$7._0.value;
             if (/* tag */ typeof n === "number" || typeof n === "string") {
               _t = body;
               continue;
             }
-            if (n.TAG === /* Identifier */ 2) {
-              const exprInfo = inferExpr(ctx, match$4._1);
-              const exprTy = getInferredMlType(exprInfo);
-              const newCtx = Curry._3(StringMap.add, n._0, {
-                TAG: /* ML */ 1,
-                _0: exprTy
-              }, ctx);
-              const bodyInfo$1 = checkExpr(newCtx, expected, body);
-              return mergeInfos(exprInfo, bodyInfo$1);
+            switch (n.TAG) {
+              case /* Identifier */ 2 :
+                const exprInfo = inferExpr(ctx, match$7._1);
+                const exprTy = getInferredMlType(exprInfo);
+                const newCtx = Curry._3(StringMap.add, n._0, {
+                  TAG: /* ML */ 1,
+                  _0: exprTy
+                }, ctx);
+                const bodyInfo$1 = checkExpr(newCtx, expected, body);
+                return mergeInfos(exprInfo, bodyInfo$1);
+              case /* Asc */ 4 :
+                const n$1 = n._0.value;
+                if (/* tag */ typeof n$1 === "number" || typeof n$1 === "string") {
+                  _t = body;
+                  continue;
+                }
+                if (n$1.TAG === /* Identifier */ 2) {
+                  const expr = match$7._1;
+                  const typeAnnot = n._1;
+                  const n$2 = n$1._0;
+                  const annotTy = termToMlType(typeAnnot);
+                  if (annotTy !== undefined) {
+                    const exprInfo$1 = checkExpr(ctx, annotTy, expr);
+                    const newCtx$1 = Curry._3(StringMap.add, n$2, {
+                      TAG: /* ML */ 1,
+                      _0: annotTy
+                    }, ctx);
+                    const bodyInfo$2 = checkExpr(newCtx$1, expected, body);
+                    return mergeInfos(exprInfo$1, bodyInfo$2);
+                  }
+                  const exprInfo$2 = inferExpr(ctx, expr);
+                  const exprTy$1 = getInferredMlType(exprInfo$2);
+                  const newCtx$2 = Curry._3(StringMap.add, n$2, {
+                    TAG: /* ML */ 1,
+                    _0: exprTy$1
+                  }, ctx);
+                  const bodyInfo$3 = checkExpr(newCtx$2, expected, body);
+                  return withErrors(mergeInfos(exprInfo$2, bodyInfo$3), {
+                    hd: Melange__Error.mark("Invalid type annotation", typeAnnot.meta.start, typeAnnot.meta.end_),
+                    tl: /* [] */ 0
+                  });
+                }
+                _t = body;
+                continue;
+              default:
+                _t = body;
+                continue;
             }
-            _t = body;
-            continue;
           } else {
             _t = body;
             continue;
           }
       }
     }
-    const info$1 = inferExpr(ctx, t);
-    const got$1 = getInferredMlType(info$1);
-    return withErrors(info$1, mlSubsume(expected, got$1, t.meta.start, t.meta.end_));
+    const info$2 = inferExpr(ctx, t);
+    const got$1 = getInferredMlType(info$2);
+    return withErrors(info$2, mlSubsume(expected, got$1, t.meta.start, t.meta.end_));
   };
 }
 

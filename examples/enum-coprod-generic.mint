@@ -25,11 +25,12 @@ star : Unit
 (either-inr (A : U) (B : U) (M : U) (f : (Arr A M)) (g : (Arr B M)) (b : B)) :
   (eq M M (app (Either A B) M (either A B M f g) (inr A B b)) (app B M g b))
 meta
-reverse = fun xs => (foldl (fun acc => fun x => [x, ...acc]) [] xs)
-append = fun xs => fun ys => (foldl (fun acc => fun x => [x, ...acc]) ys (reverse xs))
-concat = fun xss => (foldl (fun acc => fun xs => (append acc xs)) [] xss)
+reverse : ((List Term) -> (List Term)) = fun xs => (foldl (fun acc => fun x => [x, ...acc]) [] xs)
+reverse-triples : ((List (Term, (Term, Term))) -> (List (Term, (Term, Term)))) = fun xs => (foldl (fun acc => fun x => [x, ...acc]) [] xs)
+append : ((List Term) -> ((List Term) -> (List Term))) = fun xs => fun ys => (foldl (fun acc => fun x => [x, ...acc]) ys (reverse xs))
+concat : ((List (List Term)) -> (List Term)) = fun xss => (foldl (fun acc => fun xs => (append acc xs)) [] xss)
 
-build-injs-and-type = fun rest =>
+build-injs-and-type : ((List Term) -> ((List Term), Term)) = fun rest =>
   (foldl (fun acc => fun _ =>
     let prev-injs = (fst acc) in
     let prev-type = (snd acc) in
@@ -39,7 +40,7 @@ build-injs-and-type = fun rest =>
     ([(inl Unit prev-type star), ...wrapped], cur-type)
   ) ([star], Unit) rest)
 
-build-elim = fun mvar => fun case-vars => fun rest =>
+build-elim : (Term -> ((List Term) -> ((List Term) -> Term))) = fun mvar => fun case-vars => fun rest =>
   let rev-cvs = (reverse case-vars) in
   match rev-cvs with
   | [last-cv, ...remaining-cvs] =>
@@ -55,7 +56,7 @@ build-elim = fun mvar => fun case-vars => fun rest =>
 -- Build equation proofs.
 -- Tracks triples: (proof-term, injection-term, target-tc)
 -- Fold from innermost (last ctor) outward.
-build-proofs = fun mvar => fun case-vars => fun rest =>
+build-proofs : (Term -> ((List Term) -> ((List Term) -> (List Term)))) = fun mvar => fun case-vars => fun rest =>
   let rev-cvs = (reverse case-vars) in
   match rev-cvs with
   | [last-cv, ...remaining-cvs] =>
@@ -78,7 +79,8 @@ build-proofs = fun mvar => fun case-vars => fun rest =>
         (const-beta Unit mvar cv star)) in
       let inl-triple = (inl-proof, (inl Unit prev-type star), cv) in
       -- Wrap existing triples with inr:
-      let wrapped = (reverse (foldl (fun a => fun triple =>
+      -- Wrap existing triples with inr:
+      let wrapped = (reverse-triples (foldl (fun a => fun triple =>
         let old-proof = (fst triple) in
         let old-inj = (fst (snd triple)) in
         let old-tc = (snd (snd triple)) in
@@ -121,21 +123,28 @@ schema enum = fun s => match s with
     ) (false, [(star, star)]) all-rest) in
     match (snd found-params) with
     | [(mvar, U), ...tc-and-scrut] =>
-      match (reverse tc-and-scrut) with
-      | [(scrut, _), ...rev-tcs] =>
-        let case-vars = (foldl (fun acc => fun p =>
-          [(fst p), ...acc]) [] rev-tcs) in
-        match case-vars with
-        | [_, ...rest-case-vars] =>
-          let iat = (build-injs-and-type rest-case-vars) in
-          let injs = (fst iat) in
-          let coprod-type = (snd iat) in
-          let elim-arr = (build-elim mvar case-vars rest-case-vars) in
-          let case-witness = (app coprod-type mvar elim-arr scrut) in
-          let proofs = (build-proofs mvar case-vars rest-case-vars) in
-          (Ok (concat [[coprod-type], injs, [case-witness], proofs]))
-        | _ => (Error "no ctors") end
-      | _ => (Error "bad params") end
+      -- Extract case-vars and scrut: foldl collects names, last one is the scrutinee.
+      -- case-vars end up in reverse order, matching what build-elim/build-proofs need.
+      let vars-info = (foldl (fun acc => fun p =>
+        if (fst (fst acc)) == true
+        then ((false, (snd (fst acc))), (fst p))
+        else ((false, [(snd acc), ...(snd (fst acc))]), (fst p))
+        end
+      ) ((true, []), star) tc-and-scrut) in
+      let rev-case-vars = (snd (fst vars-info)) in
+      let scrut = (snd vars-info) in
+      -- case-vars is in original order (foldl reverses rev-tcs, then we reverse back)
+      let case-vars = (reverse rev-case-vars) in
+      match case-vars with
+      | [_, ...rest-case-vars] =>
+        let iat = (build-injs-and-type rest-case-vars) in
+        let injs = (fst iat) in
+        let coprod-type = (snd iat) in
+        let elim-arr = (build-elim mvar case-vars rest-case-vars) in
+        let case-witness = (app coprod-type mvar elim-arr scrut) in
+        let proofs = (build-proofs mvar case-vars rest-case-vars) in
+        (Ok (concat [[coprod-type], injs, [case-witness], proofs]))
+      | _ => (Error "no ctors") end
     | _ => (Error "bad params") end
   | _ => (Error "unrecognized") end
 construct by enum
