@@ -230,13 +230,6 @@ function matchPat(_bindings, _pat, _value) {
         }
       case /* List */ 10 :
         const pats = name._0;
-        let effectivePats;
-        if (pats) {
-          const match$2 = pats.hd.value;
-          effectivePats = /* tag */ typeof match$2 === "number" || typeof match$2 === "string" || !(match$2.TAG === /* Hole */ 1 && match$2._0 && !pats.tl) ? pats : /* [] */ 0;
-        } else {
-          effectivePats = pats;
-        }
         if (value.TAG !== /* Val */ 0) {
           return;
         }
@@ -248,7 +241,7 @@ function matchPat(_bindings, _pat, _value) {
           return;
         }
         const vals$1 = vals._0;
-        if (Stdlib__List.length(effectivePats) === Stdlib__List.length(vals$1)) {
+        if (Stdlib__List.length(pats) === Stdlib__List.length(vals$1)) {
           return Stdlib__List.fold_left2((function (acc, p, v) {
             if (acc !== undefined) {
               return matchPat(Caml_option.valFromOption(acc), p, {
@@ -257,7 +250,7 @@ function matchPat(_bindings, _pat, _value) {
               });
             }
             
-          }), Caml_option.some(bindings), effectivePats, vals$1);
+          }), Caml_option.some(bindings), pats, vals$1);
         } else {
           return;
         }
@@ -576,15 +569,8 @@ function evalExpr(_env, _t) {
 }
 
 function evalList(env, items) {
-  let effectiveItems;
-  if (items) {
-    const match = items.hd.value;
-    effectiveItems = /* tag */ typeof match === "number" || typeof match === "string" || !(match.TAG === /* Hole */ 1 && match._0 && !items.tl) ? items : /* [] */ 0;
-  } else {
-    effectiveItems = items;
-  }
   let _acc = /* [] */ 0;
-  let _remaining = effectiveItems;
+  let _remaining = items;
   while (true) {
     const remaining = _remaining;
     const acc = _acc;

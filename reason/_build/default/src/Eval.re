@@ -77,15 +77,8 @@ let rec matchPat = (bindings: evalEnv, pat: term, value: mlValue): option(evalEn
     }
 
   | List(pats) =>
-    /* Handle parser convention: [] parses as List([Hole(true)]) meaning empty */
-    let effectivePats =
-      switch (pats) {
-      | [{value: Hole(true), _}] => []
-      | _ => pats
-      };
     switch (value) {
-    | Val({value: List(vals), _}) when List.length(effectivePats) == List.length(vals) =>
-      let pats = effectivePats;
+    | Val({value: List(vals), _}) when List.length(pats) == List.length(vals) =>
       List.fold_left2(
         (acc, p, v) =>
           switch (acc) {
@@ -265,12 +258,6 @@ let rec evalExpr = (env: evalEnv, t: term): evalResult =>
   }
 
 and evalList = (env: evalEnv, items: list(term)): evalResult => {
-  /* Handle parser convention: [] parses as [Hole(true)] meaning empty */
-  let effectiveItems =
-    switch (items) {
-    | [{value: Hole(true), _}] => []
-    | _ => items
-    };
   let rec go = (acc: list(term), remaining: list(term)): evalResult =>
     switch (remaining) {
     | [] => Ok(Val(mk(List(List.rev(acc)))))
@@ -280,7 +267,7 @@ and evalList = (env: evalEnv, items: list(term)): evalResult => {
       | Ok(v) => go([termOf(v), ...acc], rest)
       }
     };
-  go([], effectiveItems);
+  go([], items);
 }
 
 and evalApp = (env: evalEnv, fVal: mlValue, args: list(term)): evalResult =>

@@ -178,7 +178,10 @@ and buildForm = (form: openForm): term => {
         mk(Term.Cons(List.rev(revHeads), tail))
       | [{value: Identifier("..."), _}, ...revHeads] =>
         /* bare [...] with no tail identifier — treat as empty spread */
-        mk(Term.Cons(List.rev(revHeads), mk(Term.List([mk(Hole(true))]))))
+        mk(Term.Cons(List.rev(revHeads), mk(Term.List([]))))
+      | [{value: Hole(true), _}] =>
+        /* [] with nothing inside — empty list */
+        mk(Term.List([]))
       | _ => mk(Term.List(items))
       }
     | _ => mk(BuilderError)

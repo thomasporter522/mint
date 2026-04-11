@@ -209,6 +209,18 @@ function buildForm(form) {
             });
           }
           switch (match$4.TAG) {
+            case /* Hole */ 1 :
+              if (match$4._0 && !match$3.tl) {
+                return Melange__Term.mk({
+                  TAG: /* List */ 10,
+                  _0: /* [] */ 0
+                });
+              } else {
+                return Melange__Term.mk({
+                  TAG: /* List */ 10,
+                  _0: elements
+                });
+              }
             case /* Identifier */ 2 :
               if (match$4._0 === "...") {
                 return Melange__Term.mk({
@@ -216,13 +228,7 @@ function buildForm(form) {
                   _0: Stdlib__List.rev(match$3.tl),
                   _1: Melange__Term.mk({
                     TAG: /* List */ 10,
-                    _0: {
-                      hd: Melange__Term.mk({
-                        TAG: /* Hole */ 1,
-                        _0: true
-                      }),
-                      tl: /* [] */ 0
-                    }
+                    _0: /* [] */ 0
                   })
                 });
               } else {
