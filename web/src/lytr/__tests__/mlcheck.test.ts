@@ -247,3 +247,76 @@ describe('ML type checker: signature type', () => {
     ok('fun s => match s with | [(name, [], ret)] => (Ok [ret]) | _ => (Error "bad") end');
   });
 });
+
+/* ------------------------------------------------------------------ */
+/*  MTerm must not act as wildcard — type mismatches must be caught    */
+/* ------------------------------------------------------------------ */
+
+describe('ML type checker: Term is not a wildcard', () => {
+  it('string where Term expected is rejected', () => {
+    fails('fun s => (Ok ["hello"])', 'Expected Term');
+  });
+
+  it('list where Term expected is rejected', () => {
+    // Ok wants List Term; if an element is a list, that's List Term not Term
+    fails('fun s => (Ok [[x, y]])', 'Expected Term');
+  });
+
+  it('pair where Term expected is rejected', () => {
+    fails('fun s => match s with | [(name, params, ret)] => (Ok [(name, ret)]) | _ => (Error "bad") end', 'Expected Term');
+  });
+
+  it('bool where Term expected is rejected', () => {
+    fails('fun s => (Ok [x == y])', 'Expected Term');
+  });
+
+  it('Term where String expected is rejected', () => {
+    fails('fun s => (Error x)', 'Expected String');
+  });
+
+  it('Term where Bool expected is rejected', () => {
+    fails('fun s => (if x then (Ok []) else (Error "bad") end)');
+  });
+
+  it('Term where List expected is rejected', () => {
+    fails('fun s => match s with | [(n, p, r)] => (Ok r) | _ => (Error "bad") end', 'Expected List');
+  });
+
+  it('fst on pair returns the left type, not Term', () => {
+    // fst (name, params) returns Term (name's type), not a wildcard
+    // Using it as a list element in Ok is fine since name : Term
+    ok('fun s => match s with | [(name, params, ret)] => (Ok [fst (name, ret)]) | _ => (Error "bad") end');
+  });
+
+  it('snd on pair returns the right type, not Term', () => {
+    ok('fun s => match s with | [(name, params, ret)] => (Ok [snd (name, ret)]) | _ => (Error "bad") end');
+  });
+
+  it('fst of pair with list left returns List, not Term', () => {
+    // fst (params, name) where params : List (Term, Term) returns List (Term, Term)
+    // Using that as a Term element in Ok should fail
+    fails('fun s => match s with | [(name, params, ret)] => (Ok [fst (params, name)]) | _ => (Error "bad") end', 'Expected Term');
+  });
+
+  it('let binding preserves inferred type', () => {
+    // let x = [a, b] makes x : List Term, using x where Term expected fails
+    fails('fun s => let x = [a, b] in (Ok [x])', 'Expected Term');
+  });
+
+  it('let binding of pair is typed as pair', () => {
+    fails('fun s => let x = (a, b) in (Ok [x])', 'Expected Term');
+  });
+
+  it('let binding of string is typed as string', () => {
+    fails('fun s => let x = "hi" in (Ok [x])', 'Expected Term');
+  });
+
+  it('match branch types must agree', () => {
+    // First branch returns Result (List Term), second must too
+    fails('fun s => match s with | [] => (Ok []) | _ => [] end');
+  });
+
+  it('if branches must have same type', () => {
+    fails('fun s => (if true then (Ok []) else [] end)');
+  });
+});

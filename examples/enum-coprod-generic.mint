@@ -109,38 +109,34 @@ schema enum = fun s => match s with
      (eq-name, [(mvar2, U), (tc2, mvar2)], _)]
     => (Ok [Unit, star, (unit-rec mvar tc scrut), (unit-comp mvar2 tc2)])
   | [(type-name, [], U), ...all-rest] =>
-    let split = (foldl (fun acc => fun entry =>
-      if (fst (fst acc)) == true
-      then match entry with
-        | (name, [], _) => ((true, [entry, ...(snd (fst acc))]), (snd acc))
-        | _ => ((false, (snd (fst acc))), [entry, ...(snd acc)])
+    -- Find case params: scan for first entry with non-empty params.
+    -- Seed with [(star, star)] to establish List (Term, Term) element type.
+    let found-params = (foldl (fun acc => fun entry =>
+      if (fst acc) == true then acc
+      else match entry with
+        | (_, [], _) => acc
+        | (_, params, _) => (true, params)
         end
-      else ((false, (snd (fst acc))), [entry, ...(snd acc)])
       end
-    ) ((true, []), []) all-rest) in
-    let ctors = (reverse (snd (fst split))) in
-    let case-and-eqs = (reverse (snd split)) in
-    match case-and-eqs with
-    | [(case-name, case-params, _), ...eq-decls] =>
-      match case-params with
-      | [(mvar, U), ...tc-and-scrut] =>
-        match (reverse tc-and-scrut) with
-        | [(scrut, _), ...rev-tcs] =>
-          let case-vars = (foldl (fun acc => fun p =>
-            [(fst p), ...acc]) [] rev-tcs) in
-          match ctors with
-          | [_, ...rest-ctors] =>
-            let iat = (build-injs-and-type rest-ctors) in
-            let injs = (fst iat) in
-            let coprod-type = (snd iat) in
-            let elim-arr = (build-elim mvar case-vars rest-ctors) in
-            let case-witness = (app coprod-type mvar elim-arr scrut) in
-            let proofs = (build-proofs mvar case-vars rest-ctors) in
-            (Ok (concat [[coprod-type], injs, [case-witness], proofs]))
-          | _ => (Error "no ctors") end
-        | _ => (Error "bad params") end
+    ) (false, [(star, star)]) all-rest) in
+    match (snd found-params) with
+    | [(mvar, U), ...tc-and-scrut] =>
+      match (reverse tc-and-scrut) with
+      | [(scrut, _), ...rev-tcs] =>
+        let case-vars = (foldl (fun acc => fun p =>
+          [(fst p), ...acc]) [] rev-tcs) in
+        match case-vars with
+        | [_, ...rest-case-vars] =>
+          let iat = (build-injs-and-type rest-case-vars) in
+          let injs = (fst iat) in
+          let coprod-type = (snd iat) in
+          let elim-arr = (build-elim mvar case-vars rest-case-vars) in
+          let case-witness = (app coprod-type mvar elim-arr scrut) in
+          let proofs = (build-proofs mvar case-vars rest-case-vars) in
+          (Ok (concat [[coprod-type], injs, [case-witness], proofs]))
+        | _ => (Error "no ctors") end
       | _ => (Error "bad params") end
-    | _ => (Error "no case") end
+    | _ => (Error "bad params") end
   | _ => (Error "unrecognized") end
 construct by enum
   falsity : U

@@ -83,8 +83,7 @@ function contextToJsMap(ctx) {
           Melange__Check.mlTypeToTerm(v._0)
         ]));
         return;
-      case /* SchemaBinding */ 2 :
-      case /* MetaLet */ 3 :
+      default:
         return;
     }
   }), ctx);
