@@ -270,55 +270,88 @@ and evalList = (env: evalEnv, items: list(term)): evalResult => {
   go([], items);
 }
 
-/* TODO: Implement evalApp — function application with all cases.
-
-   Cases to handle (in this order):
-
-   1. Closure with single arg:
-      - Evaluate the argument
-      - Match the closure's pattern against the evaluated arg value
-      - Evaluate the body in the closure's env extended with pattern bindings
-      - Error on pattern match failure
-
-   2. Closure with multiple args (curried):
-      - Apply closure to just the first arg (recurse with [firstArg])
-      - Apply the result to the remaining args (recurse with restArgs)
-
-   3. Closure with zero args:
-      - Return the closure unchanged
-
-   4. Ok constructor — Val(Identifier("Ok")) with one arg:
-      - Evaluate the argument
-      - Return Val(Ap(Identifier("Ok"), [evaluated_arg]))
-
-   5. Error constructor — Val(Identifier("Error")) with one arg:
-      - Evaluate the argument
-      - Return Val(Ap(Identifier("Error"), [evaluated_arg]))
-
-   6. fst — Val(Identifier("fst")) with one arg:
-      - Evaluate the argument
-      - If it's a Comma(l, r), return Val(l)
-      - Otherwise error "fst: argument is not a pair"
-
-   7. snd — Val(Identifier("snd")) with one arg:
-      - Evaluate the argument
-      - If it's a Comma(_, r), return Val(r)
-      - Otherwise error "snd: argument is not a pair"
-
-   8. foldl — Val(Identifier("foldl")) with three args [fArg, initArg, listArg]:
-      - Evaluate all three arguments
-      - listArg must evaluate to a List
-      - Fold over the list items using List.fold_left:
-        For each item, apply fVal to the accumulator (curried: apply to acc,
-        get partial, apply partial to item)
-      - Error if third arg is not a list
-
-   9. Val (OL term application, fallback):
-      - Evaluate all args via evalList
-      - Build Ap(fTerm, argVals)
-      - This constructs OL terms like (eq A A a a) */
-and evalApp = (_env: evalEnv, _fVal: mlValue, _args: list(term)): evalResult =>
-  failwith("TODO: evalApp")
+and evalApp = (env: evalEnv, fVal: mlValue, args: list(term)): evalResult =>
+  switch (fVal, args) {
+  | (Closure(closureEnv, pat, body), [arg]) =>
+    switch (evalExpr(env, arg)) {
+    | Err(_) as e => e
+    | Ok(argVal) =>
+      switch (matchPat(StringMap.empty, pat, argVal)) {
+      | Some(bindings) =>
+        let bodyEnv = StringMap.union((_, _, v) => Some(v), closureEnv, bindings);
+        evalExpr(bodyEnv, body);
+      | None => Err("Pattern match failed in function application")
+      }
+    }
+  | (Closure(_), [firstArg, ...restArgs]) =>
+    /* Curried: apply first arg, then apply result to rest */
+    switch (evalApp(env, fVal, [firstArg])) {
+    | Err(_) as e => e
+    | Ok(result) => evalApp(env, result, restArgs)
+    }
+  | (Closure(_), []) => Ok(fVal)
+  | (Val({value: Identifier("Ok"), _}), [arg]) =>
+    switch (evalExpr(env, arg)) {
+    | Err(_) as e => e
+    | Ok(argVal) => Ok(Val(mk(Ap(mk(Identifier("Ok")), [termOf(argVal)]))))
+    }
+  | (Val({value: Identifier("Error"), _}), [arg]) =>
+    switch (evalExpr(env, arg)) {
+    | Err(_) as e => e
+    | Ok(argVal) => Ok(Val(mk(Ap(mk(Identifier("Error")), [termOf(argVal)]))))
+    }
+  /* fst and snd — built-in pair projections */
+  | (Val({value: Identifier("fst"), _}), [arg]) =>
+    switch (evalExpr(env, arg)) {
+    | Err(_) as e => e
+    | Ok(Val({value: Comma(l, _), _})) => Ok(Val(l))
+    | Ok(_) => Err("fst: argument is not a pair")
+    }
+  | (Val({value: Identifier("snd"), _}), [arg]) =>
+    switch (evalExpr(env, arg)) {
+    | Err(_) as e => e
+    | Ok(Val({value: Comma(_, r), _})) => Ok(Val(r))
+    | Ok(_) => Err("snd: argument is not a pair")
+    }
+  /* foldl f init list — built-in left fold (curried: f acc item) */
+  | (Val({value: Identifier("foldl"), _}), [fArg, initArg, listArg]) =>
+    switch (evalExpr(env, fArg)) {
+    | Err(_) as e => e
+    | Ok(fVal) =>
+      switch (evalExpr(env, initArg)) {
+      | Err(_) as e => e
+      | Ok(initVal) =>
+        switch (evalExpr(env, listArg)) {
+        | Err(_) as e => e
+        | Ok(Val({value: List(items), _})) =>
+          List.fold_left(
+            (accResult, item) =>
+              switch (accResult) {
+              | Err(_) as e => e
+              | Ok(acc) =>
+                /* Apply f to acc, then apply result to item (curried) */
+                switch (evalApp(env, fVal, [termOf(acc)])) {
+                | Err(_) as e => e
+                | Ok(partial) =>
+                  evalApp(env, partial, [item])
+                }
+              },
+            Ok(initVal),
+            items,
+          )
+        | Ok(_) => Err("foldl: third argument must be a list")
+        }
+      }
+    }
+  | (Val(fTerm), _) =>
+    /* OL term application: evaluate args, build Ap */
+    switch (evalList(env, args)) {
+    | Err(_) as e => e
+    | Ok(Val({value: List(argVals), _})) =>
+      Ok(Val(mk(Ap(fTerm, argVals))))
+    | Ok(_) => Err("Internal: evalList returned non-list")
+    }
+  }
 
 and evalMatch = (env: evalEnv, scrutVal: mlValue, branches: list((term, term))): evalResult =>
   switch (branches) {
@@ -354,42 +387,61 @@ and evalBinOp = (op: string, lv: mlValue, rv: mlValue): evalResult =>
 
 /* === Top-level: run a schema on construct declarations === */
 
-/* TODO: Implement declToSignature.
-   Convert a construct declaration (an Asc node) into a signature triple
-   (name, (params, retType)) represented as nested Comma and List terms.
-
-   For Asc(lhs, retType):
-   - Extract name: if lhs is Identifier, use it directly; if lhs is
-     Ap(Identifier(_) as f, _), use f; otherwise use lhs as-is
-   - Extract params: if lhs is Ap(_, args), map each arg:
-     - Asc(Identifier(_) as pname, pty) becomes Comma(pname, pty)
-     - Other args become Comma(Identifier("_"), arg)
-     If lhs is not Ap, params is empty list
-   - Return: Comma(name, Comma(List(params), retType))
-
-   For non-Asc declarations:
-   - Return: Comma(Hole(true), Comma(List([]), Hole(true))) */
-let declToSignature = (_decl: term): term =>
-  failwith("TODO: declToSignature");
+let declToSignature = (decl: term): term =>
+  switch (decl.value) {
+  | Asc(lhs, retType) =>
+    /* Name is the bare identifier, params are the typed parameters */
+    let name =
+      switch (lhs.value) {
+      | Identifier(_) => lhs
+      | Ap({value: Identifier(_), _} as f, _) => f
+      | _ => lhs
+      };
+    let params =
+      switch (lhs.value) {
+      | Ap(_, args) =>
+        List.map(
+          (arg: term) =>
+            switch (arg.value) {
+            | Asc({value: Identifier(_), _} as pname, pty) =>
+              mk(Comma(pname, pty))
+            | _ => mk(Comma(mk(Identifier("_")), arg))
+            },
+          args,
+        )
+      | _ => []
+      };
+    mk(Comma(name,
+       mk(Comma(mk(List(params)), retType))))
+  | _ =>
+    mk(Comma(mk(Hole(true)),
+       mk(Comma(mk(List([])), mk(Hole(true))))))
+  };
 
 type schemaResult =
   | Witnesses(list(term))
   | SchemaError(string);
 
-/* TODO: Implement runSchema.
-   Apply a schema closure to construct declarations:
-
-   1. Convert each declaration to a signature via declToSignature
-   2. Wrap the signature list in a List term
-   3. Apply the schema closure:
-      - Match the closure's pattern against Val(sigListTerm)
-      - Evaluate the body in the closure's env extended with bindings
-   4. Interpret the result:
-      - Ok(Val(Ap(Identifier("Ok"), [List(witnesses)]))) => Witnesses(witnesses)
-      - Ok(Val(Ap(Identifier("Error"), [StringLit(msg)]))) => SchemaError(msg)
-      - Ok(_) => SchemaError("Schema returned invalid result")
-      - Err(msg) => SchemaError("Schema evaluation error: " ++ msg)
-   5. If pattern match fails: SchemaError("Schema pattern match failed on signatures")
-   6. If schemaVal is Val (not closure): SchemaError("Schema is not a function") */
-let runSchema = (_schemaVal: mlValue, _decls: list(term)): schemaResult =>
-  failwith("TODO: runSchema");
+let runSchema = (schemaVal: mlValue, decls: list(term)): schemaResult => {
+  let sigs = List.map(declToSignature, decls);
+  let sigListTerm = mk(List(sigs));
+  /* Apply the schema closure to the signature list */
+  switch (schemaVal) {
+  | Closure(closureEnv, pat, body) =>
+    let sigList = Val(sigListTerm);
+    switch (matchPat(StringMap.empty, pat, sigList)) {
+    | Some(bindings) =>
+      let bodyEnv = StringMap.union((_, _, v) => Some(v), closureEnv, bindings);
+      switch (evalExpr(bodyEnv, body)) {
+      | Ok(Val({value: Ap({value: Identifier("Ok"), _}, [{value: List(witnesses), _}]), _})) =>
+        Witnesses(witnesses)
+      | Ok(Val({value: Ap({value: Identifier("Error"), _}, [{value: StringLit(msg), _}]), _})) =>
+        SchemaError(msg)
+      | Ok(_) => SchemaError("Schema returned invalid result")
+      | Err(msg) => SchemaError("Schema evaluation error: " ++ msg)
+      }
+    | None => SchemaError("Schema pattern match failed on signatures")
+    }
+  | Val(_) => SchemaError("Schema is not a function")
+  };
+};

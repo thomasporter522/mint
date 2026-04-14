@@ -416,7 +416,7 @@ function evalExpr(_env, _t) {
       case /* Ap */ 9 :
         const e$6 = evalExpr(env, name._0);
         if (e$6.TAG === /* Ok */ 0) {
-          return Stdlib.failwith("TODO: evalApp");
+          return evalApp(env, e$6._0, name._1);
         } else {
           return e$6;
         }
@@ -565,6 +565,288 @@ function evalExpr(_env, _t) {
           _0: "Cannot evaluate block in ML expression"
         };
     }
+  };
+}
+
+function evalList(env, items) {
+  let _acc = /* [] */ 0;
+  let _remaining = items;
+  while (true) {
+    const remaining = _remaining;
+    const acc = _acc;
+    if (!remaining) {
+      return {
+        TAG: /* Ok */ 0,
+        _0: {
+          TAG: /* Val */ 0,
+          _0: Melange__Term.mk({
+            TAG: /* List */ 10,
+            _0: Stdlib__List.rev(acc)
+          })
+        }
+      };
+    }
+    const e = evalExpr(env, remaining.hd);
+    if (e.TAG !== /* Ok */ 0) {
+      return e;
+    }
+    _remaining = remaining.tl;
+    _acc = {
+      hd: termOf(e._0),
+      tl: acc
+    };
+    continue;
+  };
+}
+
+function evalApp(env, _fVal, _args) {
+  while (true) {
+    const args = _args;
+    const fVal = _fVal;
+    if (fVal.TAG === /* Val */ 0) {
+      const fTerm = fVal._0;
+      const match = fTerm.value;
+      if (!/* tag */ (typeof match === "number" || typeof match === "string") && match.TAG === /* Identifier */ 2) {
+        switch (match._0) {
+          case "Error" :
+            if (args && !args.tl) {
+              const e = evalExpr(env, args.hd);
+              if (e.TAG === /* Ok */ 0) {
+                return {
+                  TAG: /* Ok */ 0,
+                  _0: {
+                    TAG: /* Val */ 0,
+                    _0: Melange__Term.mk({
+                      TAG: /* Ap */ 9,
+                      _0: Melange__Term.mk({
+                        TAG: /* Identifier */ 2,
+                        _0: "Error"
+                      }),
+                      _1: {
+                        hd: termOf(e._0),
+                        tl: /* [] */ 0
+                      }
+                    })
+                  }
+                };
+              } else {
+                return e;
+              }
+            }
+            break;
+          case "Ok" :
+            if (args && !args.tl) {
+              const e$1 = evalExpr(env, args.hd);
+              if (e$1.TAG === /* Ok */ 0) {
+                return {
+                  TAG: /* Ok */ 0,
+                  _0: {
+                    TAG: /* Val */ 0,
+                    _0: Melange__Term.mk({
+                      TAG: /* Ap */ 9,
+                      _0: Melange__Term.mk({
+                        TAG: /* Identifier */ 2,
+                        _0: "Ok"
+                      }),
+                      _1: {
+                        hd: termOf(e$1._0),
+                        tl: /* [] */ 0
+                      }
+                    })
+                  }
+                };
+              } else {
+                return e$1;
+              }
+            }
+            break;
+          case "foldl" :
+            if (args) {
+              const match$1 = args.tl;
+              if (match$1) {
+                const match$2 = match$1.tl;
+                if (match$2 && !match$2.tl) {
+                  const e$2 = evalExpr(env, args.hd);
+                  if (e$2.TAG !== /* Ok */ 0) {
+                    return e$2;
+                  }
+                  const fVal$1 = e$2._0;
+                  const e$3 = evalExpr(env, match$1.hd);
+                  if (e$3.TAG !== /* Ok */ 0) {
+                    return e$3;
+                  }
+                  const e$4 = evalExpr(env, match$2.hd);
+                  if (e$4.TAG !== /* Ok */ 0) {
+                    return e$4;
+                  }
+                  const match$3 = e$4._0;
+                  if (match$3.TAG !== /* Val */ 0) {
+                    return {
+                      TAG: /* Err */ 1,
+                      _0: "foldl: third argument must be a list"
+                    };
+                  }
+                  const items = match$3._0.value;
+                  if (/* tag */ typeof items === "number" || typeof items === "string" || items.TAG !== /* List */ 10) {
+                    return {
+                      TAG: /* Err */ 1,
+                      _0: "foldl: third argument must be a list"
+                    };
+                  } else {
+                    return Stdlib__List.fold_left((function (accResult, item) {
+                      if (accResult.TAG !== /* Ok */ 0) {
+                        return accResult;
+                      }
+                      const e = evalApp(env, fVal$1, {
+                        hd: termOf(accResult._0),
+                        tl: /* [] */ 0
+                      });
+                      if (e.TAG === /* Ok */ 0) {
+                        return evalApp(env, e._0, {
+                          hd: item,
+                          tl: /* [] */ 0
+                        });
+                      } else {
+                        return e;
+                      }
+                    }), {
+                      TAG: /* Ok */ 0,
+                      _0: e$3._0
+                    }, items._0);
+                  }
+                }
+                
+              }
+              
+            }
+            break;
+          case "fst" :
+            if (args && !args.tl) {
+              const e$5 = evalExpr(env, args.hd);
+              if (e$5.TAG !== /* Ok */ 0) {
+                return e$5;
+              }
+              const match$4 = e$5._0;
+              if (match$4.TAG !== /* Val */ 0) {
+                return {
+                  TAG: /* Err */ 1,
+                  _0: "fst: argument is not a pair"
+                };
+              }
+              const match$5 = match$4._0.value;
+              if (/* tag */ typeof match$5 === "number" || typeof match$5 === "string" || match$5.TAG !== /* Comma */ 7) {
+                return {
+                  TAG: /* Err */ 1,
+                  _0: "fst: argument is not a pair"
+                };
+              } else {
+                return {
+                  TAG: /* Ok */ 0,
+                  _0: {
+                    TAG: /* Val */ 0,
+                    _0: match$5._0
+                  }
+                };
+              }
+            }
+            break;
+          case "snd" :
+            if (args && !args.tl) {
+              const e$6 = evalExpr(env, args.hd);
+              if (e$6.TAG !== /* Ok */ 0) {
+                return e$6;
+              }
+              const match$6 = e$6._0;
+              if (match$6.TAG !== /* Val */ 0) {
+                return {
+                  TAG: /* Err */ 1,
+                  _0: "snd: argument is not a pair"
+                };
+              }
+              const match$7 = match$6._0.value;
+              if (/* tag */ typeof match$7 === "number" || typeof match$7 === "string" || match$7.TAG !== /* Comma */ 7) {
+                return {
+                  TAG: /* Err */ 1,
+                  _0: "snd: argument is not a pair"
+                };
+              } else {
+                return {
+                  TAG: /* Ok */ 0,
+                  _0: {
+                    TAG: /* Val */ 0,
+                    _0: match$7._1
+                  }
+                };
+              }
+            }
+            break;
+        }
+      }
+      const e$7 = evalList(env, args);
+      if (e$7.TAG !== /* Ok */ 0) {
+        return e$7;
+      }
+      const match$8 = e$7._0;
+      if (match$8.TAG !== /* Val */ 0) {
+        return {
+          TAG: /* Err */ 1,
+          _0: "Internal: evalList returned non-list"
+        };
+      }
+      const argVals = match$8._0.value;
+      if (/* tag */ typeof argVals === "number" || typeof argVals === "string" || argVals.TAG !== /* List */ 10) {
+        return {
+          TAG: /* Err */ 1,
+          _0: "Internal: evalList returned non-list"
+        };
+      } else {
+        return {
+          TAG: /* Ok */ 0,
+          _0: {
+            TAG: /* Val */ 0,
+            _0: Melange__Term.mk({
+              TAG: /* Ap */ 9,
+              _0: fTerm,
+              _1: argVals._0
+            })
+          }
+        };
+      }
+    }
+    if (!args) {
+      return {
+        TAG: /* Ok */ 0,
+        _0: fVal
+      };
+    }
+    const arg = args.hd;
+    if (args.tl) {
+      const e$8 = evalApp(env, fVal, {
+        hd: arg,
+        tl: /* [] */ 0
+      });
+      if (e$8.TAG !== /* Ok */ 0) {
+        return e$8;
+      }
+      _args = args.tl;
+      _fVal = e$8._0;
+      continue;
+    }
+    const e$9 = evalExpr(env, arg);
+    if (e$9.TAG !== /* Ok */ 0) {
+      return e$9;
+    }
+    const bindings = matchPat(StringMap.empty, fVal._1, e$9._0);
+    if (bindings === undefined) {
+      return {
+        TAG: /* Err */ 1,
+        _0: "Pattern match failed in function application"
+      };
+    }
+    const bodyEnv = Curry._3(StringMap.union, (function (param, param$1, v) {
+      return v;
+    }), fVal._0, Caml_option.valFromOption(bindings));
+    return evalExpr(bodyEnv, fVal._2);
   };
 }
 
@@ -733,47 +1015,196 @@ function evalBinOp(op, lv, rv) {
   }
 }
 
-function evalList(env, items) {
-  let _acc = /* [] */ 0;
-  let _remaining = items;
-  while (true) {
-    const remaining = _remaining;
-    const acc = _acc;
-    if (!remaining) {
-      return {
-        TAG: /* Ok */ 0,
-        _0: {
-          TAG: /* Val */ 0,
-          _0: Melange__Term.mk({
-            TAG: /* List */ 10,
-            _0: Stdlib__List.rev(acc)
-          })
+function declToSignature(decl) {
+  const match = decl.value;
+  if (!/* tag */ (typeof match === "number" || typeof match === "string") && match.TAG === /* Asc */ 4) {
+    const lhs = match._0;
+    const match$1 = lhs.value;
+    let name;
+    if (/* tag */ typeof match$1 === "number" || typeof match$1 === "string") {
+      name = lhs;
+    } else {
+      switch (match$1.TAG) {
+        case /* Ap */ 9 :
+          const f = match$1._0;
+          let tmp = f.value;
+          name = /* tag */ typeof tmp === "number" || typeof tmp === "string" || tmp.TAG !== /* Identifier */ 2 ? lhs : f;
+          break;
+        default:
+          name = lhs;
+      }
+    }
+    const match$2 = lhs.value;
+    let params;
+    params = /* tag */ typeof match$2 === "number" || typeof match$2 === "string" || match$2.TAG !== /* Ap */ 9 ? /* [] */ 0 : Stdlib__List.map((function (arg) {
+        const match = arg.value;
+        if (!/* tag */ (typeof match === "number" || typeof match === "string") && match.TAG === /* Asc */ 4) {
+          const pname = match._0;
+          let tmp = pname.value;
+          if (!/* tag */ (typeof tmp === "number" || typeof tmp === "string") && tmp.TAG === /* Identifier */ 2) {
+            return Melange__Term.mk({
+              TAG: /* Comma */ 7,
+              _0: pname,
+              _1: match._1
+            });
+          }
+          
         }
-      };
-    }
-    const e = evalExpr(env, remaining.hd);
-    if (e.TAG !== /* Ok */ 0) {
-      return e;
-    }
-    _remaining = remaining.tl;
-    _acc = {
-      hd: termOf(e._0),
-      tl: acc
+        return Melange__Term.mk({
+          TAG: /* Comma */ 7,
+          _0: Melange__Term.mk({
+            TAG: /* Identifier */ 2,
+            _0: "_"
+          }),
+          _1: arg
+        });
+      }), match$2._1);
+    return Melange__Term.mk({
+      TAG: /* Comma */ 7,
+      _0: name,
+      _1: Melange__Term.mk({
+        TAG: /* Comma */ 7,
+        _0: Melange__Term.mk({
+          TAG: /* List */ 10,
+          _0: params
+        }),
+        _1: match._1
+      })
+    });
+  }
+  return Melange__Term.mk({
+    TAG: /* Comma */ 7,
+    _0: Melange__Term.mk({
+      TAG: /* Hole */ 1,
+      _0: true
+    }),
+    _1: Melange__Term.mk({
+      TAG: /* Comma */ 7,
+      _0: Melange__Term.mk({
+        TAG: /* List */ 10,
+        _0: /* [] */ 0
+      }),
+      _1: Melange__Term.mk({
+        TAG: /* Hole */ 1,
+        _0: true
+      })
+    })
+  });
+}
+
+function runSchema(schemaVal, decls) {
+  const sigs = Stdlib__List.map(declToSignature, decls);
+  const sigListTerm = Melange__Term.mk({
+    TAG: /* List */ 10,
+    _0: sigs
+  });
+  if (schemaVal.TAG === /* Val */ 0) {
+    return {
+      TAG: /* SchemaError */ 1,
+      _0: "Schema is not a function"
     };
-    continue;
+  }
+  const sigList = {
+    TAG: /* Val */ 0,
+    _0: sigListTerm
   };
-}
-
-function evalApp(_env, _fVal, _args) {
-  return Stdlib.failwith("TODO: evalApp");
-}
-
-function declToSignature(_decl) {
-  return Stdlib.failwith("TODO: declToSignature");
-}
-
-function runSchema(_schemaVal, _decls) {
-  return Stdlib.failwith("TODO: runSchema");
+  const bindings = matchPat(StringMap.empty, schemaVal._1, sigList);
+  if (bindings === undefined) {
+    return {
+      TAG: /* SchemaError */ 1,
+      _0: "Schema pattern match failed on signatures"
+    };
+  }
+  const bodyEnv = Curry._3(StringMap.union, (function (param, param$1, v) {
+    return v;
+  }), schemaVal._0, Caml_option.valFromOption(bindings));
+  const msg = evalExpr(bodyEnv, schemaVal._2);
+  if (msg.TAG !== /* Ok */ 0) {
+    return {
+      TAG: /* SchemaError */ 1,
+      _0: "Schema evaluation error: " + msg._0
+    };
+  }
+  const match = msg._0;
+  if (match.TAG !== /* Val */ 0) {
+    return {
+      TAG: /* SchemaError */ 1,
+      _0: "Schema returned invalid result"
+    };
+  }
+  const match$1 = match._0.value;
+  if (/* tag */ typeof match$1 === "number" || typeof match$1 === "string") {
+    return {
+      TAG: /* SchemaError */ 1,
+      _0: "Schema returned invalid result"
+    };
+  }
+  if (match$1.TAG !== /* Ap */ 9) {
+    return {
+      TAG: /* SchemaError */ 1,
+      _0: "Schema returned invalid result"
+    };
+  }
+  const match$2 = match$1._0.value;
+  if (/* tag */ typeof match$2 === "number" || typeof match$2 === "string") {
+    return {
+      TAG: /* SchemaError */ 1,
+      _0: "Schema returned invalid result"
+    };
+  }
+  if (match$2.TAG !== /* Identifier */ 2) {
+    return {
+      TAG: /* SchemaError */ 1,
+      _0: "Schema returned invalid result"
+    };
+  }
+  switch (match$2._0) {
+    case "Error" :
+      const match$3 = match$1._1;
+      if (!match$3) {
+        return {
+          TAG: /* SchemaError */ 1,
+          _0: "Schema returned invalid result"
+        };
+      }
+      const msg$1 = match$3.hd.value;
+      if (/* tag */ typeof msg$1 === "number" || typeof msg$1 === "string" || !(msg$1.TAG === /* StringLit */ 3 && !match$3.tl)) {
+        return {
+          TAG: /* SchemaError */ 1,
+          _0: "Schema returned invalid result"
+        };
+      } else {
+        return {
+          TAG: /* SchemaError */ 1,
+          _0: msg$1._0
+        };
+      }
+    case "Ok" :
+      const match$4 = match$1._1;
+      if (!match$4) {
+        return {
+          TAG: /* SchemaError */ 1,
+          _0: "Schema returned invalid result"
+        };
+      }
+      const witnesses = match$4.hd.value;
+      if (/* tag */ typeof witnesses === "number" || typeof witnesses === "string" || !(witnesses.TAG === /* List */ 10 && !match$4.tl)) {
+        return {
+          TAG: /* SchemaError */ 1,
+          _0: "Schema returned invalid result"
+        };
+      } else {
+        return {
+          TAG: /* Witnesses */ 0,
+          _0: witnesses._0
+        };
+      }
+    default:
+      return {
+        TAG: /* SchemaError */ 1,
+        _0: "Schema returned invalid result"
+      };
+  }
 }
 
 export {
