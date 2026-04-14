@@ -37,6 +37,10 @@ const emptyInfo = {
   bindings: emptyInfo_bindings
 };
 
+const metaDefsRef = {
+  contents: /* [] */ 0
+};
+
 function mergeBindings(c1, c2) {
   return Curry._3(StringMap.union, (function (_key, _v1, v2) {
     return v2;
@@ -1582,6 +1586,7 @@ function checkTerm(ctx, mode, t) {
       }), ctx, mlBuiltins);
       const match$3 = processMeta(emptyInfo, mlCtx, /* [] */ 0, v._0);
       const metaInfo = match$3[0];
+      metaDefsRef.contents = match$3[2];
       const info$6 = rest$1 !== undefined ? mergeInfos(metaInfo, checkTerm(match$3[1], /* Program */ 0, rest$1)) : metaInfo;
       return withErrors(info$6, ensureMode({
         hd: "program",
@@ -1602,36 +1607,26 @@ function checkTerm(ctx, mode, t) {
         const match$5 = Curry._2(StringMap.find_opt, schemaName$1, ctx);
         if (match$5 !== undefined) {
           if (match$5.TAG === /* SchemaBinding */ 3) {
-            const rawEnv = Curry._3(StringMap.fold, (function (name, binding, acc) {
-              if (binding.TAG !== /* MetaLet */ 4) {
-                return acc;
-              }
-              const v = Melange__Eval.evalExpr(acc, binding._0);
+            const rawEnv = Stdlib__List.fold_left((function (acc, param) {
+              const v = Melange__Eval.evalExpr(acc, param[1]);
               if (v.TAG === /* Ok */ 0) {
-                return Curry._3(Melange__Eval.StringMap.add, name, v._0, acc);
+                return Curry._3(Melange__Eval.StringMap.add, param[0], v._0, acc);
               } else {
                 return acc;
               }
-            }), ctx, Melange__Eval.StringMap.empty);
-            const patchClosures = function (env) {
-              return Curry._2(Melange__Eval.StringMap.map, (function (v) {
-                if (v.TAG === /* Val */ 0) {
-                  return v;
-                } else {
-                  return {
-                    TAG: /* Closure */ 1,
-                    _0: env,
-                    _1: v._1,
-                    _2: v._2
-                  };
-                }
-              }), env);
-            };
-            let env = rawEnv;
-            for (let _for = 1; _for <= 5; ++_for) {
-              env = patchClosures(env);
-            }
-            const evalEnv = env;
+            }), Melange__Eval.StringMap.empty, metaDefsRef.contents);
+            const evalEnv = Curry._2(Melange__Eval.StringMap.map, (function (v) {
+              if (v.TAG === /* Val */ 0) {
+                return v;
+              } else {
+                return {
+                  TAG: /* Closure */ 1,
+                  _0: rawEnv,
+                  _1: v._1,
+                  _2: v._2
+                };
+              }
+            }), rawEnv);
             const schemaVal = Melange__Eval.evalExpr(evalEnv, match$5._0);
             if (schemaVal.TAG === /* Ok */ 0) {
               const witnesses = Melange__Eval.runSchema(schemaVal._0, body);
@@ -1771,7 +1766,10 @@ function checkTerm(ctx, mode, t) {
             };
           }
         } else {
-          witnessErrors = /* [] */ 0;
+          witnessErrors = {
+            hd: Melange__Error.mark("Schema " + (schemaName$1 + " not found"), by.meta.start, by.meta.end_),
+            tl: /* [] */ 0
+          };
         }
       }
       const info$7 = withErrors(match$4[0], witnessErrors);
@@ -2741,6 +2739,7 @@ export {
   hole,
   fullHole,
   emptyInfo,
+  metaDefsRef,
   mergeBindings,
   mergeInfos,
   withErrors,

@@ -166,3 +166,17 @@ construct by enum
   (mybool-case-no (M : U) (yes-case : M) (no-case : M)) :
     (eq M M (mybool-case M yes-case no-case no) no-case)
 end
+
+construct by enum
+  triple : U
+  a : triple
+  b : triple
+  c : triple
+  (triple-case (M : U) (a-case : M) (b-case : M) (c-case : M) (scrutinee : triple)) : M
+  (triple-case-a (M : U) (a-case : M) (b-case : M) (c-case : M)) :
+    (eq M M (triple-case M a-case b-case c-case a) a-case)
+  (triple-case-b (M : U) (a-case : M) (b-case : M) (c-case : M)) :
+    (eq M M (triple-case M a-case b-case c-case b) b-case)
+  (triple-case-c (M : U) (a-case : M) (b-case : M) (c-case : M)) :
+    (eq M M (triple-case M a-case b-case c-case c) c-case)
+ end

@@ -400,20 +400,20 @@ describe('schema blocks', () => {
 describe('construct blocks', () => {
   it('checks construct by declarations like postulate', () => {
     expect(errors(
-      'postulate\nx : Sort\nconstruct by foo\ny : x\nend'
+      'postulate\nx : Sort\nmeta\nschema foo = fun s => (Ok (foldl (fun acc => fun _ => [?, ...acc]) [] s))\nconstruct by foo\ny : x\nend'
     )).toEqual([]);
   });
 
   it('reports unbound variable in construct declaration', () => {
     const msgs = errorMessages(
-      'postulate\nx : Sort\nconstruct by foo\ny : z\nend'
+      'postulate\nx : Sort\nmeta\nschema foo = fun s => (Ok (foldl (fun acc => fun _ => [?, ...acc]) [] s))\nconstruct by foo\ny : z\nend'
     );
     expect(msgs).toContainEqual(expect.stringContaining('Unbound variable'));
   });
 
   it('postulate context flows into construct declarations', () => {
     expect(errors(
-      'postulate\nx : Sort\ny : x\nconstruct by foo\nz : y\nend'
+      'postulate\nx : Sort\ny : x\nmeta\nschema foo = fun s => (Ok (foldl (fun acc => fun _ => [?, ...acc]) [] s))\nconstruct by foo\nz : y\nend'
     )).toEqual([]);
   });
 
@@ -436,6 +436,8 @@ describe('construct blocks', () => {
     const code = [
       'postulate',
       'x : Sort',
+      'meta',
+      'schema foo = fun s => (Ok (foldl (fun acc => fun _ => [?, ...acc]) [] s))',
       'construct by foo',
       'y : x',
       'z : y',
@@ -1212,7 +1214,7 @@ describe('context isolation', () => {
   it('schema bindings do NOT leak into construct', () => {
     const code = [
       'postulate', 'x : Sort',
-      'meta', 'schema foo = fun s => (Ok [])',
+      'meta', 'schema foo = fun s => (Ok (foldl (fun acc => fun _ => [?, ...acc]) [] s))',
       'construct by foo',
       'y : foo',
       'end',
@@ -1224,6 +1226,7 @@ describe('context isolation', () => {
   it('construct declarations see earlier construct declarations', () => {
     const code = [
       'postulate', 'x : Sort',
+      'meta', 'schema foo = fun s => (Ok (foldl (fun acc => fun _ => [?, ...acc]) [] s))',
       'construct by foo',
       'y : x', 'z : y', 'w : z',
       'end',
@@ -1233,7 +1236,7 @@ describe('context isolation', () => {
 
   it('standalone schema with no postulate context works', () => {
     expect(errors(
-      'meta\nschema foo = fun s => match s with | _ => (Ok []) end\nend'
+      'meta\nschema foo = fun s => (Ok (foldl (fun acc => fun _ => [?, ...acc]) [] s))\nend'
     )).toEqual([]);
   });
 
@@ -1242,7 +1245,7 @@ describe('context isolation', () => {
   });
 
   it('empty construct body does not crash', () => {
-    expect(errors('postulate\nx : Sort\nconstruct by foo\nend')).toEqual([]);
+    expect(errors('postulate\nx : Sort\nmeta\nschema foo = fun s => (Ok (foldl (fun acc => fun _ => [?, ...acc]) [] s))\nconstruct by foo\nend')).toEqual([]);
   });
 });
 

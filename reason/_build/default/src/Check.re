@@ -33,6 +33,10 @@ let fullHole: fullType = ([], hole);
 
 let emptyInfo = {errors: [], holes: [], inferred: None, bindings: StringMap.empty};
 
+/* MetaLet definitions in definition order, for eval env construction.
+   Set by Meta block processing, read by Construct block. */
+let metaDefsRef: ref(list((string, term))) = ref([]);
+
 let mergeBindings = (c1: context, c2: context): context =>
   StringMap.union((_key, _v1, v2) => Some(v2), c1, c2);
 
@@ -496,7 +500,8 @@ and checkTerm = (ctx: context, mode: checkingMode, t: term): staticInfo =>
         processMeta(mergeInfos(accInfo, itemInfo), accCtx, accDefs, rest);
       };
     let mlCtx = StringMap.union((_, _, v) => Some(v), ctx, mlBuiltins);
-    let (metaInfo, metaCtx, _metaDefs) = processMeta(emptyInfo, mlCtx, [], body);
+    let (metaInfo, metaCtx, metaDefs) = processMeta(emptyInfo, mlCtx, [], body);
+    metaDefsRef := metaDefs;
     let info =
       switch (rest) {
       | Some(r) => mergeInfos(metaInfo, checkTerm(metaCtx, Program, r))
@@ -512,40 +517,24 @@ and checkTerm = (ctx: context, mode: checkingMode, t: term): staticInfo =>
       | Identifier(schemaName) =>
         switch (StringMap.find_opt(schemaName, ctx)) {
         | Some(SchemaBinding(schemaBody)) =>
-          /* Build eval env from MetaLet bindings for schema evaluation */
-          /* Build eval env from MetaLet bindings.
-             First pass: evaluate all bodies (creating closures).
-             Second pass: patch all closures to see the complete env.
-             This handles mutual references regardless of definition order. */
-          let rawEnv = StringMap.fold(
-            (name, binding, acc) =>
-              switch (binding) {
-              | MetaLet(body, _) =>
-                switch (Eval.evalExpr(acc, body)) {
-                | Eval.Ok(v) => Eval.StringMap.add(name, v, acc)
-                | Eval.Err(_) => acc
-                }
-              | _ => acc
+          /* Build eval env from MetaLet definitions in definition order.
+             First pass: evaluate each body with the env built so far.
+             Second pass: patch all closures to see the complete env. */
+          let rawEnv = List.fold_left(
+            (acc, (name, defBody)) =>
+              switch (Eval.evalExpr(acc, defBody)) {
+              | Eval.Ok(v) => Eval.StringMap.add(name, v, acc)
+              | Eval.Err(_) => acc
               },
-            ctx, Eval.StringMap.empty,
+            Eval.StringMap.empty,
+            metaDefsRef^,
           );
-          /* Patch closures: iteratively replace each closure's env with
-             the latest env so that nested function calls (e.g. concat
-             calling append calling reverse) all see the complete env. */
-          let patchClosures = (env) =>
-            Eval.StringMap.map(
-              fun
-              | Eval.Closure(_, pat, body) => Eval.Closure(env, pat, body)
-              | v => v,
-              env,
-            );
-          let evalEnv = {
-            let env = ref(rawEnv);
-            for (_ in 1 to 5) {
-              env := patchClosures(env^);
-            };
-            env^;
-          };
+          let evalEnv = Eval.StringMap.map(
+            fun
+            | Eval.Closure(_, pat, body) => Eval.Closure(rawEnv, pat, body)
+            | v => v,
+            rawEnv,
+          );
           switch (Eval.evalExpr(evalEnv, schemaBody)) {
           | Eval.Ok(schemaVal) =>
             switch (Eval.runSchema(schemaVal, body)) {
@@ -640,7 +629,8 @@ and checkTerm = (ctx: context, mode: checkingMode, t: term): staticInfo =>
           }
         | Some(_) =>
           [mark(schemaName ++ " is not a schema", by.meta.start, by.meta.end_)]
-        | None => [] /* Schema not found — permissive for now */
+        | None =>
+          [mark("Schema " ++ schemaName ++ " not found", by.meta.start, by.meta.end_)]
         }
       | _ => []
       };
