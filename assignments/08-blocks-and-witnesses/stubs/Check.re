@@ -33,9 +33,11 @@ let fullHole: fullType = ([], hole);
 
 let emptyInfo = {errors: [], holes: [], inferred: None, bindings: StringMap.empty};
 
-/* MetaLet definitions in definition order, for eval env construction.
-   Set by Meta block processing, read by Construct block. */
-let metaDefsRef: ref(list((string, term))) = ref([]);
+/* TODO: Implement metaDefsRef.
+   A mutable ref holding a list of (name, term) pairs in definition order.
+   Set by Meta block processing, read by Construct block.
+   Initialize as ref([]). */
+let metaDefsRef: ref(list((string, term))) = failwith("TODO");
 
 let mergeBindings = (c1: context, c2: context): context =>
   StringMap.union((_key, _v1, v2) => Some(v2), c1, c2);
@@ -372,8 +374,6 @@ let getInferredMlType = (info: staticInfo): mlType =>
 
 /* --- OL scope checking: strict when OL bindings exist, permissive otherwise --- */
 
-/* --- OL scope checking: strict when OL bindings exist, permissive otherwise --- */
-
 let hasOLBindings = (ctx: context): bool =>
   StringMap.exists((_, v) => switch (v) { | OL(_) => true | ML(_) | Builtin(_) | SchemaBinding(_) | MetaLet(_, _) => false }, ctx);
 
@@ -383,14 +383,19 @@ let signatureType = MPair(MTerm, MPair(MList(MPair(MTerm, MTerm)), MTerm));
 /* Schema type: List Signature -> Result (List Term) */
 let schemaType = MArrow(MList(signatureType), MResult(MList(MTerm)));
 
-/* TODO: ML builtins context — every ML builtin must be declared here.
-   Builtins to include:
-   - Sort: ML(MTerm) — OL constant available in ML
-   - fst, snd, foldl: Builtin("name") — polymorphic, need custom typing rules
-   - true, false: ML(MBool)
-   - Ok, Error: Builtin("name") — result constructors */
+/* TODO: Implement mlBuiltins.
+   Build a context (StringMap) containing all ML builtins:
+   - ("Sort", ML(MTerm)) — OL constant available in ML
+   - ("fst", Builtin("fst")) — polymorphic builtin
+   - ("snd", Builtin("snd")) — polymorphic builtin
+   - ("foldl", Builtin("foldl")) — polymorphic builtin
+   - ("true", ML(MBool)) — monomorphic builtin
+   - ("false", ML(MBool)) — monomorphic builtin
+   - ("Ok", Builtin("Ok")) — Result constructor
+   - ("Error", Builtin("Error")) — Result constructor
+   Use List.fold_left to build the StringMap from a list of (name, binding) pairs. */
 let mlBuiltins: context =
-  failwith("TODO: build a StringMap with all ML builtins");
+  failwith("TODO");
 
 
 /* === Unified checker: OL and ML mutually recursive === */
@@ -418,50 +423,82 @@ and checkTerm = (ctx: context, mode: checkingMode, t: term): staticInfo =>
       };
     withErrors(info, ensureMode(["program"], mode, t.meta.start, t.meta.end_));
 
-  | Meta(body, rest) =>
-    ignore((body, rest));
-    /* TODO: Process the meta block.
+  /* TODO: Implement the Meta case.
+     Process definitions in the meta block. The parser produces separate items:
+     keyword atoms ("let"/"schema") followed by Eq(name, body) definitions.
 
-       Implement processMeta: a recursive function that scans items and handles:
-       1. "schema" keyword followed by Eq(name, rhs) → SchemaBinding
-          - Check rhs with checkSchema
-          - Handle optional type annotation on name (Asc(Identifier(n), typeAnnot))
-          - Verify annotation matches schemaType if present
-       2. Eq(Asc(Identifier(n), typeAnnot), rhs) → annotated MetaLet
-          - Parse annotation with termToMlType
-          - Check rhs against annotation with checkExpr
-          - Store as MetaLet(rhs, annotTy)
-          - Track in accDefs for definition-order eval env
-       3. Eq(Identifier(n), rhs) → bare MetaLet
-          - Infer rhs type with inferExpr
-          - Store as MetaLet(rhs, rhsTy)
-          - Track in accDefs
-       4. Unrecognized items → infer and skip
+     Steps:
+     1. Define a local recursive function processMeta(accInfo, accCtx, accDefs, items)
+        that pattern-matches on the items list:
 
-       Then:
-       - Merge mlBuiltins into ctx before processing
-       - Call processMeta on the body items
-       - Store metaDefs in metaDefsRef
-       - Check rest with the updated context */
-    failwith("TODO: implement Meta block processing");
+        a. [] => return (accInfo, accCtx, accDefs)
 
-  | Construct(by, body, rest) =>
-    ignore((by, body, rest));
-    /* TODO: Process a construct block.
+        b. [Identifier("schema"), Eq(name, rhs), ...rest] =>
+           - Extract the name string (handle both Identifier(s) and Asc(Identifier(s), typeAnnot))
+           - For type annotations, verify they match schemaType via termToMlType
+           - Check rhs via checkSchema
+           - Bind name as SchemaBinding(rhs) in context
+           - Continue with rest
 
-       Steps:
-       1. Check declarations with checkDecls (OL scope checking)
-       2. Look up the schema name in ctx (must be SchemaBinding)
-       3. Build the eval env from metaDefsRef^ in definition order:
-          - First pass: evaluate each MetaLet body with the env built so far
-          - Second pass: patch all Closure envs to point to the complete env
-       4. Evaluate the schema body to get a closure
-       5. Call Eval.runSchema to apply it to the declarations
-       6. If Witnesses: check count matches, then type-check each witness
-          against its declaration's type using resolveWithParams for substitution
-       7. If SchemaError: report the error
-       8. Add bodyInfo, witnessErrors, finalCtx bindings, check rest */
-    failwith("TODO: implement Construct block processing");
+        c. [Eq(Asc(Identifier(n), typeAnnot), rhs), ...rest] =>
+           - Parse type annotation via termToMlType
+           - If valid, checkExpr against annotated type; otherwise inferExpr
+           - Bind as MetaLet(rhs, ty) in context
+           - Add to accDefs for eval env
+           - Continue with rest
+
+        d. [Eq(Identifier(n), rhs), ...rest] =>
+           - inferExpr the body
+           - Bind as MetaLet(rhs, inferredTy) in context
+           - Add to accDefs
+           - Continue with rest
+
+        e. [item, ...rest] => inferExpr the item, continue
+
+     2. Merge ctx with mlBuiltins using StringMap.union
+     3. Call processMeta on the merged context and body items
+     4. Store definitions in metaDefsRef
+     5. Process rest (if any) in Program mode with metaCtx
+     6. Ensure mode is "program" */
+  | Meta(_body, _rest) =>
+    failwith("TODO")
+
+  /* TODO: Implement the Construct case.
+     The witness-and-discard pipeline:
+
+     1. Check declarations via checkDecls to get (bodyInfo, finalCtx)
+
+     2. Look up the schema name from the `by` annotation:
+        - by.value should be Identifier(schemaName)
+        - Find SchemaBinding(schemaBody) in ctx
+
+     3. Build the eval environment from metaDefsRef^:
+        - First pass: fold over definitions, evaluating each body with env built so far
+          via Eval.evalExpr, accumulating into Eval.StringMap
+        - Second pass: patch all Closure values to see the complete env
+          (Eval.Closure(_, pat, body) => Eval.Closure(rawEnv, pat, body))
+
+     4. Evaluate the schema body in that env via Eval.evalExpr
+
+     5. Run the schema on construct declarations via Eval.runSchema(schemaVal, body)
+
+     6. On Eval.Witnesses(witnesses):
+        - Verify witness count matches declaration count
+        - For each (decl, witness) pair:
+          a. Extract declaration name and parameters from the Asc(lhs, retType) form
+          b. Add parameter bindings to ctx (with types resolved through substEnv)
+          c. Resolve expectedType through substEnv via resolveWithParams
+          d. Check witness against expectedType via checkTerm in Expression mode
+          e. Build (paramNames, witness) entry for substEnv
+        - If any witness errors, collapse into a single error on the `by` annotation
+
+     7. On Eval.SchemaError(msg) or Eval.Err(msg): report error on `by`
+
+     8. Merge bodyInfo with witness errors, add finalCtx as bindings
+     9. Process rest (if any) in Program mode
+     10. Ensure mode is "program" */
+  | Construct(_by, _body, _rest) =>
+    failwith("TODO")
 
   | Identifier(v) =>
     let modeErrors = ensureMode(

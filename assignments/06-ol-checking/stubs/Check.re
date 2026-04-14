@@ -1,7 +1,9 @@
 open Term;
+open Print;
 open Error;
 open MLType;
-let _ = Print.printTerm; /* ensure Print is linked */
+/* printTerm is used by subsume — keep open Print available */
+let _ = printTerm;
 
 module StringMap = Map.Make(String);
 
