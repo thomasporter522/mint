@@ -32,6 +32,8 @@ let isCommaToken = (tok: primaryToken): bool =>
 let metaFromRange = (start, end_): meta =>
   {parens: false, start, end_};
 
+/* (nameFromItems moved into the and-chain below) */
+
 /* === mlType conversion from intermediate ml expressions === */
 
 let rec mlToType = (t: ml): option(mlType) =>
@@ -168,11 +170,20 @@ and buildPatSharded =
 and collectBracketElements = (cf: closedForm): (string, list(list(sharded(openForm)))) =>
   switch (cf) {
   | CHead({value: TNamed(open_), _}) => (open_, [])
-  | CMatch(inner, items, {value, _}) when isCommaToken(value) || value == TNamed(")") || value == TNamed("]") =>
+  | CMatch(inner, items, {value, _}) when isCommaToken(value) || value == TNamed(")") || value == TNamed("]") || value == TNamed(":p") =>
     let (open_, prev) = collectBracketElements(inner);
     (open_, prev @ [items])
   | _ => ("", [])
   }
+
+/* Extract an identifier name from parse tree items */
+and nameFromItems = (items: list(sharded(openForm))): string => {
+  let t = buildTerms(items);
+  switch (t.value) {
+  | Identifier(name) => name
+  | _ => "_"
+  };
+}
 
 /* === Main expression builder === */
 
@@ -551,12 +562,33 @@ and buildForm = (form: openForm): ml => {
     let body = buildChild(rightUf, right);
     mk(Fun(pats, body))
 
-  /* let(binding)in — body captured by in_face's right-precedence */
-  | (_, _, CMatch(CHead({value: TNamed("let"), _}), bindingItems, {value: TNamed("in"), _}), _, _) =>
-    let bindingContent = buildTerms(bindingItems);
+  /* let(name)=let(rhs) in(body) — bare let binding */
+  | (_, _, CMatch(
+      CMatch(CHead({value: TNamed("let"), _}), nameItems, {value: TNamed("=let"), _}),
+      rhsItems,
+      {value: TNamed("in"), _}
+    ), _, _) =>
+    let name = nameFromItems(nameItems);
+    let rhs = buildTerms(rhsItems);
     let body = buildChild(rightUf, right);
-    let b = parseBinding(bindingContent);
-    mk(Let(b, body))
+    mk(Let({name, annotation: None, rawAnnotation: None, rhs, bindingMeta: defaultMeta}, body))
+
+  /* let(name):let(type)=let(rhs) in(body) — annotated let binding */
+  | (_, _, CMatch(
+      CMatch(
+        CMatch(CHead({value: TNamed("let"), _}), nameItems, {value: TNamed(":let"), _}),
+        typeItems,
+        {value: TNamed("=let"), _}
+      ),
+      rhsItems,
+      {value: TNamed("in"), _}
+    ), _, _) =>
+    let name = nameFromItems(nameItems);
+    let typeExpr = buildTerms(typeItems);
+    let annotation = mlToType(typeExpr);
+    let rhs = buildTerms(rhsItems);
+    let body = buildChild(rightUf, right);
+    mk(Let({name, annotation, rawAnnotation: Some(typeExpr), rhs, bindingMeta: defaultMeta}, body))
 
   /* Infix :: → Cons */
   | (_, _, CHead({value: TNamed("::"), _} as tok), _, _) =>
