@@ -1,0 +1,6 @@
+reason/_build/
+web/node_modules/
+web/dist/
+web/public/content/
+*.bs.js
+.DS_Store
