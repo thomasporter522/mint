@@ -99,6 +99,7 @@ and ml = {
 and binding = {
   name: string,
   annotation: option(mlType),         /* parsed directly into mlType by the builder */
+  rawAnnotation: option(ml),          /* raw type expression, preserved for error reporting */
   rhs: ml,
   bindingMeta: meta,
 };

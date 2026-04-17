@@ -29,7 +29,7 @@ type staticInfo = {
   bindings: context,
 };
 
-let olHole: ol = mkOL(OLHole(Synthesized));
+let olHole: ol = mkOL(OLHole(User));
 let mlHole: ml = mkML(Hole(Synthesized));
 let fullHole: fullType = ([], olHole);
 
@@ -856,9 +856,26 @@ and processMeta = (accInfo, accCtx, accDefs, items: list(ml)):
   /* schema name = body */
   | [{value: Ap({value: Identifier("schema"), _}, innerItems), _}, ...rest] =>
     /* Parse schema binding from the ML encoding */
-    let (name, rhs) = parseMetaBinding(innerItems);
+    let (name, annotation, rhs) = parseMetaBinding(innerItems);
     let schemaInfo = checkSchema(accCtx, rhs);
-    let info = mergeInfos(accInfo, schemaInfo);
+    let annotErrors =
+      switch (annotation) {
+      | Some(Some(annotTy)) =>
+        if (eqType(annotTy, schemaType)) { [] }
+        else {
+          [mark(
+            "Schema type mismatch: annotated "
+            ++ printType(annotTy)
+            ++ ", expected "
+            ++ printType(schemaType),
+            -1, -1,
+          )];
+        }
+      | Some(None) =>
+        [mark("Invalid type annotation", -1, -1)]
+      | None => []
+      };
+    let info = withErrors(mergeInfos(accInfo, schemaInfo), annotErrors);
     let newCtx =
       switch (name) {
       | Some(n) => StringMap.add(n, SchemaBinding(rhs), accCtx)
@@ -893,24 +910,26 @@ and processMeta = (accInfo, accCtx, accDefs, items: list(ml)):
   }
 
 /* Parse a meta schema binding from ML-encoded form.
-   Input is the args of Ap(Identifier("schema"), innerItems). */
-and parseMetaBinding = (items: list(ml)): (option(string), ml) =>
+   Input is the args of Ap(Identifier("schema"), innerItems).
+   Returns (name, annotation, rhs).
+   annotation: None = no annotation, Some(Some(ty)) = valid, Some(None) = invalid */
+and parseMetaBinding = (items: list(ml)): (option(string), option(option(mlType)), ml) =>
   switch (items) {
   | [{value: Ap({value: Identifier("="), _}, [{value: Identifier(name), _}, rhs]), _}] =>
-    (Some(name), rhs)
+    (Some(name), None, rhs)
   | [{value: Ap({value: Identifier("="), _}, [
-      {value: Ap({value: Identifier(":"), _}, [{value: Identifier(name), _}, _typeExpr]), _},
+      {value: Ap({value: Identifier(":"), _}, [{value: Identifier(name), _}, typeExpr]), _},
       rhs,
     ]), _}] =>
-    (Some(name), rhs)
+    (Some(name), Some(mlExprToType(typeExpr)), rhs)
   | [rhs] =>
-    (None, rhs)
+    (None, None, rhs)
   | items =>
     /* Multiple items — combine as application */
     switch (items) {
-    | [] => (None, mkML(Hole(Synthesized)))
-    | [single] => (None, single)
-    | [first, ...rest] => (None, mkML(Ap(first, rest)))
+    | [] => (None, None, mkML(Hole(Synthesized)))
+    | [single] => (None, None, single)
+    | [first, ...rest] => (None, None, mkML(Ap(first, rest)))
     }
   }
 
@@ -1022,22 +1041,70 @@ and checkPat = (ctx: context, ty: mlType, t: pat): (context, staticInfo) =>
     if (eqType(ty, MTerm)) {
       checkOLPatAp(ctx, headPat, argPats)
     } else {
+      /* Allow OL patterns when type is unknown/any */
       (ctx, withErrors(emptyInfo,
         [mark("Constructor pattern but expected " ++ printType(ty), t.meta.start, t.meta.end_)]))
     }
   }
 
+
 and checkOLPatAp = (ctx: context, headPat: pat, argPats: list(pat)): (context, staticInfo) => {
-  let (ctx1, headInfo) = checkPat(ctx, MTerm, headPat);
+  let checkOLSubpat = (ctx: context, p: pat): (context, staticInfo) =>
+    switch (p.value) {
+    | PVar(name) =>
+      switch (StringMap.find_opt(name, ctx)) {
+      | Some(_) => (ctx, emptyInfo)
+      | None => (StringMap.add(name, ML(MTerm), ctx), emptyInfo)
+      }
+    | _ => checkPat(ctx, MTerm, p)
+    };
+  let (ctx1, headInfo) = checkOLSubpat(ctx, headPat);
   List.fold_left(
     ((accCtx, accInfo), argPat) => {
-      let (newCtx, argInfo) = checkPat(accCtx, MTerm, argPat);
+      let (newCtx, argInfo) = checkOLSubpat(accCtx, argPat);
       (newCtx, mergeInfos(accInfo, argInfo));
     },
     (ctx1, headInfo),
     argPats,
   );
 }
+
+/* Check a pattern in OL context: already-bound variables are not type-checked */
+and checkOLPat = (ctx: context, p: pat): (context, staticInfo) =>
+  switch (p.value) {
+  | PVar(name) =>
+    switch (StringMap.find_opt(name, ctx)) {
+    | Some(_) => (ctx, emptyInfo)  /* already bound — just a reference */
+    | None =>
+      if (!hasOLBindings(ctx)) {
+        (ctx, emptyInfo)  /* No OL context — treat as OL constructor */
+      } else {
+        (StringMap.add(name, ML(MTerm), ctx), emptyInfo)  /* bind as pattern variable */
+      }
+    }
+  | PAp(headName, args) =>
+    checkOLPatAp(ctx, headName, args)
+  | PHole | PWildcard => (ctx, emptyInfo)
+  | PList(items) =>
+    List.fold_left(
+      ((accCtx, accInfo), item) => {
+        let (newCtx, itemInfo) = checkOLPat(accCtx, item);
+        (newCtx, mergeInfos(accInfo, itemInfo));
+      },
+      (ctx, emptyInfo),
+      items,
+    )
+  | PTuple(items) =>
+    List.fold_left(
+      ((accCtx, accInfo), item) => {
+        let (newCtx, itemInfo) = checkOLPat(accCtx, item);
+        (newCtx, mergeInfos(accInfo, itemInfo));
+      },
+      (ctx, emptyInfo),
+      items,
+    )
+  | _ => (ctx, emptyInfo)
+  }
 
 and inferExpr = (ctx: context, t: ml): staticInfo =>
   switch (t.value) {

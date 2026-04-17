@@ -279,13 +279,13 @@ and parseBinding = (content: ml): binding => {
       ]), _},
       rhs,
     ]) =>
-    {name, annotation: mlToType(typeExpr), rhs, bindingMeta: content.meta}
+    {name, annotation: mlToType(typeExpr), rawAnnotation: Some(typeExpr), rhs, bindingMeta: content.meta}
   /* name = rhs */
   | Ap({value: Identifier("="), _}, [{value: Identifier(name), _}, rhs]) =>
-    {name, annotation: None, rhs, bindingMeta: content.meta}
+    {name, annotation: None, rawAnnotation: None, rhs, bindingMeta: content.meta}
   /* Fallback — couldn't parse binding */
   | _ =>
-    {name: "_", annotation: None, rhs: content, bindingMeta: content.meta}
+    {name: "_", annotation: None, rawAnnotation: None, rhs: content, bindingMeta: content.meta}
   };
 }
 
@@ -296,6 +296,19 @@ and faceToken = (form: closedForm): string =>
   | CMatch(_, _, {value: TNamed(n), _}) => n
   | CHead({value: TNamed(n), _}) => n
   | _ => ""
+  }
+
+/* Scan meta block items for schema keyword + binding pairs.
+   `schema` is an atom keyword, so `schema foo = body` produces
+   two items: [Identifier("schema"), Ap(Identifier("="), [Identifier("foo"), body])].
+   We need to combine them into a single SchemaDef. */
+and scanMetaDefs = (items: list(ml)): list(metaDef) =>
+  switch (items) {
+  | [] => []
+  | [{value: Identifier("schema"), _}, next, ...rest] =>
+    [SchemaDef(parseBinding(next)), ...scanMetaDefs(rest)]
+  | [item, ...rest] =>
+    [mlToMetaDef(item), ...scanMetaDefs(rest)]
   }
 
 and buildBlock = (keyword, contents, rest): ml => {
@@ -309,7 +322,7 @@ and buildBlock = (keyword, contents, rest): ml => {
     | None => blockML
     };
   | "meta" =>
-    let defs = List.map(mlToMetaDef, body);
+    let defs = scanMetaDefs(body);
     let blockML = mk(Ap(mk(Identifier("__meta")), List.map(metaDefToML, defs)));
     switch (rest) {
     | Some(r) => mk(Ap(mk(Identifier("__seq")), [blockML, r]))
@@ -442,15 +455,29 @@ and declToML = (d: decl): ml => {
   mk(Ap(mk(Identifier(":")), [lhs, retTerm]));
 }
 
+and mlTypeToExpr = (ty: mlType): ml =>
+  switch (ty) {
+  | MTerm => mk(Identifier("Term"))
+  | MSort => mk(Identifier("Sort"))
+  | MBool => mk(Identifier("Bool"))
+  | MString => mk(Identifier("String"))
+  | MList(t) => mk(Ap(mk(Identifier("List")), [mlTypeToExpr(t)]))
+  | MResult(t) => mk(Ap(mk(Identifier("Result")), [mlTypeToExpr(t)]))
+  | MTuple(items) => mk(Tuple(List.map(mlTypeToExpr, items)))
+  | MArrow(a, b) => mk(Ap(mk(Identifier("->")), [mlTypeToExpr(a), mlTypeToExpr(b)]))
+  }
+
 and metaDefToML = (d: metaDef): ml => {
   let bindingToML = (b: binding): ml => {
     let nameTerm = mk(Identifier(b.name));
     let lhs =
-      switch (b.annotation) {
-      | Some(_) =>
-        /* We already have the annotation parsed; just put name */
-        nameTerm
-      | None => nameTerm
+      switch (b.annotation, b.rawAnnotation) {
+      | (Some(ty), _) =>
+        mk(Ap(mk(Identifier(":")), [nameTerm, mlTypeToExpr(ty)]))
+      | (None, Some(rawExpr)) =>
+        /* Annotation couldn't parse — preserve raw expression for error reporting */
+        mk(Ap(mk(Identifier(":")), [nameTerm, rawExpr]))
+      | (None, None) => nameTerm
       };
     mk(Ap(mk(Identifier("=")), [lhs, b.rhs]));
   };

@@ -92,8 +92,8 @@ describe('ML type checker: pattern matching', () => {
     ok('fun s => match s with | [] => (Error "empty") | _ => (Ok []) end');
   });
 
-  it('accepts match with pair patterns in list', () => {
-    ok('fun s => match s with | [(params, ret)] => (Ok []) | _ => (Error "bad") end');
+  it('accepts match with tuple patterns in list', () => {
+    ok('fun s => match s with | [(name, params, ret)] => (Ok []) | _ => (Error "bad") end');
   });
 
   it('accepts match with multiple branches', () => {
@@ -233,10 +233,8 @@ describe('ML type checker: signature type', () => {
   });
 
   it('old 2-tuple pattern fails on signature', () => {
-    // (params, ret) against (String, (List (String, Term), Term))
-    // params gets String, ret gets (List (String, Term), Term)
-    // Then (Ok [ret]) checks ret against Term but it has pair type
-    fails('fun s => match s with | [(params, ret)] => (Ok [ret]) | _ => (Error "bad") end', 'Expected Term');
+    // 2-tuple pattern against 3-tuple signature — arity mismatch
+    fails('fun s => match s with | [(params, ret)] => (Ok [ret]) | _ => (Error "bad") end', 'Tuple pattern');
   });
 
   it('nested param destructuring works', () => {
