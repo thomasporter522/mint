@@ -23,6 +23,7 @@ let grammar = {
     |> addMatch(MatchPair(",l", "]"))
     /* Infix operators */
     |> addInfix("=",  ~symbol="=",  ~left=0.2, ~right=0.3)
+    |> addInfix("::",  ~symbol="::", ~left=0.6, ~right=0.5) /* right-assoc cons */
     |> addInfix(":",  ~symbol=":",  ~left=1.0, ~right=1.1)
     |> addInfix("->", ~symbol="->", ~left=2.0, ~right=1.9) /* right-assoc */
     |> addInfix("!=", ~symbol="!=", ~left=4.0, ~right=4.1)
@@ -60,7 +61,6 @@ let grammar = {
     /* schema: keyword atom used as definition marker inside meta blocks */
     |> addToken("schema", {kind: Keyword("schema"), leftPrec: Uninterested, rightPrec: Uninterested})
     |> addToken("_",   {kind: Symbol("_"),    leftPrec: Uninterested, rightPrec: Uninterested})
-    |> addToken("...", {kind: Symbol("..."), leftPrec: Uninterested, rightPrec: Uninterested})
     /* construct...by — matched pair, by takes over block-end/block-block matching */
     |> addToken("by", {kind: Keyword("by"), leftPrec: Interior, rightPrec: Interior})
     |> addMatch(MatchPair("construct", "by"));

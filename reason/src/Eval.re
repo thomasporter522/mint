@@ -1,25 +1,27 @@
 /* ML interpreter for the meta-language.
    Evaluates schema bodies applied to construct declarations.
-   Values are terms, except closures which capture their environment. */
+   Values are ml terms, except closures which capture their environment. */
 
 open Term;
 
 module StringMap = Map.Make(String);
 
+let mk = Term.mkML;
+
 /* --- Value representation --- */
 
 type mlValue =
-  | Val(term)
-  | Closure(evalEnv, term, term)  /* env, pattern, body */
+  | Val(ml)
+  | Closure(evalEnv, pat, ml)  /* env, pattern, body */
 and evalEnv = StringMap.t(mlValue);
 
 type evalResult =
   | Ok(mlValue)
   | Err(string);
 
-/* --- Structural equality on terms --- */
+/* --- Structural equality on ml terms --- */
 
-let rec termEqual = (a: term, b: term): bool =>
+let rec termEqual = (a: ml, b: ml): bool =>
   switch (a.value, b.value) {
   | (Identifier(x), Identifier(y)) => x == y
   | (StringLit(x), StringLit(y)) => x == y
@@ -30,12 +32,11 @@ let rec termEqual = (a: term, b: term): bool =>
   | (List(a), List(b)) =>
     List.length(a) == List.length(b)
     && List.for_all2(termEqual, a, b)
-  | (Comma(a1, b1), Comma(a2, b2)) =>
-    termEqual(a1, a2) && termEqual(b1, b2)
-  | (Arrow(a1, b1), Arrow(a2, b2)) =>
-    termEqual(a1, a2) && termEqual(b1, b2)
-  | (Asc(a1, b1), Asc(a2, b2)) =>
-    termEqual(a1, a2) && termEqual(b1, b2)
+  | (Tuple(a), Tuple(b)) =>
+    List.length(a) == List.length(b)
+    && List.for_all2(termEqual, a, b)
+  | (Cons(h1, t1), Cons(h2, t2)) =>
+    termEqual(h1, h2) && termEqual(t1, t2)
   | (Hole(_), Hole(_)) => true
   | _ => false
   };
@@ -46,9 +47,9 @@ let mlValueEqual = (a: mlValue, b: mlValue): bool =>
   | _ => false
   };
 
-/* --- Extract term from mlValue --- */
+/* --- Extract ml term from mlValue --- */
 
-let termOf = (v: mlValue): term =>
+let termOf = (v: mlValue): ml =>
   switch (v) {
   | Val(t) => t
   | Closure(_, _, _) => mk(Identifier("<closure>"))
@@ -56,13 +57,13 @@ let termOf = (v: mlValue): term =>
 
 /* --- Pattern matching --- */
 
-let rec matchPat = (bindings: evalEnv, pat: term, value: mlValue): option(evalEnv) =>
-  switch (pat.value) {
-  | Identifier("_") => Some(bindings)
+let rec matchPat = (bindings: evalEnv, p: pat, value: mlValue): option(evalEnv) =>
+  switch (p.value) {
+  | PWildcard => Some(bindings)
 
-  | Hole(_) => Some(bindings)
+  | PHole => Some(bindings)
 
-  | Identifier(name) =>
+  | PVar(name) =>
     switch (StringMap.find_opt(name, bindings)) {
     | Some(existing) =>
       if (mlValueEqual(existing, value)) { Some(bindings) } else { None }
@@ -70,13 +71,13 @@ let rec matchPat = (bindings: evalEnv, pat: term, value: mlValue): option(evalEn
       Some(StringMap.add(name, value, bindings))
     }
 
-  | StringLit(s) =>
+  | PString(s) =>
     switch (value) {
     | Val({value: StringLit(s2), _}) when s == s2 => Some(bindings)
     | _ => None
     }
 
-  | List(pats) =>
+  | PList(pats) =>
     switch (value) {
     | Val({value: List(vals), _}) when List.length(pats) == List.length(vals) =>
       List.fold_left2(
@@ -92,42 +93,41 @@ let rec matchPat = (bindings: evalEnv, pat: term, value: mlValue): option(evalEn
     | _ => None
     }
 
-  | Cons(headPats, tailPat) =>
+  | PCons(headPat, tailPat) =>
     switch (value) {
-    | Val({value: List(vals), _}) when List.length(vals) >= List.length(headPats) =>
-      let headVals = List.filteri((i, _) => i < List.length(headPats), vals);
-      let tailVals = List.filteri((i, _) => i >= List.length(headPats), vals);
-      let headResult = List.fold_left2(
+    | Val({value: List(vals), _}) when List.length(vals) >= 1 =>
+      switch (vals) {
+      | [hd, ...tl] =>
+        switch (matchPat(bindings, headPat, Val(hd))) {
+        | None => None
+        | Some(b) => matchPat(b, tailPat, Val(mk(List(tl))))
+        }
+      | [] => None  /* unreachable due to length check */
+      }
+    | _ => None
+    }
+
+  | PTuple(pats) =>
+    switch (value) {
+    | Val({value: Tuple(vals), _}) when List.length(pats) == List.length(vals) =>
+      List.fold_left2(
         (acc, p, v) =>
           switch (acc) {
           | None => None
           | Some(b) => matchPat(b, p, Val(v))
           },
         Some(bindings),
-        headPats,
-        headVals,
-      );
-      switch (headResult) {
-      | None => None
-      | Some(b) => matchPat(b, tailPat, Val(mk(List(tailVals))))
-      }
+        pats,
+        vals,
+      )
     | _ => None
     }
 
-  | Comma(pL, pR) =>
+  | PAp(headPat, argPats) =>
     switch (value) {
-    | Val({value: Comma(vL, vR), _}) =>
-      switch (matchPat(bindings, pL, Val(vL))) {
-      | None => None
-      | Some(b) => matchPat(b, pR, Val(vR))
-      }
-    | _ => None
-    }
-
-  | Ap(pF, pArgs) =>
-    switch (value) {
-    | Val({value: Ap(vF, vArgs), _}) when List.length(pArgs) == List.length(vArgs) =>
-      switch (matchPat(bindings, pF, Val(vF))) {
+    | Val({value: Ap(vF, vArgs), _})
+        when List.length(argPats) == List.length(vArgs) =>
+      switch (matchPat(bindings, headPat, Val(vF))) {
       | None => None
       | Some(b) =>
         List.fold_left2(
@@ -137,19 +137,17 @@ let rec matchPat = (bindings: evalEnv, pat: term, value: mlValue): option(evalEn
             | Some(b) => matchPat(b, p, Val(v))
             },
           Some(b),
-          pArgs,
+          argPats,
           vArgs,
         )
       }
     | _ => None
     }
-
-  | _ => None
   };
 
 /* --- Expression evaluation --- */
 
-let rec evalExpr = (env: evalEnv, t: term): evalResult =>
+let rec evalExpr = (env: evalEnv, t: ml): evalResult =>
   switch (t.value) {
   | Identifier(name) =>
     switch (StringMap.find_opt(name, env)) {
@@ -163,33 +161,40 @@ let rec evalExpr = (env: evalEnv, t: term): evalResult =>
 
   | List(items) => evalList(env, items)
 
-  | Cons(heads, tail) =>
-    switch (evalList(env, heads)) {
+  | Cons(head, tail) =>
+    switch (evalExpr(env, head)) {
     | Err(_) as e => e
-    | Ok(Val({value: List(headVals), _})) =>
+    | Ok(headVal) =>
       switch (evalExpr(env, tail)) {
       | Err(_) as e => e
       | Ok(Val({value: List(tailVals), _})) =>
-        Ok(Val(mk(List(headVals @ tailVals))))
-      | Ok(v) => Err("Cons tail is not a list: " ++ Print.printTerm(termOf(v)))
-      }
-    | Ok(_) => Err("Internal: evalList returned non-list")
-    }
-
-  | Comma(left, right) =>
-    switch (evalExpr(env, left)) {
-    | Err(_) as e => e
-    | Ok(lv) =>
-      switch (evalExpr(env, right)) {
-      | Err(_) as e => e
-      | Ok(rv) =>
-        let t = mk(Comma(termOf(lv), termOf(rv)));
-        Ok(Val({...t, meta: {...t.meta, parens: true}}));
+        Ok(Val(mk(List([termOf(headVal), ...tailVals]))))
+      | Ok(v) => Err("Cons tail is not a list: " ++ Print.printML(termOf(v)))
       }
     }
 
-  | Fun(pat, body) =>
-    Ok(Closure(env, pat, body))
+  | Tuple(items) =>
+    let rec evalItems = (acc, remaining) =>
+      switch (remaining) {
+      | [] =>
+        let t = mk(Tuple(List.rev(acc)));
+        Ok(Val({...t, meta: {...t.meta, parens: true}}))
+      | [item, ...rest] =>
+        switch (evalExpr(env, item)) {
+        | Err(_) as e => e
+        | Ok(v) => evalItems([termOf(v), ...acc], rest)
+        }
+      };
+    evalItems([], items)
+
+  | Fun(pats, body) =>
+    switch (pats) {
+    | [] => evalExpr(env, body)
+    | [pat] => Ok(Closure(env, pat, body))
+    | [pat, ...restPats] =>
+      /* Multi-param: fun p1 p2 => body  becomes  Closure(env, p1, fun p2 => body) */
+      Ok(Closure(env, pat, mk(Fun(restPats, body))))
+    }
 
   | Ap(f, args) =>
     switch (evalExpr(env, f)) {
@@ -212,19 +217,16 @@ let rec evalExpr = (env: evalEnv, t: term): evalResult =>
     }
 
   | Let(binding, body) =>
-    switch (binding.value) {
-    | Eq(pat, expr) =>
-      switch (evalExpr(env, expr)) {
-      | Err(_) as e => e
-      | Ok(exprVal) =>
-        switch (matchPat(StringMap.empty, pat, exprVal)) {
-        | Some(bindings) =>
-          let bodyEnv = StringMap.union((_, _, v) => Some(v), env, bindings);
-          evalExpr(bodyEnv, body);
-        | None => Err("Let pattern match failed")
-        }
+    switch (evalExpr(env, binding.rhs)) {
+    | Err(_) as e => e
+    | Ok(rhsVal) =>
+      let pat = Term.mkPat(PVar(binding.name));
+      switch (matchPat(StringMap.empty, pat, rhsVal)) {
+      | Some(bindings) =>
+        let bodyEnv = StringMap.union((_, _, v) => Some(v), env, bindings);
+        evalExpr(bodyEnv, body);
+      | None => Err("Let pattern match failed")
       }
-    | _ => Err("Invalid let binding")
     }
 
   | BinOp(op, left, right) =>
@@ -237,28 +239,11 @@ let rec evalExpr = (env: evalEnv, t: term): evalResult =>
       }
     }
 
-  | Asc(expr, _) => evalExpr(env, expr)
-
-  | Eq(_, body) => evalExpr(env, body)
-
-  | Arrow(a, b) =>
-    switch (evalExpr(env, a)) {
-    | Err(_) as e => e
-    | Ok(av) =>
-      switch (evalExpr(env, b)) {
-      | Err(_) as e => e
-      | Ok(bv) => Ok(Val(mk(Arrow(termOf(av), termOf(bv)))))
-      }
-    }
-
-  | Postulate(_, _) | Meta(_, _) | Construct(_, _, _) =>
-    Err("Cannot evaluate block in ML expression")
-
   | Shard(_) | BuilderError => Err("Cannot evaluate syntax error")
   }
 
-and evalList = (env: evalEnv, items: list(term)): evalResult => {
-  let rec go = (acc: list(term), remaining: list(term)): evalResult =>
+and evalList = (env: evalEnv, items: list(ml)): evalResult => {
+  let rec go = (acc: list(ml), remaining: list(ml)): evalResult =>
     switch (remaining) {
     | [] => Ok(Val(mk(List(List.rev(acc)))))
     | [item, ...rest] =>
@@ -270,7 +255,7 @@ and evalList = (env: evalEnv, items: list(term)): evalResult => {
   go([], items);
 }
 
-and evalApp = (env: evalEnv, fVal: mlValue, args: list(term)): evalResult =>
+and evalApp = (env: evalEnv, fVal: mlValue, args: list(ml)): evalResult =>
   switch (fVal, args) {
   | (Closure(closureEnv, pat, body), [arg]) =>
     switch (evalExpr(env, arg)) {
@@ -304,14 +289,14 @@ and evalApp = (env: evalEnv, fVal: mlValue, args: list(term)): evalResult =>
   | (Val({value: Identifier("fst"), _}), [arg]) =>
     switch (evalExpr(env, arg)) {
     | Err(_) as e => e
-    | Ok(Val({value: Comma(l, _), _})) => Ok(Val(l))
-    | Ok(_) => Err("fst: argument is not a pair")
+    | Ok(Val({value: Tuple([first, ..._]), _})) => Ok(Val(first))
+    | Ok(_) => Err("fst: argument is not a tuple")
     }
   | (Val({value: Identifier("snd"), _}), [arg]) =>
     switch (evalExpr(env, arg)) {
     | Err(_) as e => e
-    | Ok(Val({value: Comma(_, r), _})) => Ok(Val(r))
-    | Ok(_) => Err("snd: argument is not a pair")
+    | Ok(Val({value: Tuple([_, second, ..._]), _})) => Ok(Val(second))
+    | Ok(_) => Err("snd: argument is not a tuple")
     }
   /* foldl f init list — built-in left fold (curried: f acc item) */
   | (Val({value: Identifier("foldl"), _}), [fArg, initArg, listArg]) =>
@@ -353,7 +338,7 @@ and evalApp = (env: evalEnv, fVal: mlValue, args: list(term)): evalResult =>
     }
   }
 
-and evalMatch = (env: evalEnv, scrutVal: mlValue, branches: list((term, term))): evalResult =>
+and evalMatch = (env: evalEnv, scrutVal: mlValue, branches: list((pat, ml))): evalResult =>
   switch (branches) {
   | [] => Err("Non-exhaustive match")
   | [(pat, body), ...rest] =>
@@ -365,64 +350,43 @@ and evalMatch = (env: evalEnv, scrutVal: mlValue, branches: list((term, term))):
     }
   }
 
-and evalBinOp = (op: string, lv: mlValue, rv: mlValue): evalResult =>
+and evalBinOp = (op: binOp, lv: mlValue, rv: mlValue): evalResult =>
   switch (op) {
-  | "==" =>
+  | Eq =>
     Ok(Val(mk(Identifier(mlValueEqual(lv, rv) ? "true" : "false"))))
-  | "!=" =>
+  | Neq =>
     Ok(Val(mk(Identifier(mlValueEqual(lv, rv) ? "false" : "true"))))
-  | "&&" =>
+  | And =>
     switch (lv, rv) {
     | (Val({value: Identifier("true"), _}), Val({value: Identifier("true"), _})) =>
       Ok(Val(mk(Identifier("true"))))
     | _ => Ok(Val(mk(Identifier("false"))))
     }
-  | "||" =>
+  | Or =>
     switch (lv) {
     | Val({value: Identifier("true"), _}) => Ok(Val(mk(Identifier("true"))))
     | _ => Ok(rv)
     }
-  | _ => Err("Unknown operator: " ++ op)
   };
 
 /* === Top-level: run a schema on construct declarations === */
 
-let declToSignature = (decl: term): term =>
-  switch (decl.value) {
-  | Asc(lhs, retType) =>
-    /* Name is the bare identifier, params are the typed parameters */
-    let name =
-      switch (lhs.value) {
-      | Identifier(_) => lhs
-      | Ap({value: Identifier(_), _} as f, _) => f
-      | _ => lhs
-      };
-    let params =
-      switch (lhs.value) {
-      | Ap(_, args) =>
-        List.map(
-          (arg: term) =>
-            switch (arg.value) {
-            | Asc({value: Identifier(_), _} as pname, pty) =>
-              mk(Comma(pname, pty))
-            | _ => mk(Comma(mk(Identifier("_")), arg))
-            },
-          args,
-        )
-      | _ => []
-      };
-    mk(Comma(name,
-       mk(Comma(mk(List(params)), retType))))
-  | _ =>
-    mk(Comma(mk(Hole(true)),
-       mk(Comma(mk(List([])), mk(Hole(true))))))
-  };
+let declToSignature = (d: decl): ml => {
+  let name = mk(Identifier(d.declName));
+  let params =
+    List.map(
+      (p: param) =>
+        mk(Tuple([mk(Identifier(p.paramName)), embedOL(p.paramType)])),
+      d.params,
+    );
+  mk(Tuple([name, mk(List(params)), embedOL(d.retType)]));
+};
 
 type schemaResult =
-  | Witnesses(list(term))
+  | Witnesses(list(ml))
   | SchemaError(string);
 
-let runSchema = (schemaVal: mlValue, decls: list(term)): schemaResult => {
+let runSchema = (schemaVal: mlValue, decls: list(decl)): schemaResult => {
   let sigs = List.map(declToSignature, decls);
   let sigListTerm = mk(List(sigs));
   /* Apply the schema closure to the signature list */

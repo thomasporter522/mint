@@ -45,6 +45,18 @@ type decl = {
 
 /* === Meta language === */
 
+/* ML types — the type language of the meta-language.
+   Parsed from annotation syntax by the builder. */
+type mlType =
+  | MTerm
+  | MSort
+  | MBool
+  | MString
+  | MList(mlType)
+  | MResult(mlType)
+  | MTuple(list(mlType))                     /* (A, B, C) — arbitrary arity */
+  | MArrow(mlType, mlType)                   /* A -> B */
+
 /* ML patterns */
 type cPat =
   | PWildcard                                /* _ */
@@ -54,7 +66,7 @@ type cPat =
   | PList(list(pat))                         /* [p1, p2, p3] */
   | PCons(pat, pat)                          /* p :: ptail */
   | PTuple(list(pat))                        /* (p1, p2, p3) */
-  | PAp(string, list(pat))                    /* (C p1 p2) — constructor name + arg patterns */
+  | PAp(pat, list(pat))                       /* (f p1 p2) — head + arg patterns */
 and pat = {
   value: cPat,
   meta,
@@ -86,7 +98,7 @@ and ml = {
 /* ML bindings (shared by let and meta-level definitions) */
 and binding = {
   name: string,
-  annotation: option(ml),      /* : type (parsed as ML, converted to mlType) */
+  annotation: option(mlType),         /* parsed directly into mlType by the builder */
   rhs: ml,
   bindingMeta: meta,
 };

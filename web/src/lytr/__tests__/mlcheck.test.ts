@@ -354,14 +354,14 @@ describe('ML type checker: let type annotations', () => {
   });
 
   it('annotated let with List Term -> List Term', () => {
-    ok('fun s => let rev : ((List Term) -> (List Term)) = fun xs => (foldl (fun acc => fun x => [x, ...acc]) [] xs) in (Ok (rev [a, b]))');
+    ok('fun s => let rev : ((List Term) -> (List Term)) = fun xs => (foldl (fun acc => fun x => x :: acc) [] xs) in (Ok (rev [a, b]))');
   });
 
   it('annotation gives param types to lambda', () => {
     // Without annotation, f infers as Term -> Term (param is Term).
     // With annotation (List Term) -> (List Term), param xs gets List Term.
     // Then foldl can properly type-check the callback.
-    ok('fun s => let rev : ((List Term) -> (List Term)) = fun xs => (foldl (fun acc => fun x => [x, ...acc]) [] xs) in (Ok (rev [a]))');
+    ok('fun s => let rev : ((List Term) -> (List Term)) = fun xs => (foldl (fun acc => fun x => x :: acc) [] xs) in (Ok (rev [a]))');
   });
 
   it('annotated let with Result type', () => {
@@ -371,7 +371,7 @@ describe('ML type checker: let type annotations', () => {
   it('annotation propagates through function application', () => {
     // rev has type (List Term) -> (List Term), so (rev xs) returns List Term
     // Then (Ok (rev xs)) should pass since Ok wants List Term
-    ok('fun s => let rev : ((List Term) -> (List Term)) = fun xs => (foldl (fun acc => fun x => [x, ...acc]) [] xs) in match s with | _ => (Ok (rev [a, b])) end');
+    ok('fun s => let rev : ((List Term) -> (List Term)) = fun xs => (foldl (fun acc => fun x => x :: acc) [] xs) in match s with | _ => (Ok (rev [a, b])) end');
   });
 
   /* --- Annotations that should fail --- */

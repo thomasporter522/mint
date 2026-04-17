@@ -3,9 +3,13 @@ open Grammar;
 open Term;
 open Parser;
 
+/* === Helpers === */
+
+let mk = mkML;
+
 let combineTerms =
   fun
-  | [] => mk(Hole(true))
+  | [] => mk(Hole(Synthesized))
   | [t] => t
   | [first, ..._] as ts => {
       let last = List.nth(ts, List.length(ts) - 1);
@@ -13,14 +17,11 @@ let combineTerms =
       {...t, meta: {...t.meta, start: first.meta.start, end_: last.meta.end_}};
     };
 
-let localize = (t: term, token: ranged(primaryToken)): term =>
+let localize = (t: ml, token: ranged(primaryToken)): ml =>
   {...t, meta: {...t.meta, start: token.start, end_: token.end_}};
 
-let isToken = (name: string, tok: primaryToken): bool =>
-  switch (tok) {
-  | TNamed(n) => n == name
-  | _ => false
-  };
+let localizePat = (p: pat, token: ranged(primaryToken)): pat =>
+  {...p, meta: {...p.meta, start: token.start, end_: token.end_}};
 
 let isCommaToken = (tok: primaryToken): bool =>
   switch (tok) {
@@ -28,7 +29,154 @@ let isCommaToken = (tok: primaryToken): bool =>
   | _ => false
   };
 
-let rec buildTerms = (fs: list(sharded(openForm))): term =>
+let metaFromRange = (start, end_): meta =>
+  {parens: false, start, end_};
+
+/* === mlType conversion from intermediate ml expressions === */
+
+let rec mlToType = (t: ml): option(mlType) =>
+  switch (t.value) {
+  | Identifier("Term") => Some(MTerm)
+  | Identifier("Sort") => Some(MSort)
+  | Identifier("Bool") => Some(MBool)
+  | Identifier("String") => Some(MString)
+  | Identifier("Signature") =>
+    Some(MTuple([MTerm, MList(MTuple([MTerm, MTerm])), MTerm]))
+  | Ap({value: Identifier("List"), _}, [arg]) =>
+    switch (mlToType(arg)) {
+    | Some(t) => Some(MList(t))
+    | None => None
+    }
+  | Ap({value: Identifier("Result"), _}, [arg]) =>
+    switch (mlToType(arg)) {
+    | Some(t) => Some(MResult(t))
+    | None => None
+    }
+  | Ap({value: Identifier("->"), _}, [l, r]) =>
+    switch (mlToType(l), mlToType(r)) {
+    | (Some(lt), Some(rt)) => Some(MArrow(lt, rt))
+    | _ => None
+    }
+  | Tuple(items) =>
+    let types = List.map(mlToType, items);
+    if (List.for_all(t => t != None, types)) {
+      Some(MTuple(List.map(t => switch (t) { | Some(v) => v | None => MTerm }, types)))
+    } else {
+      None
+    }
+  | _ => None
+  };
+
+/* === Pattern building === */
+
+let rec buildPat = (form: openForm): pat => {
+  let {left, leftUf, closed, rightUf, right} = form;
+
+  switch (left, leftUf, closed, rightUf, right) {
+  /* Bracket forms: (...), [...] */
+  | (None, [], CMatch(_, _, {value: TNamed(")" | "]"), _}), [], None) =>
+    let (open_, elementGroups) = collectBracketElements(closed);
+    let elements = List.map(buildPatTerms, elementGroups);
+    switch (open_, elements) {
+    | ("(", [single]) => {...single, meta: {...single.meta, parens: true}}
+    | ("(", elements) =>
+      let p = mkPat(PTuple(elements));
+      {...p, meta: {...p.meta, parens: true}}
+    | ("[", items) =>
+      switch (List.rev(items)) {
+      | [{value: PHole, _}] =>
+        /* [] with nothing inside — empty list */
+        mkPat(PList([]))
+      | _ => mkPat(PList(items))
+      }
+    | _ => mkPat(PWildcard)
+    };
+
+  /* Infix :: in patterns */
+  | (_, _, CHead({value: TNamed("::"), _} as tok), _, _) =>
+    let headPat = buildPatLeftChild(left, leftUf);
+    let tailPat = buildPatChild(rightUf, right);
+    localizePat(mkPat(PCons(headPat, tailPat)), tok)
+
+  /* Atoms */
+  | (None, [], CHead({value: TAtom(Hole), _} as tok), [], None) =>
+    localizePat(mkPat(PHole), tok)
+  | (None, [], CHead({value: TAtom(Identifier("_")), _} as tok), [], None) =>
+    localizePat(mkPat(PWildcard), tok)
+  | (None, [], CHead({value: TAtom(Identifier(v)), _} as tok), [], None) =>
+    localizePat(mkPat(PVar(v)), tok)
+  | (None, [], CHead({value: TAtom(StringLit(s)), _} as tok), [], None) =>
+    localizePat(mkPat(PString(s)), tok)
+
+  /* _ keyword */
+  | (None, [], CHead({value: TNamed("_"), _} as tok), [], None) =>
+    localizePat(mkPat(PWildcard), tok)
+
+  /* Named token as pattern variable */
+  | (None, [], CHead({value: TNamed(name), _} as tok), [], None) =>
+    localizePat(mkPat(PVar(name)), tok)
+
+  | _ => mkPat(PWildcard)
+  };
+}
+
+and buildPatTerms = (fs: list(sharded(openForm))): pat =>
+  combinePatTerms(List.concat_map(buildPatSharded, fs))
+
+and combinePatTerms = (ps: list(pat)): pat =>
+  switch (ps) {
+  | [] => mkPat(PHole)
+  | [p] => p
+  | [head, ...args] when List.length(args) > 0 =>
+    let first = List.hd(args);
+    let last = List.nth(args, List.length(args) - 1);
+    let p = mkPat(PAp(head, args));
+    {...p, meta: metaFromRange(first.meta.start, last.meta.end_)};
+  | [p, ..._] => p
+  }
+
+and buildPatChild = (unforms, form) =>
+  combinePatTerms(
+    switch (form) {
+    | Some(f) => buildPatUnforms(unforms) @ [buildPat(f)]
+    | None => buildPatUnforms(unforms)
+    },
+  )
+
+and buildPatLeftChild = (left, leftUf) =>
+  combinePatTerms(
+    switch (left) {
+    | Some(f) => [buildPat(f), ...buildPatUnforms(leftUf)]
+    | None => buildPatUnforms(leftUf)
+    },
+  )
+
+and buildPatUnform =
+  fun
+  | USecondary(_) => []
+  | UShard(_) => []
+
+and buildPatUnforms = unforms => List.concat_map(buildPatUnform, unforms)
+
+and buildPatSharded =
+  fun
+  | Unform(u) => buildPatUnform(u)
+  | Form(f) => [buildPat(f)]
+
+/* === Bracket element collection (shared by ml and pat building) === */
+
+and collectBracketElements = (cf: closedForm): (string, list(list(sharded(openForm)))) =>
+  switch (cf) {
+  | CHead({value: TNamed(open_), _}) => (open_, [])
+  | CMatch(inner, items, {value, _}) when isCommaToken(value) || value == TNamed(")") || value == TNamed("]") =>
+    let (open_, prev) = collectBracketElements(inner);
+    (open_, prev @ [items])
+  | _ => ("", [])
+  }
+
+/* === Main expression builder === */
+
+and buildTerms = (fs: list(sharded(openForm))): ml =>
   combineTerms(List.concat_map(buildSharded, fs))
 
 and buildChild = (unforms, form) =>
@@ -39,52 +187,6 @@ and buildChild = (unforms, form) =>
     },
   )
 
-and buildItems = (items: list(sharded(openForm))): list(term) =>
-  List.filter_map(
-    fun
-    | Unform(_) => None
-    | Form(f) => Some(buildForm(f)),
-    items,
-  )
-
-/* --- Block builders --- */
-
-and faceToken = (form: closedForm): string =>
-  switch (form) {
-  | CMatch(_, _, {value: TNamed(n), _}) => n
-  | CHead({value: TNamed(n), _}) => n
-  | _ => ""
-  }
-
-and buildBlock = (keyword, contents, rest): term => {
-  let body = buildItems(contents);
-  switch (keyword) {
-  | "postulate" => mk(Postulate(body, rest))
-  | "meta" => mk(Meta(body, rest))
-  | "construct" =>
-    switch (body, rest) {
-    | ([], Some(r)) => r  /* construct by ... — real content is in the "by" block */
-    | ([by, ...decls], _) => mk(Construct(by, decls, rest))
-    | ([], None) => mk(Construct(mk(Hole(true)), [], rest))
-    }
-  | "by" =>
-    switch (body) {
-    | [name, ...decls] => mk(Construct(name, decls, rest))
-    | [] => mk(Construct(mk(Hole(true)), [], rest))
-    }
-  | _ => mk(BuilderError)
-  };
-}
-
-and buildBlocks = (form, contents, rest): term => {
-  let keyword = faceToken(form);
-  switch (form) {
-  | CHead(_) => buildBlock(keyword, contents, rest)
-  | CMatch(inner, innerItems, _) =>
-    buildBlocks(inner, innerItems, Some(buildBlock(keyword, contents, rest)))
-  };
-}
-
 and buildLeftChild = (left, leftUf) =>
   combineTerms(
     switch (left) {
@@ -93,8 +195,13 @@ and buildLeftChild = (left, leftUf) =>
     },
   )
 
-and buildInfix = (constructor, left, leftUf, tok, rightUf, right) =>
-  localize(mk(constructor(buildLeftChild(left, leftUf), buildChild(rightUf, right))), tok)
+and buildItems = (items: list(sharded(openForm))): list(ml) =>
+  List.filter_map(
+    fun
+    | Unform(_) => None
+    | Form(f) => Some(buildForm(f)),
+    items,
+  )
 
 /* --- Match chain: match(scrut)with()|(pat)=>(body)|(pat)=>(body)end --- */
 
@@ -106,7 +213,7 @@ and isMatchChain = (cf: closedForm): bool =>
   | _ => false
   }
 
-and collectMatchBranches = (cf: closedForm): (term, list((term, term))) =>
+and collectMatchBranches = (cf: closedForm): (ml, list((pat, ml))) =>
   switch (cf) {
   | CMatch(CHead({value: TNamed("match"), _}), scrutItems, {value: TNamed("with"), _}) =>
     (buildTerms(scrutItems), [])
@@ -114,14 +221,19 @@ and collectMatchBranches = (cf: closedForm): (term, list((term, term))) =>
     let body = buildTerms(bodyItems);
     switch (inner) {
     | CMatch(deeper, patItems, {value: TNamed("=>"), _}) =>
-      let pat = buildTerms(patItems);
+      let patForm = buildPatTerms(patItems);
       let (scrutinee, prevBranches) = collectMatchBranches(deeper);
-      (scrutinee, prevBranches @ [(pat, body)])
+      (scrutinee, prevBranches @ [(patForm, body)])
     | _ =>
       collectMatchBranches(inner)
     }
-  | _ => (mk(Hole(true)), [])
+  | _ => (mk(Hole(Synthesized)), [])
   }
+
+and buildMatchChain = (cf: closedForm): ml => {
+  let (scrutinee, branches) = collectMatchBranches(cf);
+  mk(Match(scrutinee, branches));
+}
 
 /* --- If chain: if(cond)then(thenBr)else(elseBr)end --- */
 
@@ -133,27 +245,249 @@ and isIfChain = (cf: closedForm): bool =>
   | _ => false
   }
 
-and buildIfChain = (cf: closedForm): term =>
+and buildIfChain = (cf: closedForm): ml =>
   switch (cf) {
   | CMatch(CMatch(CMatch(CHead({value: TNamed("if"), _}), condItems, {value: TNamed("then"), _}), thenItems, {value: TNamed("else"), _}), elseItems, {value: TNamed("end"), _}) =>
     mk(If(buildTerms(condItems), buildTerms(thenItems), buildTerms(elseItems)))
   | _ => mk(BuilderError)
   }
 
-/* --- Bracket elements: walk comma chain --- */
+/* --- Fun handler: fun(pats)=>f(body) --- */
 
-and collectBracketElements = (cf: closedForm): (string, list(list(sharded(openForm)))) =>
-  switch (cf) {
-  | CHead({value: TNamed(open_), _}) => (open_, [])
-  | CMatch(inner, items, {value, _}) when isCommaToken(value) || value == TNamed(")") || value == TNamed("]") =>
-    let (open_, prev) = collectBracketElements(inner);
-    (open_, prev @ [items])
-  | _ => ("", [])
+and buildFunPats = (items: list(sharded(openForm))): list(pat) =>
+  List.filter_map(
+    fun
+    | Unform(_) => None
+    | Form(f) => Some(buildPat(f)),
+    items,
+  )
+
+/* --- Let handler: let(binding)in(body) --- */
+/* The binding content is something like `name = rhs` or `name : type = rhs`.
+   After buildTerms, this becomes:
+   - Ap(Identifier("="), [Identifier(name), rhs])
+   - Ap(Identifier("="), [Ap(Identifier(":"), [Identifier(name), typeExpr]), rhs])
+*/
+
+and parseBinding = (content: ml): binding => {
+  switch (content.value) {
+  /* name : type = rhs */
+  | Ap({value: Identifier("="), _}, [
+      {value: Ap({value: Identifier(":"), _}, [
+        {value: Identifier(name), _},
+        typeExpr,
+      ]), _},
+      rhs,
+    ]) =>
+    {name, annotation: mlToType(typeExpr), rhs, bindingMeta: content.meta}
+  /* name = rhs */
+  | Ap({value: Identifier("="), _}, [{value: Identifier(name), _}, rhs]) =>
+    {name, annotation: None, rhs, bindingMeta: content.meta}
+  /* Fallback — couldn't parse binding */
+  | _ =>
+    {name: "_", annotation: None, rhs: content, bindingMeta: content.meta}
+  };
+}
+
+/* --- Block builders --- */
+
+and faceToken = (form: closedForm): string =>
+  switch (form) {
+  | CMatch(_, _, {value: TNamed(n), _}) => n
+  | CHead({value: TNamed(n), _}) => n
+  | _ => ""
   }
 
-/* === Main builder === */
+and buildBlock = (keyword, contents, rest): ml => {
+  let body = buildItems(contents);
+  switch (keyword) {
+  | "postulate" =>
+    let decls = List.map(mlToDecl, body);
+    let blockML = mk(Ap(mk(Identifier("__postulate")), List.map(declToML, decls)));
+    switch (rest) {
+    | Some(r) => mk(Ap(mk(Identifier("__seq")), [blockML, r]))
+    | None => blockML
+    };
+  | "meta" =>
+    let defs = List.map(mlToMetaDef, body);
+    let blockML = mk(Ap(mk(Identifier("__meta")), List.map(metaDefToML, defs)));
+    switch (rest) {
+    | Some(r) => mk(Ap(mk(Identifier("__seq")), [blockML, r]))
+    | None => blockML
+    };
+  | "construct" =>
+    switch (body, rest) {
+    | ([], Some(r)) => r
+    | ([by, ...decls], _) =>
+      let schemaName = extractName(by);
+      let declList = List.map(mlToDecl, decls);
+      let blockML = mk(Ap(mk(Identifier("__construct")), [mk(Identifier(schemaName)), ...List.map(declToML, declList)]));
+      switch (rest) {
+      | Some(r) => mk(Ap(mk(Identifier("__seq")), [blockML, r]))
+      | None => blockML
+      };
+    | ([], None) =>
+      let blockML = mk(Ap(mk(Identifier("__construct")), [mk(Hole(Synthesized))]));
+      blockML
+    }
+  | "by" =>
+    switch (body) {
+    | [name, ...decls] =>
+      let schemaName = extractName(name);
+      let declList = List.map(mlToDecl, decls);
+      mk(Ap(mk(Identifier("__construct")), [mk(Identifier(schemaName)), ...List.map(declToML, declList)]))
+    | [] =>
+      mk(Ap(mk(Identifier("__construct")), [mk(Hole(Synthesized))]))
+    }
+  | _ => mk(BuilderError)
+  };
+}
 
-and buildForm = (form: openForm): term => {
+and extractName = (t: ml): string =>
+  switch (t.value) {
+  | Identifier(name) => name
+  | _ => "_"
+  }
+
+/* Convert an ml expression (from the intermediate representation) into a decl.
+   A declaration looks like:
+   - `name : retType` => Ap(Identifier(":"), [Identifier(name), retType])
+   - `(name (p1 : T1) ...) : retType` => Ap(Identifier(":"), [Ap(Identifier(name), [...]), retType])
+   The inner Ap for params contains items like Ap(Identifier(":"), [Identifier(pname), ptype])
+*/
+and mlToDecl = (t: ml): decl => {
+  switch (t.value) {
+  /* (name params...) : retType */
+  | Ap({value: Identifier(":"), _}, [lhs, retTypeExpr]) =>
+    switch (lhs.value) {
+    /* name : retType — no params */
+    | Identifier(name) =>
+      {declName: name, params: [], retType: mlToOL(retTypeExpr), declMeta: t.meta}
+    /* (name p1 p2 ...) : retType — with params */
+    | Ap({value: Identifier(name), _}, paramExprs) =>
+      let params = List.map(mlToParam, paramExprs);
+      {declName: name, params, retType: mlToOL(retTypeExpr), declMeta: t.meta}
+    | _ =>
+      {declName: "_", params: [], retType: mlToOL(retTypeExpr), declMeta: t.meta}
+    }
+  /* No colon — just a name or application, treat as decl with hole retType */
+  | Identifier(name) =>
+    {declName: name, params: [], retType: mkOL(OLHole(Synthesized)), declMeta: t.meta}
+  | _ =>
+    {declName: "_", params: [], retType: mkOL(OLHole(Synthesized)), declMeta: t.meta}
+  };
+}
+
+and mlToParam = (t: ml): param => {
+  switch (t.value) {
+  /* (pname : ptype) — annotated param */
+  | Ap({value: Identifier(":"), _}, [{value: Identifier(name), _}, typeExpr]) =>
+    {paramName: name, paramType: mlToOL(typeExpr), paramMeta: t.meta}
+  /* bare identifier — untyped param, use hole for type */
+  | Identifier(name) =>
+    {paramName: name, paramType: mkOL(OLHole(Synthesized)), paramMeta: t.meta}
+  | _ =>
+    {paramName: "_", paramType: mkOL(OLHole(Synthesized)), paramMeta: t.meta}
+  };
+}
+
+/* Convert ml intermediate expression to an OL term */
+and mlToOL = (t: ml): ol => {
+  let value =
+    switch (t.value) {
+    | Hole(k) => OLHole(k)
+    | Identifier(s) => OLIdentifier(s)
+    | Ap(f, args) => OLAp(mlToOL(f), List.map(mlToOL, args))
+    | _ => OLHole(Synthesized)
+    };
+  {value, meta: t.meta};
+}
+
+/* Convert ml expression to a metaDef.
+   In meta blocks, items are either:
+   - `schema name : type = body` — SchemaDef
+   - `name : type = body` or `name = body` — LetDef
+*/
+and mlToMetaDef = (t: ml): metaDef => {
+  switch (t.value) {
+  /* schema name ... — the Ap has schema as head */
+  | Ap({value: Identifier("schema"), _}, [rest]) =>
+    SchemaDef(parseBinding(rest))
+  | Ap({value: Identifier("schema"), _}, items) =>
+    /* schema followed by a binding expression: recombine the items */
+    let combined = combineTerms(items);
+    SchemaDef(parseBinding(combined))
+  | _ =>
+    LetDef(parseBinding(t))
+  };
+}
+
+/* Convert a decl back to ml for block representation */
+and declToML = (d: decl): ml => {
+  let nameTerm = mk(Identifier(d.declName));
+  let retTerm = olToML(d.retType);
+  let lhs =
+    switch (d.params) {
+    | [] => nameTerm
+    | params =>
+      let paramTerms = List.map(p => {
+        let n = mk(Identifier(p.paramName));
+        let ty = olToML(p.paramType);
+        let asc = mk(Ap(mk(Identifier(":")), [n, ty]));
+        {...asc, meta: {...asc.meta, parens: true}};
+      }, params);
+      let ap = mk(Ap(nameTerm, paramTerms));
+      {...ap, meta: {...ap.meta, parens: true}};
+    };
+  mk(Ap(mk(Identifier(":")), [lhs, retTerm]));
+}
+
+and metaDefToML = (d: metaDef): ml => {
+  let bindingToML = (b: binding): ml => {
+    let nameTerm = mk(Identifier(b.name));
+    let lhs =
+      switch (b.annotation) {
+      | Some(_) =>
+        /* We already have the annotation parsed; just put name */
+        nameTerm
+      | None => nameTerm
+      };
+    mk(Ap(mk(Identifier("=")), [lhs, b.rhs]));
+  };
+  switch (d) {
+  | LetDef(b) => bindingToML(b)
+  | SchemaDef(b) =>
+    mk(Ap(mk(Identifier("schema")), [bindingToML(b)]))
+  };
+}
+
+and olToML = (t: ol): ml => {
+  let value =
+    switch (t.value) {
+    | OLHole(k) => Hole(k)
+    | OLIdentifier(s) => Identifier(s)
+    | OLAp(f, args) => Ap(olToML(f), List.map(olToML, args))
+    };
+  {value, meta: t.meta};
+}
+
+and buildBlocks = (form, contents, rest): ml => {
+  let keyword = faceToken(form);
+  switch (form) {
+  | CHead(_) => buildBlock(keyword, contents, rest)
+  | CMatch(inner, innerItems, _) =>
+    buildBlocks(inner, innerItems, Some(buildBlock(keyword, contents, rest)))
+  };
+}
+
+/* --- Infix builder helper --- */
+
+and buildInfix = (constructor, left, leftUf, tok, rightUf, right) =>
+  localize(mk(constructor(buildLeftChild(left, leftUf), buildChild(rightUf, right))), tok)
+
+/* === Main form builder === */
+
+and buildForm = (form: openForm): ml => {
   let {left, leftUf, closed, rightUf, right} = form;
 
   switch (left, leftUf, closed, rightUf, right) {
@@ -164,64 +498,70 @@ and buildForm = (form: openForm): term => {
     switch (open_, elements) {
     | ("(", [single]) => {...single, meta: {...single.meta, parens: true}}
     | ("(", elements) =>
-      let rec buildComma =
-        fun
-        | [] => mk(Hole(true))
-        | [single] => single
-        | [first, ...rest] => mk(Comma(first, buildComma(rest)));
-      let t = buildComma(elements);
+      let t = mk(Tuple(elements));
       {...t, meta: {...t.meta, parens: true}}
     | ("[", items) =>
-      /* Check if last element is a spread: ...rest */
       switch (List.rev(items)) {
-      | [{value: Ap({value: Identifier("..."), _}, [tail]), _}, ...revHeads] =>
-        mk(Term.Cons(List.rev(revHeads), tail))
-      | [{value: Identifier("..."), _}, ...revHeads] =>
-        /* bare [...] with no tail identifier — treat as empty spread */
-        mk(Term.Cons(List.rev(revHeads), mk(Term.List([]))))
-      | [{value: Hole(true), _}] =>
+      | [{value: Hole(Synthesized), _}] =>
         /* [] with nothing inside — empty list */
-        mk(Term.List([]))
-      | _ => mk(Term.List(items))
+        mk(List([]))
+      | _ => mk(List(items))
       }
     | _ => mk(BuilderError)
     };
 
   /* Atoms */
   | (None, [], CHead({value: TAtom(Hole), _} as tok), [], None) =>
-    localize(mk(Term.Hole(false)), tok)
+    localize(mk(Hole(User)), tok)
   | (None, [], CHead({value: TAtom(Identifier(v)), _} as tok), [], None) =>
-    localize(mk(Term.Identifier(v)), tok)
+    localize(mk(Identifier(v)), tok)
   | (None, [], CHead({value: TAtom(StringLit(s)), _} as tok), [], None) =>
-    localize(mk(Term.StringLit(s)), tok)
+    localize(mk(StringLit(s)), tok)
 
-  /* fun(pat)=> — body captured by =>_face's right-precedence */
+  /* fun(pats)=>f — body captured by =>f_face's right-precedence */
   | (_, _, CMatch(CHead({value: TNamed("fun"), _}), patItems, {value: TNamed("=>" | "=>f"), _}), _, _) =>
-    let pat = buildTerms(patItems);
+    let pats = buildFunPats(patItems);
     let body = buildChild(rightUf, right);
-    mk(Fun(pat, body))
+    mk(Fun(pats, body))
 
   /* let(binding)in — body captured by in_face's right-precedence */
   | (_, _, CMatch(CHead({value: TNamed("let"), _}), bindingItems, {value: TNamed("in"), _}), _, _) =>
-    let binding = buildTerms(bindingItems);
+    let bindingContent = buildTerms(bindingItems);
     let body = buildChild(rightUf, right);
-    mk(Let(binding, body))
+    let b = parseBinding(bindingContent);
+    mk(Let(b, body))
 
-  /* Infix operators */
+  /* Infix :: → Cons */
+  | (_, _, CHead({value: TNamed("::"), _} as tok), _, _) =>
+    buildInfix((l, r) => Cons(l, r), left, leftUf, tok, rightUf, right)
+
+  /* Infix : → intermediate Ap(Identifier(":"), [l, r]) */
   | (_, _, CHead({value: TNamed(":"), _} as tok), _, _) =>
-    buildInfix((l, r) => Asc(l, r), left, leftUf, tok, rightUf, right)
+    buildInfix((l, r) => Ap(mk(Identifier(":")), [l, r]), left, leftUf, tok, rightUf, right)
+
+  /* Infix -> → intermediate Ap(Identifier("->"), [l, r]) */
   | (_, _, CHead({value: TNamed("->"), _} as tok), _, _) =>
-    buildInfix((l, r) => Arrow(l, r), left, leftUf, tok, rightUf, right)
+    buildInfix((l, r) => Ap(mk(Identifier("->")), [l, r]), left, leftUf, tok, rightUf, right)
+
+  /* Infix = → intermediate Ap(Identifier("="), [l, r]) */
   | (_, _, CHead({value: TNamed("="), _} as tok), _, _) =>
-    buildInfix((l, r) => Eq(l, r), left, leftUf, tok, rightUf, right)
+    buildInfix((l, r) => Ap(mk(Identifier("=")), [l, r]), left, leftUf, tok, rightUf, right)
 
-  /* Keyword atoms */
-  | (None, [], CHead({value: TNamed(name), _} as tok), [], None) =>
-    localize(mk(Term.Identifier(name)), tok)
+  /* Infix == → BinOp(Eq, ...) */
+  | (_, _, CHead({value: TNamed("=="), _} as tok), _, _) =>
+    buildInfix((l, r) => BinOp(Eq, l, r), left, leftUf, tok, rightUf, right)
 
-  /* Catch-all infix */
-  | (_, _, CHead({value: TNamed(op), _} as tok), _, _) =>
-    buildInfix((l, r) => BinOp(op, l, r), left, leftUf, tok, rightUf, right)
+  /* Infix != → BinOp(Neq, ...) */
+  | (_, _, CHead({value: TNamed("!="), _} as tok), _, _) =>
+    buildInfix((l, r) => BinOp(Neq, l, r), left, leftUf, tok, rightUf, right)
+
+  /* Infix && → BinOp(And, ...) */
+  | (_, _, CHead({value: TNamed("&&"), _} as tok), _, _) =>
+    buildInfix((l, r) => BinOp(And, l, r), left, leftUf, tok, rightUf, right)
+
+  /* Infix || → BinOp(Or, ...) */
+  | (_, _, CHead({value: TNamed("||"), _} as tok), _, _) =>
+    buildInfix((l, r) => BinOp(Or, l, r), left, leftUf, tok, rightUf, right)
 
   /* match...with...|...=>...end */
   | (_, _, CMatch(_, _, {value: TNamed("end"), _}), _, _) when isMatchChain(closed) =>
@@ -231,17 +571,20 @@ and buildForm = (form: openForm): term => {
   | (_, _, CMatch(_, _, {value: TNamed("end"), _}), _, _) when isIfChain(closed) =>
     buildIfChain(closed)
 
+  /* Keyword atoms — these produce identifiers */
+  | (None, [], CHead({value: TNamed(name), _} as tok), [], None) =>
+    localize(mk(Identifier(name)), tok)
+
   /* Other blocks terminated by `end` */
   | (_, _, CMatch(inner, innerItems, {value: TNamed("end"), _}), [], None) =>
     buildBlocks(inner, innerItems, None)
 
+  /* Catch-all infix — produce Ap(Identifier(op), [l, r]) as intermediate */
+  | (_, _, CHead({value: TNamed(op), _} as tok), _, _) =>
+    buildInfix((l, r) => Ap(mk(Identifier(op)), [l, r]), left, leftUf, tok, rightUf, right)
+
   | _ => mk(BuilderError)
   };
-}
-
-and buildMatchChain = (cf: closedForm): term => {
-  let (scrutinee, branches) = collectMatchBranches(cf);
-  mk(Match(scrutinee, branches));
 }
 
 and buildUnform =
@@ -256,4 +599,4 @@ and buildSharded =
   | Unform(u) => buildUnform(u)
   | Form(f) => [buildForm(f)];
 
-let build = (forms: list(sharded(openForm))): term => buildTerms(forms);
+let build = (forms: list(sharded(openForm))): ml => buildTerms(forms);

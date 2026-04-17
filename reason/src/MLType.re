@@ -1,14 +1,13 @@
-/* ML type system for the meta-language.
-   Simply-typed with Term, Sort, String, List, Result, pairs, and functions. */
+/* ML type system — re-exported from Term.re where the canonical definition lives. */
 
-type mlType =
+type mlType = Term.mlType =
   | MTerm
   | MSort
   | MBool
   | MString
   | MList(mlType)
   | MResult(mlType)
-  | MPair(mlType, mlType)
+  | MTuple(list(mlType))
   | MArrow(mlType, mlType);
 
 let rec printType =
@@ -19,11 +18,11 @@ let rec printType =
   | MString => "String"
   | MList(t) => "List " ++ printTypeAtom(t)
   | MResult(t) => "Result " ++ printTypeAtom(t)
-  | MPair(a, b) => "(" ++ printType(a) ++ ", " ++ printType(b) ++ ")"
+  | MTuple(items) => "(" ++ String.concat(", ", List.map(printType, items)) ++ ")"
   | MArrow(a, b) => printTypeAtom(a) ++ " -> " ++ printTypeAtom(b)
 and printTypeAtom =
   fun
-  | (MTerm | MSort | MBool | MString | MPair(_, _)) as t => printType(t)
+  | (MTerm | MSort | MBool | MString | MTuple(_)) as t => printType(t)
   | t => "(" ++ printType(t) ++ ")";
 
 let rec eqType = (a: mlType, b: mlType): bool =>
@@ -34,7 +33,9 @@ let rec eqType = (a: mlType, b: mlType): bool =>
   | (MString, MString) => true
   | (MList(a), MList(b)) => eqType(a, b)
   | (MResult(a), MResult(b)) => eqType(a, b)
-  | (MPair(a1, a2), MPair(b1, b2)) => eqType(a1, b1) && eqType(a2, b2)
+  | (MTuple(as_), MTuple(bs)) =>
+    List.length(as_) == List.length(bs)
+    && List.for_all2(eqType, as_, bs)
   | (MArrow(a1, a2), MArrow(b1, b2)) => eqType(a1, b1) && eqType(a2, b2)
   | _ => false
   };
