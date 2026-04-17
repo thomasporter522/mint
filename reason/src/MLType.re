@@ -11,30 +11,37 @@ type mlType =
   | MPair(mlType, mlType)
   | MArrow(mlType, mlType);
 
+/* Pretty-print a type.
+   Examples:
+     MTerm => "Term"
+     MList(MTerm) => "List Term"
+     MArrow(MTerm, MTerm) => "Term -> Term"
+     MPair(MTerm, MList(MTerm)) => "(Term, List Term)"
+     MArrow(MList(MTerm), MResult(MTerm)) => "List Term -> Result Term" */
 let rec printType =
   fun
-  | MTerm => "Term"
-  | MSort => "Sort"
-  | MBool => "Bool"
-  | MString => "String"
-  | MList(t) => "List " ++ printTypeAtom(t)
-  | MResult(t) => "Result " ++ printTypeAtom(t)
-  | MPair(a, b) => "(" ++ printType(a) ++ ", " ++ printType(b) ++ ")"
-  | MArrow(a, b) => printTypeAtom(a) ++ " -> " ++ printTypeAtom(b)
+  | MTerm => failwith("TODO")
+  | MSort => failwith("TODO")
+  | MBool => failwith("TODO")
+  | MString => failwith("TODO")
+  | MList(t) => failwith("TODO")
+  | MResult(t) => failwith("TODO")
+  | MPair(a, b) => failwith("TODO")
+  | MArrow(a, b) => failwith("TODO")
+
+/* Like printType, but wraps compound types in parentheses.
+   Compound = MList, MResult, MArrow. Simple = everything else.
+   Used when a type appears as an argument to a type constructor.
+   Examples:
+     MTerm => "Term"  (no parens, simple)
+     MList(MTerm) => "(List Term)"  (parens, compound)
+     MArrow(MTerm, MTerm) => "(Term -> Term)"  (parens, compound)
+     MPair(MTerm, MTerm) => "(Term, Term)"  (no parens, simple) */
 and printTypeAtom =
   fun
   | (MTerm | MSort | MBool | MString | MPair(_, _)) as t => printType(t)
   | t => "(" ++ printType(t) ++ ")";
 
+/* Structural equality on types. */
 let rec eqType = (a: mlType, b: mlType): bool =>
-  switch (a, b) {
-  | (MTerm, MTerm)
-  | (MSort, MSort)
-  | (MBool, MBool)
-  | (MString, MString) => true
-  | (MList(a), MList(b)) => eqType(a, b)
-  | (MResult(a), MResult(b)) => eqType(a, b)
-  | (MPair(a1, a2), MPair(b1, b2)) => eqType(a1, b1) && eqType(a2, b2)
-  | (MArrow(a1, a2), MArrow(b1, b2)) => eqType(a1, b1) && eqType(a2, b2)
-  | _ => false
-  };
+  failwith("TODO");

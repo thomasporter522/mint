@@ -4,23 +4,41 @@ type termMeta = {
   end_: int,
 };
 
+type holeType = 
+  | User 
+  | Synthesized
+
+type binOp = 
+  | Eq 
+  | Neq 
+  | And 
+  | Or
+
+type cPat = 
+  | Identifier(string)
+  | Wildcard 
+and pat = {
+  value: cPat,
+  meta: termMeta,
+};
+
 type cTerm =
   | Shard(Grammar.primaryToken)
-  | Hole(bool)
+  | Hole(holeType)
   | Identifier(string)
   | StringLit(string)
   | Asc(term, term)
   | Arrow(term, term)
   | Eq(term, term)
   | Comma(term, term)
-  | BinOp(string, term, term)
+  | BinOp(binOp, term, term)
   | Ap(term, list(term))
   | List(list(term))
-  | Cons(list(term), term)               /* [h1, h2, ...tail] */
-  | Fun(term, term)                          /* fun pat => body */
-  | Match(term, list((term, term)))          /* match scrut with branches */
+  | Cons(term, term)               /* h1 :: tail */
+  | Fun(list(pat), term)                          /* fun p1 p2 p3 ... => body */
+  | Match(term, list((pat, term)))          /* match scrut with branches */
   | If(term, term, term)                     /* if cond then thenBr else elseBr */
-  | Let(term, term)                          /* let binding in body */
+  | Let(pat, option(term), term, term)                          /* let p (: t) = e1 in e2 */
   | Postulate(list(term), option(term))
   | Meta(list(term), option(term))
   | Construct(term, list(term), option(term))

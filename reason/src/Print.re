@@ -1,5 +1,6 @@
 open Term;
 
+/* Print a primary token (used by the parser/builder, not usually called directly). */
 let printPrimaryToken =
   fun
   | Grammar.BOF | Grammar.EOF => ""
@@ -8,91 +9,91 @@ let printPrimaryToken =
   | TAtom(StringLit(s)) => "\"" ++ s ++ "\""
   | TNamed(n) => n;
 
+let printBinop : binOp => string = 
+  fun                                                           
+    | Eq => "=="
+    | Neq => "!="                                                                                      
+    | And => "&&"
+    | Or => "||"; 
+
+/* Debug printer: shows AST structure. Prefix with "P" when parens=true.
+   Examples:
+     Identifier("x")              => "Id(x)"
+     Ap(f, [x, y]) with parens    => "PAp(Id(f),[Id(x),Id(y)])"
+     Hole(false)                   => "Hole"
+     Hole(true)                    => "Hole_"
+     Fun(pat, body)                => "Fun(Id(x),Id(x))"
+     Match(s, [(p,b)])             => "Match(Id(s),[(Id(p)=>Id(b))])" */
 let rec debugTerm = (t: term): string => {
+  let printList = l => "[" ++ String.concat(",", l) ++ "]";
   let p = t.meta.parens ? "P" : "";
   switch (t.value) {
-  | Shard(_) => "Shard"
-  | Hole(ins) => ins ? "Hole_" : "Hole"
+  | Shard(shard) => "Shard(" ++ printPrimaryToken(shard) ++ ")"
+  | Hole(ht) => ht == User ? "Hole" : "Hole_"
   | Identifier(v) => "Id(" ++ v ++ ")"
-  | StringLit(s) => "Str(" ++ s ++ ")"
-  | Asc(l, r) => p ++ "Asc(" ++ debugTerm(l) ++ "," ++ debugTerm(r) ++ ")"
-  | Arrow(l, r) => p ++ "Arrow(" ++ debugTerm(l) ++ "," ++ debugTerm(r) ++ ")"
-  | Eq(l, r) => p ++ "Eq(" ++ debugTerm(l) ++ "," ++ debugTerm(r) ++ ")"
-  | Comma(l, r) => p ++ "Comma(" ++ debugTerm(l) ++ "," ++ debugTerm(r) ++ ")"
-  | BinOp(op, l, r) => p ++ "BinOp(" ++ op ++ "," ++ debugTerm(l) ++ "," ++ debugTerm(r) ++ ")"
-  | Ap(f, args) => p ++ "Ap(" ++ debugTerm(f) ++ ",[" ++ String.concat(",", List.map(debugTerm, args)) ++ "])"
-  | List(items) => "List([" ++ String.concat(",", List.map(debugTerm, items)) ++ "])"
-  | Cons(heads, tail) => "Cons([" ++ String.concat(",", List.map(debugTerm, heads)) ++ "]," ++ debugTerm(tail) ++ ")"
-  | Fun(pat, body) => "Fun(" ++ debugTerm(pat) ++ "," ++ debugTerm(body) ++ ")"
-  | Match(scrut, branches) =>
-    "Match(" ++ debugTerm(scrut) ++ ",[" ++
-    String.concat(",", List.map(((p, b)) => "(" ++ debugTerm(p) ++ "=>" ++ debugTerm(b) ++ ")", branches)) ++ "])"
-  | Let(b, body) => "Let(" ++ debugTerm(b) ++ "," ++ debugTerm(body) ++ ")"
-  | If(c, t, e) => "If(" ++ debugTerm(c) ++ "," ++ debugTerm(t) ++ "," ++ debugTerm(e) ++ ")"
-  | Postulate(body, _) => "Post([" ++ String.concat(",", List.map(debugTerm, body)) ++ "])"
-  | Meta(_, _) => "Meta"
-  | Construct(_, _, _) => "Construct"
-  | BuilderError => "ERR"
+  | StringLit(s) => "StringLit(" ++ s ++ ")"
+  | Asc(l, r) => "Asc(" ++ debugTerm(l) ++ "," ++ debugTerm(r) ++ ")"
+  | Arrow(l, r) => "Arrow(" ++ debugTerm(l) ++ "," ++ debugTerm(r) ++ ")"
+  | Eq(l, r) => "Eq(" ++ debugTerm(l) ++ "," ++ debugTerm(r) ++ ")"
+  | Comma(l, r) => "Comma(" ++ debugTerm(l) ++ "," ++ debugTerm(r) ++ ")"
+  | BinOp(op, l, r) => "Binop(" ++ printBinop(op) ++ debugTerm(l) ++ "," ++ debugTerm(r) ++ ")"
+  | Ap(f, args) => "Ap(" ++ debugTerm(f) ++ "," ++ printList(List.map(debugTerm,args)) ++ ")"
+  | List(items) => "Id(" ++ ++ ")"
+  | Cons(heads, tail) => "Id(" ++ ++ ")"
+  | Fun(pat, body) => "Id(" ++ ++ ")"
+  | Match(scrut, branches) => "Id(" ++ ++ ")"
+  | Let(b, body) => "Id(" ++ ++ ")"
+  | If(c, t, e) => "Id(" ++ ++ ")"
+  | Postulate(body, _) => "Id(" ++ ++ ")"
+  | Meta(_, _) => "Id(" ++ ++ ")"
+  | Construct(_, _, _) => "Id(" ++ ++ ")"
+  | BuilderError => "Id(" ++ ++ ")"
   };
 };
 
+/* Pretty printer: produces readable output that round-trips through the parser.
+   The key insight: if t.meta.parens is true, wrap the whole result in parens.
+
+   Cases:
+   - Hole(true) prints as "" (synthetic, invisible)
+   - Hole(false) prints as "?"
+   - Ap(f, args): "f a1 a2" (space-separated)
+   - Asc(l, r): "l : r"
+   - List(items): "[a, b, c]" (comma-separated)
+   - Cons(heads, tail): "[h1, h2, ...tail]"
+   - Comma(l, r): "l, r"
+   - Fun(pat, body): "fun pat => body"
+   - Match(scrut, branches): "match s with | p1 => b1 | p2 => b2 end"
+   - If(c, t, e): "if c then t else e end"
+   - Let(binding, body): "let binding in body"
+   - BinOp(op, l, r): "l op r"
+   - Arrow(l, r): "l -> r"
+   - Eq(l, r): "l = r"
+   - Postulate/Meta/Construct: block syntax with newlines and "end" */
 let rec printTerm = (t: term): string => {
   let inner =
     switch (t.value) {
     | Shard(token) => printPrimaryToken(token)
-    | Hole(inserted) => inserted ? "" : "?"
-    | Identifier(v) => v
-    | StringLit(s) => "\"" ++ s ++ "\""
-    | Asc(left, right) =>
-      printTerm(left) ++ " : " ++ printTerm(right)
-    | Arrow(left, right) =>
-      printTerm(left) ++ " -> " ++ printTerm(right)
-    | Eq(left, right) =>
-      printTerm(left) ++ " = " ++ printTerm(right)
-    | Comma(left, right) =>
-      printTerm(left) ++ ", " ++ printTerm(right)
-    | BinOp(op, left, right) =>
-      printTerm(left) ++ " " ++ op ++ " " ++ printTerm(right)
-    | Ap(f, args) =>
-      printTerm(f) ++ " " ++ String.concat(" ", List.map(printTerm, args))
-    | List(items) =>
-      "[" ++ String.concat(", ", List.map(printTerm, items)) ++ "]"
-    | Cons(heads, tail) =>
-      "[" ++ String.concat(", ", List.map(printTerm, heads))
-      ++ (List.length(heads) > 0 ? ", " : "")
-      ++ "..." ++ printTerm(tail) ++ "]"
-    | Fun(pat, body) =>
-      "fun " ++ printTerm(pat) ++ " => " ++ printTerm(body)
-    | Match(scrut, branches) =>
-      "match " ++ printTerm(scrut) ++ " with"
-      ++ String.concat("", List.map(
-           ((p, b)) => " | " ++ printTerm(p) ++ " => " ++ printTerm(b),
-           branches,
-         ))
-      ++ " end"
-    | Let(binding, body) =>
-      "let " ++ printTerm(binding) ++ " in " ++ printTerm(body)
-    | If(cond, thenBr, elseBr) =>
-      "if " ++ printTerm(cond)
-      ++ " then " ++ printTerm(thenBr)
-      ++ " else " ++ printTerm(elseBr)
-      ++ " end"
-    | Postulate(body, rest) =>
-      "postulate "
-      ++ String.concat("\n", List.map(printTerm, body))
-      ++ " end"
-      ++ (switch (rest) { | None => "" | Some(r) => " " ++ printTerm(r) })
-    | Meta(body, rest) =>
-      "meta "
-      ++ String.concat("\n", List.map(printTerm, body))
-      ++ " end"
-      ++ (switch (rest) { | None => "" | Some(r) => " " ++ printTerm(r) })
-    | Construct(by, body, rest) =>
-      "construct " ++ printTerm(by) ++ " "
-      ++ String.concat("\n", List.map(printTerm, body))
-      ++ " end"
-      ++ (switch (rest) { | None => "" | Some(r) => " " ++ printTerm(r) })
+    | Hole(inserted) => failwith("TODO")
+    | Identifier(v) => failwith("TODO")
+    | StringLit(s) => failwith("TODO")
+    | Asc(left, right) => failwith("TODO")
+    | Arrow(left, right) => failwith("TODO")
+    | Eq(left, right) => failwith("TODO")
+    | Comma(left, right) => failwith("TODO")
+    | BinOp(op, left, right) => failwith("TODO")
+    | Ap(f, args) => failwith("TODO")
+    | List(items) => failwith("TODO")
+    | Cons(heads, tail) => failwith("TODO")
+    | Fun(pat, body) => failwith("TODO")
+    | Match(scrut, branches) => failwith("TODO")
+    | Let(binding, body) => failwith("TODO")
+    | If(cond, thenBr, elseBr) => failwith("TODO")
+    | Postulate(body, rest) => failwith("TODO")
+    | Meta(body, rest) => failwith("TODO")
+    | Construct(by, body, rest) => failwith("TODO")
     | BuilderError => "<BUILDER ERROR>"
     };
-  t.meta.parens ? "(" ++ inner ++ ")" : inner;
+  /* Wrap in parens if the meta flag says so */
+  failwith("TODO: use t.meta.parens");
 };
