@@ -185,6 +185,304 @@ and nameFromItems = (items: list(sharded(openForm))): string => {
   };
 }
 
+/* === Block-level builders === */
+
+/* Build an OL term from an openForm. OL terms are identifiers,
+   application, and holes — any ML construct produces OLHole as error recovery. */
+and buildOLTerm = (form: openForm): ol => {
+  let {left, leftUf: _, closed, rightUf: _, right} = form;
+
+  switch (left, closed, right) {
+  /* Atom: identifier */
+  | (None, CHead({value: TAtom(Identifier(v)), _} as tok), None) =>
+    {value: OLIdentifier(v), meta: metaFromRange(tok.start, tok.end_)}
+  /* Atom: hole */
+  | (None, CHead({value: TAtom(Hole), _} as tok), None) =>
+    {value: OLHole(User), meta: metaFromRange(tok.start, tok.end_)}
+  /* Named token as identifier (e.g. Sort) */
+  | (None, CHead({value: TNamed(name), _} as tok), None) =>
+    {value: OLIdentifier(name), meta: metaFromRange(tok.start, tok.end_)}
+  /* Parens: (...) — just recurse, preserving parens flag */
+  | (None, CMatch(_, _, {value: TNamed(")"), _}), None) =>
+    let (_, elementGroups) = collectBracketElements(closed);
+    switch (elementGroups) {
+    | [single] =>
+      let inner = buildOLTerms(single);
+      {...inner, meta: {...inner.meta, parens: true}}
+    | _ => mkOL(OLHole(Synthesized))
+    }
+  /* Application: left + head + right form an OLAp */
+  | (_, _, _) =>
+    let parts = buildOLLeftChild(form.left, form.leftUf)
+      @ [buildOLHead(closed)]
+      @ buildOLRightChild(form.rightUf, form.right);
+    combineOLTerms(parts)
+  };
+}
+
+and buildOLHead = (cf: closedForm): ol =>
+  switch (cf) {
+  | CHead({value: TAtom(Identifier(v)), _} as tok) =>
+    {value: OLIdentifier(v), meta: metaFromRange(tok.start, tok.end_)}
+  | CHead({value: TAtom(Hole), _} as tok) =>
+    {value: OLHole(User), meta: metaFromRange(tok.start, tok.end_)}
+  | CHead({value: TNamed(name), _} as tok) =>
+    {value: OLIdentifier(name), meta: metaFromRange(tok.start, tok.end_)}
+  | CMatch(_, _, {value: TNamed(")"), _}) =>
+    let (_, elementGroups) = collectBracketElements(cf);
+    switch (elementGroups) {
+    | [single] =>
+      let inner = buildOLTerms(single);
+      {...inner, meta: {...inner.meta, parens: true}}
+    | _ => mkOL(OLHole(Synthesized))
+    }
+  | _ => mkOL(OLHole(Synthesized))
+  }
+
+and buildOLLeftChild = (left, leftUf) =>
+  switch (left) {
+  | Some(f) => [buildOLTerm(f), ...buildOLUnforms(leftUf)]
+  | None => buildOLUnforms(leftUf)
+  }
+
+and buildOLRightChild = (rightUf, right) =>
+  switch (right) {
+  | Some(f) => buildOLUnforms(rightUf) @ [buildOLTerm(f)]
+  | None => buildOLUnforms(rightUf)
+  }
+
+and buildOLUnforms = (unforms): list(ol) =>
+  List.concat_map(
+    fun
+    | USecondary(_) => []
+    | UShard(_) => [],
+    unforms,
+  )
+
+and buildOLSharded =
+  fun
+  | Unform(_) => []
+  | Form(f) => [buildOLTerm(f)]
+
+/* Combine multiple OL items as OLAp (like combineTerms but for OL) */
+and combineOLTerms =
+  fun
+  | [] => mkOL(OLHole(Synthesized))
+  | [t] => t
+  | [first, ...rest] => {
+      let last = List.nth(rest, List.length(rest) - 1);
+      {value: OLAp(first, rest), meta: metaFromRange(first.meta.start, last.meta.end_)};
+    }
+
+/* Build OL terms from sharded items — like buildTerms but for OL */
+and buildOLTerms = (items: list(sharded(openForm))): ol =>
+  combineOLTerms(List.concat_map(buildOLSharded, items))
+
+/* Build a param from a closedForm that has the :p structure.
+   (name :p type) → CMatch(CMatch(CHead("("), nameItems, ":p"), typeItems, ")") */
+and buildParam = (cf: closedForm): param =>
+  switch (cf) {
+  | CMatch(CMatch(CHead({value: TNamed("("), _}), nameItems, {value: TNamed(":p"), _}), typeItems, {value: TNamed(")"), _}) =>
+    let name = nameFromItems(nameItems);
+    let paramType = buildOLTerms(typeItems);
+    {paramName: name, paramType, paramMeta: defaultMeta}
+  | _ =>
+    {paramName: "_", paramType: mkOL(OLHole(Synthesized)), paramMeta: defaultMeta}
+  }
+
+/* Build a decl directly from an openForm.
+   Declarations are either:
+   - name : retType  (: as infix)
+   - (name params...) : retType  (: as infix, lhs is paren group)
+   - bare name  (no colon, for construct blocks) */
+and buildDeclFromForm = (form: openForm): decl => {
+  let {left, leftUf, closed, rightUf, right} = form;
+
+  switch (closed) {
+  /* Infix : — this is a declaration with type annotation */
+  | CHead({value: TNamed(":"), _}) =>
+    let lhs = buildLeftChild(left, leftUf);
+    let retType = buildOLChild(rightUf, right);
+    switch (lhs.value) {
+    /* name : retType — no params */
+    | Identifier(name) =>
+      {declName: name, params: [], retType, declMeta: form |> formMeta}
+    /* (name params...) : retType — with params */
+    | Ap({value: Identifier(name), _}, paramExprs) when lhs.meta.parens =>
+      let params = List.map(extractParamFromML, paramExprs);
+      {declName: name, params, retType, declMeta: form |> formMeta}
+    | _ =>
+      {declName: "_", params: [], retType, declMeta: form |> formMeta}
+    }
+
+  /* Bare identifier — no colon */
+  | CHead({value: TAtom(Identifier(name)), _}) when left == None && right == None =>
+    {declName: name, params: [], retType: mkOL(OLHole(Synthesized)), declMeta: form |> formMeta}
+
+  /* Fallback */
+  | _ =>
+    {declName: "_", params: [], retType: mkOL(OLHole(Synthesized)), declMeta: form |> formMeta}
+  };
+}
+
+/* Extract an OL term from the right child of an openForm */
+and buildOLChild = (rightUf, right): ol =>
+  switch (right) {
+  | Some(f) =>
+    let ufs = buildOLUnforms(rightUf);
+    combineOLTerms(ufs @ [buildOLTerm(f)])
+  | None =>
+    combineOLTerms(buildOLUnforms(rightUf))
+  }
+
+/* Compute meta for a form from its children */
+and formMeta = (form: openForm): meta => {
+  /* Use buildLeftChild/buildChild to get position info, or default */
+  let start = switch (form.left) {
+  | Some(f) => (buildForm(f)).meta.start
+  | None => switch (form.closed) {
+    | CHead(tok) => tok.start
+    | CMatch(_, _, tok) => tok.start
+    }
+  };
+  let end_ = switch (form.right) {
+  | Some(f) => (buildForm(f)).meta.end_
+  | None => switch (form.closed) {
+    | CHead(tok) => tok.end_
+    | CMatch(_, _, tok) => tok.end_
+    }
+  };
+  {parens: false, start, end_};
+}
+
+/* Extract a param from an ML expression (used when lhs of : is a paren group
+   that was built via buildLeftChild, which goes through buildForm).
+   The ML Ap(Identifier(":"), [name, type]) inside a parens group = a param. */
+and extractParamFromML = (t: ml): param =>
+  switch (t.value) {
+  | Tuple([{value: Identifier(name), _}, typeExpr]) =>
+    {paramName: name, paramType: mlToOL(typeExpr), paramMeta: t.meta}
+  | Identifier(name) =>
+    {paramName: name, paramType: mkOL(OLHole(Synthesized)), paramMeta: t.meta}
+  | _ =>
+    {paramName: "_", paramType: mkOL(OLHole(Synthesized)), paramMeta: t.meta}
+  }
+
+/* Build a decl from a sharded item */
+and buildDeclFromSharded = (item: sharded(openForm)): option(decl) =>
+  switch (item) {
+  | Form(f) => Some(buildDeclFromForm(f))
+  | Unform(_) => None
+  }
+
+/* Scan meta block items for definitions.
+   schema keyword + definition → SchemaDef
+   name = rhs → LetDef (bare)
+   name : type = rhs → LetDef (annotated) */
+and buildMetaDefItems = (items: list(sharded(openForm))): list(metaDef) =>
+  scanMetaSharded(items)
+
+and scanMetaSharded = (items: list(sharded(openForm))): list(metaDef) =>
+  switch (items) {
+  | [] => []
+  /* schema keyword followed by a form → SchemaDef */
+  | [Form({left: None, leftUf: [], closed: CHead({value: TAtom(Identifier("schema")) | TNamed("schema"), _}), rightUf: [], right: None}), Form(defForm), ...rest] =>
+    [SchemaDef(buildBindingFromForm(defForm)), ...scanMetaSharded(rest)]
+  /* Regular form → LetDef */
+  | [Form(f), ...rest] =>
+    [buildMetaDefFromForm(f), ...scanMetaSharded(rest)]
+  /* Skip unforms */
+  | [Unform(_), ...rest] =>
+    scanMetaSharded(rest)
+  }
+
+/* Build a metaDef from an openForm (non-schema item in meta block) */
+and buildMetaDefFromForm = (form: openForm): metaDef =>
+  LetDef(buildBindingFromForm(form))
+
+/* Build a binding from an openForm that has = as infix, possibly with : annotation.
+   Patterns:
+   - name = rhs → bare binding
+   - name : type = rhs → annotated binding (the = has : infix on its left) */
+and buildBindingFromForm = (form: openForm): binding => {
+  let {left, leftUf, closed, rightUf, right} = form;
+
+  switch (closed) {
+  /* = as infix */
+  | CHead({value: TNamed("="), _}) =>
+    let lhs = buildLeftChild(left, leftUf);
+    let rhs = buildChild(rightUf, right);
+    switch (lhs.value) {
+    /* name : type = rhs — annotated */
+    | Ap({value: Identifier(":"), _}, [{value: Identifier(name), _}, typeExpr]) =>
+      let annotation = mlToType(typeExpr);
+      {name, annotation, rawAnnotation: Some(typeExpr), rhs, bindingMeta: defaultMeta}
+    /* name = rhs — bare */
+    | Identifier(name) =>
+      {name, annotation: None, rawAnnotation: None, rhs, bindingMeta: defaultMeta}
+    | _ =>
+      {name: "_", annotation: None, rawAnnotation: None, rhs: lhs, bindingMeta: defaultMeta}
+    }
+  /* Fallback — not an = form, treat the whole thing as rhs */
+  | _ =>
+    let t = buildForm(form);
+    {name: "_", annotation: None, rawAnnotation: None, rhs: t, bindingMeta: defaultMeta}
+  };
+}
+
+/* Build a block value from a keyword, contents, and optional rest.
+   Produces block values directly — no __postulate/__meta/__construct encoding. */
+and buildBlockFromForm = (keyword: string, contents: list(sharded(openForm))): block =>
+  switch (keyword) {
+  | "postulate" =>
+    let decls = List.filter_map(buildDeclFromSharded, contents);
+    Postulate(decls)
+  | "meta" =>
+    let defs = buildMetaDefItems(contents);
+    Meta(defs)
+  | "construct" | "by" =>
+    /* For construct: first item is the schema name (from `by`), rest are decls.
+       For by: contents already include name + decls. */
+    switch (contents) {
+    | [Form({left: None, leftUf: [], closed: CHead({value: TAtom(Identifier(name)), _}), rightUf: [], right: None}), ...declItems]
+    | [Form({left: None, leftUf: [], closed: CHead({value: TNamed(name), _}), rightUf: [], right: None}), ...declItems] =>
+      let decls = List.filter_map(buildDeclFromSharded, declItems);
+      Construct(name, decls)
+    | _ =>
+      Construct("_", List.filter_map(buildDeclFromSharded, contents))
+    }
+  | _ => Postulate([])
+  }
+
+/* Walk the CMatch structure to collect blocks for a program.
+   Similar to buildBlocks but produces block values. */
+and collectBlocks = (form: closedForm, contents: list(sharded(openForm))): list(block) =>
+  switch (form) {
+  | CHead({value: TNamed(keyword), _}) =>
+    [buildBlockFromForm(keyword, contents)]
+  | CMatch(inner, innerItems, {value: TNamed(keyword), _}) =>
+    collectBlocks(inner, innerItems) @ [buildBlockFromForm(keyword, contents)]
+  | _ => []
+  }
+
+/* Top-level entry point: walk the forms and produce a program (list of blocks). */
+and buildProgram = (forms: list(sharded(openForm))): program => {
+  /* At the top level, the forms should contain block structures terminated by end.
+     The structure is: CMatch(blockChain, lastBlockContents, "end") */
+  let blocks = List.concat_map(
+    fun
+    | Form(form) =>
+      switch (form.closed) {
+      | CMatch(inner, innerItems, {value: TNamed("end"), _}) =>
+        collectBlocks(inner, innerItems)
+      | _ => []
+      }
+    | Unform(_) => [],
+    forms,
+  );
+  blocks;
+}
+
 /* === Main expression builder === */
 
 and buildTerms = (fs: list(sharded(openForm))): ml =>
