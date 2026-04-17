@@ -77,7 +77,7 @@ build-proofs : (Term -> ((List Term) -> ((List Term) -> (List Term)))) = fun mva
         cv
         (either-inl Unit prev-type mvar f prev-elim star)
         (const-beta Unit mvar cv star)) in
-      let inl-triple = (inl-proof, (inl Unit prev-type star), cv) in
+      let inl-triple = (inl-proof, ((inl Unit prev-type star), cv)) in
       -- Wrap existing triples with inr:
       -- Wrap existing triples with inr:
       let wrapped = (reverse-triples (foldl (fun a => fun triple =>
@@ -90,10 +90,10 @@ build-proofs : (Term -> ((List Term) -> ((List Term) -> (List Term)))) = fun mva
           old-tc
           (either-inr Unit prev-type mvar f prev-elim old-inj)
           old-proof) in
-        (new-proof, (inr Unit prev-type old-inj), old-tc) :: a
+        (new-proof, ((inr Unit prev-type old-inj), old-tc)) :: a
       ) [] prev-triples)) in
       ((inl-triple :: wrapped, cur-elim), cur-type)
-    ) (([((const-beta Unit mvar last-cv star), star, last-cv)],
+    ) (([((const-beta Unit mvar last-cv star), (star, last-cv))],
         (const Unit mvar last-cv)), Unit) remaining-cvs) in
     -- Extract just the proof terms
     (reverse (foldl (fun acc => fun triple =>
