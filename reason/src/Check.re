@@ -368,22 +368,36 @@ let mlBuiltins: context =
 
 /* Check a single declaration line: (name (p1:T1) ...) : RetType */
 let rec checkDeclLine = (ctx: context, d: decl): staticInfo => {
-  /* Build a context with parameters */
-  let paramCtx = List.fold_left(
-    (acc, p: param) =>
-      StringMap.add(p.paramName, OL(Some(([], p.paramType))), acc),
-    ctx,
-    d.params,
-  );
-  /* Check retType is well-formed in that context */
+  /* Matches typeDeclaration in the formalism:
+       typeArgs(Γ[x ā : T])(ā)
+       typeTerm(Γ[x ā : T][ā])(T)(T')
+       ⊢ typeDeclaration(Γ)(x ā : T)
+     The declaration x ā : T is added to Γ before checking its own
+     parameter types and return type, so the constructor's name is in
+     scope inside its own signature. Each parameter's type is itself
+     checked as a well-formed term; the parameter binding is added to
+     the context before the next parameter is checked, supporting
+     dependent parameter types. */
+  let paramPairs =
+    List.map((p: param) => (Some(p.paramName), p.paramType), d.params);
+  let selfBinding = OL(Some((paramPairs, d.retType)));
+  let selfCtx = StringMap.add(d.declName, selfBinding, ctx);
+  /* typeArgs: check each param's type, accumulate param bindings */
+  let (paramInfo, paramCtx) =
+    List.fold_left(
+      ((accInfo, accCtx), p: param) => {
+        let typeInfo = checkOLTerm(accCtx, Expression(Some(olHole)), p.paramType);
+        let newCtx =
+          StringMap.add(p.paramName, OL(Some(([], p.paramType))), accCtx);
+        (mergeInfos(accInfo, typeInfo), newCtx);
+      },
+      (emptyInfo, selfCtx),
+      d.params,
+    );
+  /* typeTerm: check retType in Γ[x ā : T][ā] */
   let retInfo = checkOLTerm(paramCtx, Expression(Some(olHole)), d.retType);
-  /* Build the fullType for this declaration */
-  let paramPairs = List.map(
-    (p: param) => (Some(p.paramName), p.paramType),
-    d.params,
-  );
-  let bindings = StringMap.singleton(d.declName, OL(Some((paramPairs, d.retType))));
-  {...retInfo, bindings};
+  let bindings = StringMap.singleton(d.declName, selfBinding);
+  {...mergeInfos(paramInfo, retInfo), bindings};
 }
 
 /* Check an OL term (used for declaration types in postulate/construct) */
@@ -1052,8 +1066,13 @@ let runConstructSchema =
                   d.params,
                 );
               let expectedType = resolveWithParams(substEnv, d.retType);
+              /* Apply [x_j ↦ t_j] substitutions from earlier witnesses to the
+                 current witness body too, matching the formalism's
+                 [x ↦ t][w̄] where the substitution reaches into both
+                 subsequent declarations and subsequent witness terms. */
+              let witnessOL = resolveWithParams(substEnv, mlToOL(witness));
               let witnessInfo =
-                checkOLTerm(witnessCtx, Expression(Some(expectedType)), mlToOL(witness));
+                checkOLTerm(witnessCtx, Expression(Some(expectedType)), witnessOL);
               let paramNames = List.map((p: param) => p.paramName, d.params);
               let newSubstEnv =
                 StringMap.add(d.declName, (paramNames, witness), substEnv);

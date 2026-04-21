@@ -1808,3 +1808,174 @@ describe('paren-wrapped meta ranges', () => {
     expect(slice.endsWith('(to N N))')).toBe(true);
   });
 });
+
+/* ------------------------------------------------------------------ */
+/*  Argument type well-formedness                                      */
+/*  Every term in the program must be checked — including the types    */
+/*  of declaration parameters. The typeArgs judgment in the formalism  */
+/*  requires each parameter's type to itself be a well-formed term.    */
+/* ------------------------------------------------------------------ */
+
+describe('argument type well-formedness', () => {
+  it('rejects unbound identifier in a parameter type', () => {
+    const msgs = errorMessages('postulate\n(f (a : undeclared)) : Sort\nend');
+    expect(msgs.some(m => m.includes('Unbound') && m.includes('undeclared'))).toBe(true);
+  });
+
+  it('rejects arity error in a parameter type', () => {
+    const msgs = errorMessages(
+      'postulate\nN : Sort\n(f (a : (N extra))) : Sort\nend'
+    );
+    expect(msgs.some(m => m.includes('Too many'))).toBe(true);
+  });
+
+  it('rejects inconsistency inside a parameter type', () => {
+    // (P (x : N)) takes N, not Sort.
+    const msgs = errorMessages(
+      'postulate\nN : Sort\n(P (x : N)) : Sort\n(f (a : (P Sort))) : Sort\nend'
+    );
+    expect(msgs.some(m => m.includes('Inconsistency'))).toBe(true);
+  });
+
+  it('rejects parameter type referencing a name declared later in the block', () => {
+    // `later` is declared after `f`, so not in scope when checking f.
+    const msgs = errorMessages(
+      'postulate\n(f (a : later)) : Sort\nlater : Sort\nend'
+    );
+    expect(msgs.some(m => m.includes('Unbound') && m.includes('later'))).toBe(true);
+  });
+
+  it('accepts a well-formed parameter type', () => {
+    expect(errors('postulate\nN : Sort\n(f (a : N)) : Sort\nend')).toEqual([]);
+  });
+
+  it('accepts dependent parameter types (later arg references earlier arg)', () => {
+    expect(errors('postulate\n(f (A : Sort) (a : A)) : A\nend')).toEqual([]);
+  });
+
+  it('accepts chained dependencies across multiple parameters', () => {
+    expect(errors(
+      'postulate\n(f (A : Sort) (B : Sort) (a : A) (b : B)) : Sort\nend'
+    )).toEqual([]);
+  });
+
+  it('checks parameter types inside construct-block declarations', () => {
+    const msgs = errorMessages([
+      'postulate',
+      'N : Sort',
+      'meta',
+      'schema s = fun xs => match xs with | _ => (Error "bad") end',
+      'construct by s',
+      '(f (a : undeclared)) : N',
+      'end',
+    ].join('\n'));
+    expect(msgs.some(m => m.includes('Unbound') && m.includes('undeclared'))).toBe(true);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/*  Self-reference in declarations                                     */
+/*  The typeDeclaration judgment places the declaration x ā : T into   */
+/*  Γ when checking its own args and return type, so the constructor's */
+/*  name is in scope inside its own signature.                         */
+/* ------------------------------------------------------------------ */
+
+describe('self-reference in declarations', () => {
+  it('accepts self-reference in the return type', () => {
+    // H : (x : Sort) → (H x) — H applied in its own retType.
+    expect(errors('postulate\n(H (x : Sort)) : (H x)\nend')).toEqual([]);
+  });
+
+  it('accepts self-reference in a zero-ary declaration (F : F)', () => {
+    // The degenerate case — the decl's type is its own name.
+    expect(errors('postulate\nF : F\nend')).toEqual([]);
+  });
+
+  it('name is in scope for parameter types (no Unbound error)', () => {
+    // F takes one arg; its param type mentions F itself. With self-ref the
+    // name resolves (even if arity still produces other errors).
+    const msgs = errorMessages('postulate\n(F (x : F)) : Sort\nend');
+    expect(msgs.every(m => !m.includes('Unbound'))).toBe(true);
+  });
+
+  it('still rejects arity errors in self-reference', () => {
+    // F takes one arg, but retType uses F with two.
+    const msgs = errorMessages('postulate\n(F (x : Sort)) : (F x x)\nend');
+    expect(msgs.some(m => m.includes('Too many'))).toBe(true);
+  });
+
+  it('still rejects unbound non-self names even when self is in scope', () => {
+    const msgs = errorMessages('postulate\n(F (x : Sort)) : (F other)\nend');
+    expect(msgs.some(m => m.includes('Unbound') && m.includes('other'))).toBe(true);
+  });
+
+  it('self-reference works inside a construct-block declaration', () => {
+    // Same shape as the postulate version, but inside construct.
+    // Schema is intentionally the error branch so we test that the
+    // decl well-formedness pass does not emit Unbound for Rec.
+    const code = [
+      'postulate',
+      'N : Sort',
+      'meta',
+      'schema s = fun xs => match xs with | _ => (Error "bad") end',
+      'construct by s',
+      '(Rec (x : N)) : (Rec x)',
+      'end',
+    ].join('\n');
+    const msgs = errorMessages(code);
+    expect(msgs.every(m => !m.includes('Unbound') || !m.includes('Rec'))).toBe(true);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/*  Witness substitution (matching the typeWitnesses formalism)        */
+/*  [x ↦ t] is applied to all of w̄ — param types, return types, AND    */
+/*  witness bodies. A schema-generated witness that references an      */
+/*  earlier declared name resolves to the witness of that name.        */
+/* ------------------------------------------------------------------ */
+
+describe('witness substitution in construct blocks', () => {
+  it('substitutes earlier witness into later decl return type', () => {
+    // Schema witnesses a (the type) as N, and b (of type a) as zero.
+    // For b's check, expected type is a[witness] = N, and zero : N. OK.
+    const code = [
+      'postulate',
+      'N : Sort',
+      'zero : N',
+      'end',
+      'meta',
+      'schema wrap = fun xs => match xs with',
+      '  | [(_, [], _), (_, [], _)] => (Ok [N, zero])',
+      '  | _ => (Error "bad")',
+      '  end',
+      'construct by wrap',
+      'a : Sort',
+      'b : a',
+      'end',
+    ].join('\n');
+    expect(errors(code)).toEqual([]);
+  });
+
+  it('substitutes earlier witness into later witness body', () => {
+    // The schema produces as the second witness the identifier of the FIRST
+    // decl (name1). Without body substitution, name1 would be unbound in
+    // the witness-check context. With [name1 ↦ zero] substitution, it
+    // becomes zero : N. OK.
+    const code = [
+      'postulate',
+      'N : Sort',
+      'zero : N',
+      'end',
+      'meta',
+      'schema echo = fun xs => match xs with',
+      '  | [(name1, [], _), (_, [], _)] => (Ok [zero, name1])',
+      '  | _ => (Error "bad")',
+      '  end',
+      'construct by echo',
+      'a : N',
+      'b : N',
+      'end',
+    ].join('\n');
+    expect(errors(code)).toEqual([]);
+  });
+});
