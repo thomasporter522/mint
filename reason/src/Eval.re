@@ -10,7 +10,7 @@ module StringMap = Map.Make(String);
 
 type mlValue =
   | Val(term)
-  | Closure(evalEnv, term, term)  /* env, pattern, body */
+  | Closure(ref(evalEnv), term, term)  /* env (ref for recursion knot-tying), pattern, body */
 and evalEnv = StringMap.t(mlValue);
 
 type evalResult =
@@ -189,7 +189,7 @@ let rec evalExpr = (env: evalEnv, t: term): evalResult =>
     }
 
   | Fun(pat, body) =>
-    Ok(Closure(env, pat, body))
+    Ok(Closure(ref(env), pat, body))
 
   | Ap(f, args) =>
     switch (evalExpr(env, f)) {
@@ -278,7 +278,7 @@ and evalApp = (env: evalEnv, fVal: mlValue, args: list(term)): evalResult =>
     | Ok(argVal) =>
       switch (matchPat(StringMap.empty, pat, argVal)) {
       | Some(bindings) =>
-        let bodyEnv = StringMap.union((_, _, v) => Some(v), closureEnv, bindings);
+        let bodyEnv = StringMap.union((_, _, v) => Some(v), closureEnv^, bindings);
         evalExpr(bodyEnv, body);
       | None => Err("Pattern match failed in function application")
       }
@@ -431,7 +431,7 @@ let runSchema = (schemaVal: mlValue, decls: list(term)): schemaResult => {
     let sigList = Val(sigListTerm);
     switch (matchPat(StringMap.empty, pat, sigList)) {
     | Some(bindings) =>
-      let bodyEnv = StringMap.union((_, _, v) => Some(v), closureEnv, bindings);
+      let bodyEnv = StringMap.union((_, _, v) => Some(v), closureEnv^, bindings);
       switch (evalExpr(bodyEnv, body)) {
       | Ok(Val({value: Ap({value: Identifier("Ok"), _}, [{value: List(witnesses), _}]), _})) =>
         Witnesses(witnesses)

@@ -529,12 +529,17 @@ and checkTerm = (ctx: context, mode: checkingMode, t: term): staticInfo =>
             Eval.StringMap.empty,
             metaDefsRef^,
           );
-          let evalEnv = Eval.StringMap.map(
-            fun
-            | Eval.Closure(_, pat, body) => Eval.Closure(rawEnv, pat, body)
-            | v => v,
+          /* Tie the recursive knot: each closure's env-ref is redirected to
+             rawEnv so recursive and mutually recursive references resolve. */
+          Eval.StringMap.iter(
+            (_, v) =>
+              switch (v) {
+              | Eval.Closure(envRef, _, _) => envRef := rawEnv
+              | _ => ()
+              },
             rawEnv,
           );
+          let evalEnv = rawEnv;
           switch (Eval.evalExpr(evalEnv, schemaBody)) {
           | Eval.Ok(schemaVal) =>
             switch (Eval.runSchema(schemaVal, body)) {

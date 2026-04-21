@@ -1484,3 +1484,231 @@ describe('ML type display round-trip', () => {
     expect(roundTripped).toBe(goalStr);
   });
 });
+
+/* ------------------------------------------------------------------ */
+/*  Typed-SK abstraction schema                                        */
+/*  Tests the recursive [x]e SK abstraction from examples/typed-SK.    */
+/*  Exercises meta-level recursion through knot-tying of closure envs. */
+/* ------------------------------------------------------------------ */
+
+describe('typed-SK abstraction schema', () => {
+  // Postulates + recursive abs function + abstraction schema, parameterized
+  // by extra postulates to keep the preamble reusable.
+  function preamble(extraPostulates: string[] = []): string[] {
+    return [
+      'postulate',
+      'U : Sort',
+      '(eq (A : U) (B : U) (a : A) (b : B)) : U',
+      '(refl (A : U) (a : A)) : (eq A A a a)',
+      '(trans (A : U) (a : A) (b : A) (c : A) (e1 : (eq A A a b)) (e2 : (eq A A b c))) : (eq A A a c)',
+      '(to (A : U) (B : U)) : U',
+      '(ap (A : U) (B : U) (f : (to A B)) (a : A)) : B',
+      '(cong-ap (A : U) (B : U) (f : (to A B)) (g : (to A B)) (a : A) (b : A)',
+      '         (ef : (eq (to A B) (to A B) f g)) (ea : (eq A A a b))) :',
+      '  (eq B B (ap A B f a) (ap A B g b))',
+      '(K (A : U) (B : U)) : (to A (to B A))',
+      '(S (A : U) (B : U) (C : U)) : (to (to A (to B C)) (to (to A B) (to A C)))',
+      '(K-eq (A : U) (B : U) (x : A) (y : B)) : (eq A A (ap B A (ap A (to B A) (K A B) x) y) x)',
+      '(S-eq (A : U) (B : U) (C : U) (f : (to A (to B C))) (g : (to A B)) (x : A)) :',
+      '  (eq C C',
+      '    (ap A C',
+      '      (ap (to A B) (to A C)',
+      '        (ap (to A (to B C)) (to (to A B) (to A C)) (S A B C) f)',
+      '        g)',
+      '      x)',
+      '    (ap B C (ap A (to B C) f x) (ap A B g x)))',
+      'N : U',
+      'plus : (to N (to N N))',
+      ...extraPostulates,
+      'meta',
+      'abs = fun x => fun e => fun A => fun B =>',
+      '  if e == x',
+      '  then (',
+      '      (ap (to A (to A A)) (to A A)',
+      '        (ap (to A (to (to A A) A)) (to (to A (to A A)) (to A A))',
+      '          (S A (to A A) A)',
+      '          (K A (to A A)))',
+      '        (K A A))',
+      '    ,',
+      '      (trans A',
+      '        (ap A A',
+      '          (ap (to A (to A A)) (to A A)',
+      '            (ap (to A (to (to A A) A)) (to (to A (to A A)) (to A A))',
+      '              (S A (to A A) A)',
+      '              (K A (to A A)))',
+      '            (K A A))',
+      '          x)',
+      '        (ap (to A A) A',
+      '          (ap A (to (to A A) A) (K A (to A A)) x)',
+      '          (ap A (to A A) (K A A) x))',
+      '        x',
+      '        (S-eq A (to A A) A (K A (to A A)) (K A A) x)',
+      '        (K-eq A (to A A) x (ap A (to A A) (K A A) x)))',
+      '    )',
+      '  else match e with',
+      '  | (ap Aprime Bprime f a) =>',
+      '      let f-res = (abs x f A (to Aprime B)) in',
+      '      let a-res = (abs x a A Aprime) in',
+      '      let fw = (fst f-res) in',
+      '      let fp = (snd f-res) in',
+      '      let aw = (fst a-res) in',
+      '      let ap2 = (snd a-res) in',
+      '      let witness =',
+      '        (ap (to A Aprime) (to A B)',
+      '          (ap (to A (to Aprime B)) (to (to A Aprime) (to A B))',
+      '            (S A Aprime B)',
+      '            fw)',
+      '          aw) in',
+      '      let proof =',
+      '        (trans B',
+      '          (ap A B witness x)',
+      '          (ap Aprime B (ap A (to Aprime B) fw x) (ap A Aprime aw x))',
+      '          (ap Aprime B f a)',
+      '          (S-eq A Aprime B fw aw x)',
+      '          (cong-ap Aprime B',
+      '            (ap A (to Aprime B) fw x)',
+      '            f',
+      '            (ap A Aprime aw x)',
+      '            a',
+      '            fp',
+      '            ap2)) in',
+      '      (witness, proof)',
+      '  | _ => ((ap B (to A B) (K B A) e), (K-eq B A e x))',
+      '  end',
+      '  end',
+      'schema abstraction = fun s => match s with',
+      '  | [(f, [], (to A B)), (_, [(x, _)], (eq _ _ (ap _ _ f x) body))] =>',
+      '      let result = (abs x body A B) in',
+      '      (Ok [(fst result), (snd result)])',
+      '  | _ => (Error "abstraction: expected (f : to A B) and (f-beta (x : A) : eq B B (ap A B f x) body)")',
+      '  end',
+    ];
+  }
+
+  /* --- Positive cases: abstraction synthesizes correct combinators --- */
+
+  it('identity: [n]n uses the I case', () => {
+    const code = [
+      ...preamble(),
+      'construct by abstraction',
+      'id : (to N N)',
+      '(id-beta (n : N)) : (eq N N (ap N N id n) n)',
+      'end',
+    ].join('\n');
+    expect(errors(code)).toEqual([]);
+  });
+
+  it('constant function: [n]zero uses the K case', () => {
+    const code = [
+      ...preamble(['zero : N']),
+      'construct by abstraction',
+      'k-zero : (to N N)',
+      '(k-zero-beta (n : N)) : (eq N N (ap N N k-zero n) zero)',
+      'end',
+    ].join('\n');
+    expect(errors(code)).toEqual([]);
+  });
+
+  it('double: [n]plus n n exercises two-level recursion', () => {
+    const code = [
+      ...preamble(),
+      'construct by abstraction',
+      'double : (to N N)',
+      '(double-beta (n : N)) : (eq N N (ap N N double n) (ap N N (ap N (to N N) plus n) n))',
+      'end',
+    ].join('\n');
+    expect(errors(code)).toEqual([]);
+  });
+
+  it('sequenced abstraction: triple built from double', () => {
+    const code = [
+      ...preamble(),
+      'construct by abstraction',
+      'double : (to N N)',
+      '(double-beta (n : N)) : (eq N N (ap N N double n) (ap N N (ap N (to N N) plus n) n))',
+      '',
+      'construct by abstraction',
+      'triple : (to N N)',
+      '(triple-beta (n : N)) : (eq N N (ap N N triple n) (ap N N (ap N (to N N) plus n) (ap N N double n)))',
+      'end',
+    ].join('\n');
+    expect(errors(code)).toEqual([]);
+  });
+
+  it('deeper body: [n]plus (plus n n) n requires depth-3 recursion', () => {
+    const code = [
+      ...preamble(),
+      'construct by abstraction',
+      'deep : (to N N)',
+      '(deep-beta (n : N)) : (eq N N (ap N N deep n) (ap N N (ap N (to N N) plus (ap N N (ap N (to N N) plus n) n)) n))',
+      'end',
+    ].join('\n');
+    expect(errors(code)).toEqual([]);
+  });
+
+  /* --- Negative cases: pattern must reject malformed beta declarations --- */
+
+  it('rejects equation whose LHS is not an application', () => {
+    // (eq (to N N) (to N N) not-abs double) — LHS is a bare identifier,
+    // not (ap A B f x), so the schema pattern must not match.
+    const code = [
+      ...preamble(),
+      'construct by abstraction',
+      'double : (to N N)',
+      '(double-beta (n : N)) : (eq N N (ap N N double n) (ap N N (ap N (to N N) plus n) n))',
+      '',
+      'construct by abstraction',
+      'not-abs : (to N N)',
+      '(not-abs-beta (n : N)) : (eq (to N N) (to N N) not-abs double)',
+      'end',
+    ].join('\n');
+    const msgs = errorMessages(code);
+    expect(msgs).toEqual(
+      expect.arrayContaining([expect.stringContaining('abstraction: expected')]),
+    );
+    // Must NOT report ill-typed witnesses — the pattern should reject before evaluation.
+    expect(msgs.every(m => !m.includes('ill-typed witnesses'))).toBe(true);
+  });
+
+  it('rejects equation whose applied function is not the defined name', () => {
+    // LHS is (ap N N plus n), but the defined function is `f`, not `plus`.
+    // Nonlinear pattern match on f must fail.
+    const code = [
+      ...preamble(),
+      'construct by abstraction',
+      'f : (to N N)',
+      '(f-beta (n : N)) : (eq N N (ap N N plus n) n)',
+      'end',
+    ].join('\n');
+    const msgs = errorMessages(code);
+    expect(msgs).toEqual(
+      expect.arrayContaining([expect.stringContaining('abstraction: expected')]),
+    );
+  });
+
+  it('rejects equation whose applied argument is not the equation parameter', () => {
+    // LHS is (ap N N f other), but the equation parameter is `n`.
+    const code = [
+      ...preamble(['other : N']),
+      'construct by abstraction',
+      'f : (to N N)',
+      '(f-beta (n : N)) : (eq N N (ap N N f other) n)',
+      'end',
+    ].join('\n');
+    const msgs = errorMessages(code);
+    expect(msgs).toEqual(
+      expect.arrayContaining([expect.stringContaining('abstraction: expected')]),
+    );
+  });
+
+  it('rejects construct block with only one declaration', () => {
+    const code = [
+      ...preamble(),
+      'construct by abstraction',
+      'solo : (to N N)',
+      'end',
+    ].join('\n');
+    const msgs = errorMessages(code);
+    expect(msgs.length).toBeGreaterThan(0);
+  });
+});
