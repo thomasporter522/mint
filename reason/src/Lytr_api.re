@@ -27,16 +27,16 @@ let displayBinding = (name: string, ft: fullType): ml => {
           | None => mkML(Hole(Synthesized))
           };
         let paramML = embedOL(ty);
-        let t = mkML(Ap(mkML(Identifier(":")), [n, paramML]));
+        let t = mkML(Asc(n, paramML));
         {...t, meta: {...t.meta, parens: true}};
       },
       params,
     );
   switch (paramTerms) {
-  | [] => mkML(Ap(mkML(Identifier(":")), [nameTerm, retML]))
+  | [] => mkML(Asc(nameTerm, retML))
   | _ =>
     let spine = mkML(Ap(nameTerm, paramTerms));
-    mkML(Ap(mkML(Identifier(":")), [spine, retML]));
+    mkML(Asc(spine, retML));
   };
 };
 
@@ -84,8 +84,21 @@ external makeJsResult:
 
 /* === Pipeline === */
 
+/* Collect "Unexpected token" errors for top-level shards (unmatched tokens). */
+let shardErrors = (forms: list(sharded(openForm))): list(Error.error) =>
+  List.filter_map(
+    fun
+    | Unform(UShard(tok)) when tok.start >= 0 =>
+      Some(Error.mark("Unexpected token", tok.start, tok.end_))
+    | _ => None,
+    forms,
+  );
+
 let processCode = (code: string): jsResult => {
-  let statics = getStatics(build(parse(g, lex(g, code))));
+  let forms = parse(g, lex(g, code));
+  let prog = buildProgram(forms);
+  let baseStatics = checkProgram(StringMap.empty, prog);
+  let statics = {...baseStatics, errors: baseStatics.errors @ shardErrors(forms)};
 
   let errors =
     Array.of_list(
@@ -133,11 +146,19 @@ let checkSchemaCode = (code: string): jsMLResult => {
   };
 };
 
-let parseAndPrint = (code: string): string =>
-  Print.printML(build(parse(g, lex(g, code))));
+let parseAndPrint = (code: string): string => {
+  let forms = parse(g, lex(g, code));
+  let prog = buildProgram(forms);
+  switch (prog) {
+  | [] => Print.printML(build(forms))
+  | _ => Print.printProgram(prog)
+  };
+};
 
-let parseAndDebug = (code: string): string =>
-  Print.debugML(build(parse(g, lex(g, code))));
+let parseAndDebug = (code: string): string => {
+  let forms = parse(g, lex(g, code));
+  Print.debugML(build(forms));
+};
 
 /* ML evaluation */
 type jsEvalResult;

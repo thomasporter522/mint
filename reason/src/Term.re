@@ -81,6 +81,7 @@ type cML =
   | Identifier(string)                       /* x — could be OL or ML, resolved by checker */
   | StringLit(string)
   | Tuple(list(ml))                          /* (a, b, c) */
+  | Asc(ml, ml)                              /* x : T — ascription (mostly syntactic) */
   | BinOp(binOp, ml, ml)                     /* a == b, a && b, etc. */
   | Ap(ml, list(ml))                         /* f x y — could be OL or ML application */
   | List(list(ml))                           /* [a, b, c] */

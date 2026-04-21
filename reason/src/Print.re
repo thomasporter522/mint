@@ -91,26 +91,16 @@ let rec printML = (t: ml): string => {
     | StringLit(s) => "\"" ++ s ++ "\""
     | Tuple(items) =>
       String.concat(", ", List.map(printML, items))
+    | Asc(l, r) =>
+      printML(l) ++ " : " ++ printML(r)
     | BinOp(op, left, right) =>
       printML(left) ++ " " ++ printBinOp(op) ++ " " ++ printML(right)
-    /* Infix operators encoded as Ap(Identifier(op), [l, r]) */
-    | Ap({value: Identifier(":"), _}, [l, r]) =>
-      printML(l) ++ " : " ++ printML(r)
+    /* Infix operators encoded as Ap(Identifier(op), [l, r]) — produced
+       by the catch-all in buildForm for operators like ->, =, etc. */
     | Ap({value: Identifier("->"), _}, [l, r]) =>
       printML(l) ++ " -> " ++ printML(r)
     | Ap({value: Identifier("="), _}, [l, r]) =>
       printML(l) ++ " = " ++ printML(r)
-    /* Block encodings */
-    | Ap({value: Identifier("__seq"), _}, [first, rest]) =>
-      printML(first) ++ " " ++ printML(rest)
-    | Ap({value: Identifier("__postulate"), _}, items) =>
-      "postulate " ++ String.concat("\n", List.map(printML, items)) ++ " end"
-    | Ap({value: Identifier("__meta"), _}, items) =>
-      "meta " ++ String.concat("\n", List.map(printML, items)) ++ " end"
-    | Ap({value: Identifier("__construct"), _}, [{value: Identifier(name), _}, ...items]) =>
-      "construct by " ++ name ++ " " ++ String.concat("\n", List.map(printML, items)) ++ " end"
-    | Ap({value: Identifier("__construct"), _}, items) =>
-      "construct " ++ String.concat("\n", List.map(printML, items)) ++ " end"
     | Ap(f, args) =>
       printML(f) ++ " " ++ String.concat(" ", List.map(printML, args))
     | List(items) =>
@@ -154,6 +144,8 @@ let rec debugML = (t: ml): string => {
   | StringLit(s) => "Str(" ++ s ++ ")"
   | Tuple(items) =>
     p ++ "Tuple(" ++ String.concat(",", List.map(debugML, items)) ++ ")"
+  | Asc(l, r) =>
+    p ++ "Asc(" ++ debugML(l) ++ "," ++ debugML(r) ++ ")"
   | BinOp(op, l, r) =>
     p ++ "BinOp(" ++ printBinOp(op) ++ "," ++ debugML(l) ++ "," ++ debugML(r) ++ ")"
   | Ap(f, args) =>
@@ -205,16 +197,16 @@ let printMetaDef = (d: metaDef): string =>
 let printBlock = (b: block): string =>
   switch (b) {
   | Postulate(decls) =>
-    "postulate\n" ++ String.concat("\n", List.map(printDecl, decls))
+    "postulate " ++ String.concat("\n", List.map(printDecl, decls)) ++ " end"
   | Meta(defs) =>
-    "meta\n" ++ String.concat("\n", List.map(printMetaDef, defs))
+    "meta " ++ String.concat("\n", List.map(printMetaDef, defs)) ++ " end"
   | Construct(schemaName, decls) =>
-    "construct by " ++ schemaName ++ "\n"
-    ++ String.concat("\n", List.map(printDecl, decls))
+    "construct by " ++ schemaName ++ " "
+    ++ String.concat("\n", List.map(printDecl, decls)) ++ " end"
   };
 
 let printProgram = (p: program): string =>
-  String.concat("\n", List.map(printBlock, p));
+  String.concat(" ", List.map(printBlock, p));
 
 /* --- Backward-compatible aliases --- */
 

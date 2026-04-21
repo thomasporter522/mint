@@ -251,22 +251,6 @@ let ensureMode = (allowed, mode, from, to_) =>
 
 /* --- Extracting params (name + type) from OL arg list --- */
 
-let extractParams = (args: list(ol)): list((option(string), ol)) =>
-  List.map(
-    (arg: ol) =>
-      switch (arg.value) {
-      | OLAp({value: OLIdentifier(":"), _}, [name, ty]) =>
-        let paramName =
-          switch (name.value) {
-          | OLIdentifier(v) => Some(v)
-          | _ => None
-          };
-        (paramName, ty);
-      | _ => (None, arg)
-      },
-    args,
-  );
-
 /* === ML type utilities === */
 
 let addParens = (t: ml): ml =>
@@ -380,58 +364,10 @@ let mlBuiltins: context =
     ],
   );
 
-/* === Helpers: parse ML-encoded declarations and meta defs === */
-
-/* Parse an ML-encoded declaration back to a decl.
-   Encoding: Ap(Identifier(":"), [lhs, retType])
-   where lhs is Identifier(name) or Ap(Identifier(name), [param1, ...])
-   and each param is Ap(Identifier(":"), [Identifier(pname), typeExpr]) */
-let parseDeclFromML = (t: ml): decl =>
-  switch (t.value) {
-  | Ap({value: Identifier(":"), _}, [lhs, retTypeExpr]) =>
-    switch (lhs.value) {
-    | Identifier(name) =>
-      {declName: name, params: [], retType: mlToOL(retTypeExpr), declMeta: t.meta}
-    | Ap({value: Identifier(name), _}, paramExprs) =>
-      let params = List.map((p: ml) =>
-        switch (p.value) {
-        | Ap({value: Identifier(":"), _}, [{value: Identifier(pname), _}, typeExpr]) =>
-          {paramName: pname, paramType: mlToOL(typeExpr), paramMeta: p.meta}
-        | Identifier(pname) =>
-          {paramName: pname, paramType: mkOL(OLHole(Synthesized)), paramMeta: p.meta}
-        | _ =>
-          {paramName: "_", paramType: mkOL(OLHole(Synthesized)), paramMeta: p.meta}
-        },
-        paramExprs,
-      );
-      {declName: name, params, retType: mlToOL(retTypeExpr), declMeta: t.meta}
-    | _ =>
-      {declName: "_", params: [], retType: mlToOL(retTypeExpr), declMeta: t.meta}
-    }
-  | Identifier(name) =>
-    {declName: name, params: [], retType: mkOL(OLHole(Synthesized)), declMeta: t.meta}
-  | _ =>
-    {declName: "_", params: [], retType: mkOL(OLHole(Synthesized)), declMeta: t.meta}
-  };
-
-
 /* === Unified checker: OL and ML mutually recursive === */
 
-let rec checkDecls = (ctx: context, items: list(ml)): (staticInfo, context) => {
-  let decls = List.map(parseDeclFromML, items);
-  List.fold_left(
-    ((accInfo, accCtx), d: decl) => {
-      let lineInfo = checkDeclLine(accCtx, d);
-      let newCtx = mergeBindings(accCtx, lineInfo.bindings);
-      (mergeInfos(accInfo, lineInfo), newCtx);
-    },
-    (emptyInfo, ctx),
-    decls,
-  );
-}
-
 /* Check a single declaration line: (name (p1:T1) ...) : RetType */
-and checkDeclLine = (ctx: context, d: decl): staticInfo => {
+let rec checkDeclLine = (ctx: context, d: decl): staticInfo => {
   /* Build a context with parameters */
   let paramCtx = List.fold_left(
     (acc, p: param) =>
@@ -549,410 +485,6 @@ and checkOLTerm = (ctx: context, mode: checkingMode, t: ol): staticInfo =>
     }
   }
 
-/* Check an ML expression in the program-level / block context.
-   Handles __seq, __postulate, __meta, __construct encodings,
-   plus regular ML expressions. */
-and checkTerm = (ctx: context, mode: checkingMode, t: ml): staticInfo =>
-  switch (t.value) {
-  /* __seq: sequential block chaining */
-  | Ap({value: Identifier("__seq"), _}, [first, rest]) =>
-    let firstInfo = checkTerm(ctx, Program, first);
-    let nextCtx = mergeBindings(ctx, firstInfo.bindings);
-    let restInfo = checkTerm(nextCtx, Program, rest);
-    mergeInfos(firstInfo, restInfo);
-
-  /* __postulate: declaration block */
-  | Ap({value: Identifier("__postulate"), _}, items) =>
-    let (info, finalCtx) = checkDecls(ctx, items);
-    let info = withBindings(info, finalCtx);
-    withErrors(info, ensureMode(["program"], mode, t.meta.start, t.meta.end_));
-
-  /* __meta: meta definition block */
-  | Ap({value: Identifier("__meta"), _}, items) =>
-    let mlCtx = StringMap.union((_, _, v) => Some(v), ctx, mlBuiltins);
-    let (metaInfo, metaCtx, metaDefs) = processMeta(emptyInfo, mlCtx, [], items);
-    metaDefsRef := metaDefs;
-    withErrors(metaInfo, ensureMode(["program"], mode, t.meta.start, t.meta.end_))
-    |> (info => withBindings(info, metaCtx));
-
-  /* __construct: construct block with schema */
-  | Ap({value: Identifier("__construct"), _}, [schemaRef, ...declItems]) =>
-    let (bodyInfo, finalCtx) = checkDecls(ctx, declItems);
-    let decls = List.map(parseDeclFromML, declItems);
-    /* Run the schema on the construct declarations and type-check witnesses */
-    let witnessErrors =
-      switch (schemaRef.value) {
-      | Identifier(schemaName) =>
-        switch (StringMap.find_opt(schemaName, ctx)) {
-        | Some(SchemaBinding(schemaBody)) =>
-          /* Build eval env from MetaLet definitions in definition order.
-             First pass: evaluate each body with the env built so far.
-             Second pass: patch all closures to see the complete env. */
-          let rawEnv = List.fold_left(
-            (acc, (name, defBody)) =>
-              switch (Eval.evalExpr(acc, defBody)) {
-              | Eval.Ok(v) => Eval.StringMap.add(name, v, acc)
-              | Eval.Err(_) => acc
-              },
-            Eval.StringMap.empty,
-            metaDefsRef^,
-          );
-          let evalEnv = Eval.StringMap.map(
-            fun
-            | Eval.Closure(_, pat, body) => Eval.Closure(rawEnv, pat, body)
-            | v => v,
-            rawEnv,
-          );
-          switch (Eval.evalExpr(evalEnv, schemaBody)) {
-          | Eval.Ok(schemaVal) =>
-            switch (Eval.runSchema(schemaVal, decls)) {
-            | Eval.Witnesses(witnesses) =>
-              /* Check witness count matches declaration count */
-              if (List.length(witnesses) != List.length(decls)) {
-                [mark(
-                  "Schema produced " ++ string_of_int(List.length(witnesses))
-                  ++ " witnesses but construct has " ++ string_of_int(List.length(decls))
-                  ++ " declarations",
-                  schemaRef.meta.start, schemaRef.meta.end_,
-                )];
-              } else {
-                /* Substitute witnesses for declared constants and type-check.
-                   For each declaration, the witness must have the declared type
-                   in the context where previous witnesses have been substituted. */
-                let (witnessErrs, _) = List.fold_left2(
-                  ((accErrs, substEnv), d: decl, witness) => {
-                    /* Add declaration parameters to context for witness checking.
-                       Parameter types must be resolved through substEnv so that
-                       references to earlier declared names get their witnesses. */
-                    let witnessCtx =
-                      List.fold_left(
-                        (acc, p: param) => {
-                          let resolvedPty = resolveWithParams(substEnv, p.paramType);
-                          StringMap.add(p.paramName, OL(Some(([], resolvedPty))), acc);
-                        },
-                        ctx,
-                        d.params,
-                      );
-                    let expectedType = resolveWithParams(substEnv, d.retType);
-                    let witnessInfo = checkOLTerm(witnessCtx, Expression(Some(expectedType)), mlToOL(witness));
-                    /* For parameterized decls, store (name, params, witness) for
-                       application-level substitution in subsequent types */
-                    let paramNames = List.map((p: param) => p.paramName, d.params);
-                    let newSubstEnv =
-                      StringMap.add(d.declName, (paramNames, witness), substEnv);
-                    (accErrs @ witnessInfo.errors, newSubstEnv);
-                  },
-                  ([], emptyWitnessEnv),
-                  decls,
-                  witnesses,
-                );
-                if (List.length(witnessErrs) > 0) {
-                  let details = String.concat("; ", List.map((e: error) => e.message, witnessErrs));
-                  [mark(
-                    schemaName ++ " matched but generated ill-typed witnesses: " ++ details,
-                    schemaRef.meta.start, schemaRef.meta.end_,
-                  )];
-                } else {
-                  [];
-                };
-              }
-            | Eval.SchemaError(msg) =>
-              [mark("Schema error: " ++ msg, schemaRef.meta.start, schemaRef.meta.end_)]
-            }
-          | Eval.Err(msg) =>
-            [mark("Schema evaluation failed: " ++ msg, schemaRef.meta.start, schemaRef.meta.end_)]
-          }
-        | Some(_) =>
-          [mark(schemaName ++ " is not a schema", schemaRef.meta.start, schemaRef.meta.end_)]
-        | None =>
-          [mark("Schema " ++ schemaName ++ " not found", schemaRef.meta.start, schemaRef.meta.end_)]
-        }
-      | _ => []
-      };
-    let info = withErrors(bodyInfo, witnessErrors);
-    let info = withBindings(info, finalCtx);
-    withErrors(info, ensureMode(["program"], mode, t.meta.start, t.meta.end_));
-
-  /* __construct with no declarations */
-  | Ap({value: Identifier("__construct"), _}, _) =>
-    withErrors(emptyInfo, ensureMode(["program"], mode, t.meta.start, t.meta.end_));
-
-  /* --- Regular ML expression handling --- */
-
-  | Identifier(v) =>
-    let modeErrors = ensureMode(
-      ["expression", "spine", "identifier"], mode, t.meta.start, t.meta.end_,
-    );
-    switch (mode) {
-    | Expression(_) =>
-      switch (lookupCtx(ctx, v)) {
-      | NotFound =>
-        let err = mark("Unbound variable " ++ v, t.meta.start, t.meta.end_);
-        {errors: [err, ...modeErrors], holes: [], inferred: None, mlInferred: None, bindings: StringMap.empty};
-      | Found(inferred) =>
-        let subErrors =
-          switch (mode) {
-          | Expression(expected) => subsume(expected, inferred, t.meta.start, t.meta.end_)
-          | _ => []
-          };
-        {errors: modeErrors @ subErrors, holes: [], inferred, mlInferred: None, bindings: StringMap.empty};
-      }
-    | _ =>
-      {errors: modeErrors, holes: [], inferred: None, mlInferred: None, bindings: StringMap.empty}
-    };
-
-  | Ap(f, args) =>
-    switch (mode) {
-    | Program =>
-      let (info, _) =
-        List.fold_left(
-          ((accInfo, accCtx), item) => {
-            let itemInfo = checkTerm(accCtx, Program, item);
-            let newCtx = mergeBindings(accCtx, itemInfo.bindings);
-            (mergeInfos(accInfo, itemInfo), newCtx);
-          },
-          (emptyInfo, ctx),
-          [f, ...args],
-        );
-      info;
-
-    | Spine =>
-      let (info, _) =
-        List.fold_left(
-          ((accInfo, accCtx), arg) => {
-            let argInfo = checkTerm(accCtx, Argument, arg);
-            let combined = mergeInfos(accInfo, argInfo);
-            (combined, mergeBindings(accCtx, combined.bindings));
-          },
-          {
-            let funInfo = checkTerm(ctx, IdentifierMode, f);
-            (funInfo, mergeBindings(ctx, funInfo.bindings));
-          },
-          args,
-        );
-      info;
-
-    | Expression(expected) =>
-      let funInfo = checkTerm(ctx, Expression(None), f);
-      switch (funInfo.inferred) {
-      | Some((params, retType)) =>
-        let arityErrors =
-          checkArity(List.length(params), List.length(args), f.meta.start, f.meta.end_);
-        let minLen = min(List.length(params), List.length(args));
-        let (argInfos, finalEnv) =
-          List.fold_left(
-            ((accInfos, env), i) => {
-              let (paramName, paramTy) = List.nth(params, i);
-              let expectedTy = resolve(env, paramTy);
-              let argInfo = checkTerm(ctx, Expression(Some(expectedTy)), List.nth(args, i));
-              let env =
-                switch (paramName) {
-                | Some(name) => StringMap.add(name, List.nth(args, i) |> mlToOL, env)
-                | None => env
-                };
-              (accInfos @ [argInfo], env);
-            },
-            ([], emptyEnv),
-            List.init(minLen, i => i),
-          );
-        let info = List.fold_left(mergeInfos, funInfo, argInfos);
-        let retType = resolve(finalEnv, retType);
-        let inferred =
-          List.length(params) == List.length(args)
-            ? Some(([], retType)) : Some(([], olHole));
-        let subErrors = subsume(expected, inferred, t.meta.start, t.meta.end_);
-        withErrors({...info, inferred}, arityErrors @ subErrors);
-      | None => funInfo
-      };
-
-    | Line =>
-      /* OL declaration line encoded as Ap(Identifier(":"), [lhs, retType]) */
-      switch (f.value) {
-      | Identifier(":") =>
-        switch (args) {
-        | [_left, _right] =>
-          let d = parseDeclFromML(t);
-          checkDeclLine(ctx, d);
-        | _ => emptyInfo
-        }
-      | _ =>
-        let modeErrors = ensureMode(["spine"], mode, t.meta.start, t.meta.end_);
-        let funInfo = checkTerm(ctx, Expression(Some(olHole)), f);
-        let argInfos = List.map(a => checkTerm(ctx, Expression(Some(olHole)), a), args);
-        withErrors(List.fold_left(mergeInfos, funInfo, argInfos), modeErrors);
-      }
-
-    | Argument =>
-      /* Argument in OL spine: Ap(Identifier(":"), [name, type]) */
-      switch (f.value) {
-      | Identifier(":") =>
-        switch (args) {
-        | [{value: Identifier(x), _} as left, right] =>
-          let leftInfo = checkTerm(ctx, IdentifierMode, left);
-          let rightInfo = checkTerm(ctx, Expression(Some(olHole)), right);
-          let info = mergeInfos(leftInfo, rightInfo);
-          if (List.length(leftInfo.errors) == 0) {
-            withBindings(info, StringMap.singleton(x, OL(Some(([], mlToOL(right))))))
-          } else {
-            info;
-          };
-        | _ => emptyInfo
-        }
-      | _ =>
-        let modeErrors = ensureMode(["spine"], mode, t.meta.start, t.meta.end_);
-        let funInfo = checkTerm(ctx, Expression(Some(olHole)), f);
-        let argInfos = List.map(a => checkTerm(ctx, Expression(Some(olHole)), a), args);
-        withErrors(List.fold_left(mergeInfos, funInfo, argInfos), modeErrors);
-      }
-
-    | _ =>
-      let modeErrors = ensureMode(["spine"], mode, t.meta.start, t.meta.end_);
-      let funInfo = checkTerm(ctx, Expression(Some(olHole)), f);
-      let argInfos = List.map(a => checkTerm(ctx, Expression(Some(olHole)), a), args);
-      withErrors(List.fold_left(mergeInfos, funInfo, argInfos), modeErrors);
-    }
-
-  | Hole(_) =>
-    switch (mode) {
-    | Expression(expected) =>
-      let goal =
-        switch (expected) {
-        | Some(e) => embedOL(e)
-        | None => mlHole
-        };
-      {errors: [], holes: [(t.meta.start, {goal, context: ctx})],
-       inferred: Some(fullHole), mlInferred: None, bindings: StringMap.empty};
-    | _ =>
-      {errors: [mark("Hole in non-expression", t.meta.start, t.meta.end_)],
-       holes: [], inferred: Some(fullHole), mlInferred: None, bindings: StringMap.empty};
-    }
-
-  | Shard(_) =>
-    if (t.meta.start >= 0) {
-      {errors: [mark("Unexpected token", t.meta.start, t.meta.end_)],
-       holes: [], inferred: None, mlInferred: None, bindings: StringMap.empty};
-    } else {
-      emptyInfo;
-    }
-
-  | BuilderError =>
-    if (t.meta.start >= 0) {
-      {errors: [mark("Syntax error", t.meta.start, t.meta.end_)],
-       holes: [], inferred: None, mlInferred: None, bindings: StringMap.empty};
-    } else {
-      emptyInfo;
-    }
-
-  | _ => emptyInfo
-  }
-
-/* === Process meta definitions === */
-
-and processMeta = (accInfo, accCtx, accDefs, items: list(ml)):
-    (staticInfo, context, list((string, ml))) =>
-  switch (items) {
-  | [] => (accInfo, accCtx, accDefs)
-
-  /* schema name = body */
-  | [{value: Ap({value: Identifier("schema"), _}, innerItems), _}, ...rest] =>
-    /* Parse schema binding from the ML encoding */
-    let (name, annotation, rhs) = parseMetaBinding(innerItems);
-    let schemaInfo = checkSchema(accCtx, rhs);
-    let annotErrors =
-      switch (annotation) {
-      | Some(Some(annotTy)) =>
-        if (eqType(annotTy, schemaType)) { [] }
-        else {
-          [mark(
-            "Schema type mismatch: annotated "
-            ++ printType(annotTy)
-            ++ ", expected "
-            ++ printType(schemaType),
-            -1, -1,
-          )];
-        }
-      | Some(None) =>
-        [mark("Invalid type annotation", -1, -1)]
-      | None => []
-      };
-    let info = withErrors(mergeInfos(accInfo, schemaInfo), annotErrors);
-    let newCtx =
-      switch (name) {
-      | Some(n) => StringMap.add(n, SchemaBinding(rhs), accCtx)
-      | None => accCtx
-      };
-    processMeta(info, newCtx, accDefs, rest);
-
-  /* name : type = body  OR  name = body */
-  | [{value: Ap({value: Identifier("="), _}, eqArgs), _} as item, ...rest] =>
-    let (name, annotation, rhs) = parseMetaLetBinding(eqArgs, item);
-    switch (name) {
-    | Some(n) =>
-      let (bodyInfo, rhsTy) =
-        switch (annotation) {
-        | Some(ty) => (checkExpr(accCtx, ty, rhs), ty)
-        | None =>
-          let info = inferExpr(accCtx, rhs);
-          (info, getInferredMlType(info));
-        };
-      let newCtx = StringMap.add(n, MetaLet(rhs, rhsTy), accCtx);
-      let newDefs = accDefs @ [(n, rhs)];
-      processMeta(mergeInfos(accInfo, bodyInfo), newCtx, newDefs, rest);
-    | None =>
-      let bodyInfo = inferExpr(accCtx, rhs);
-      processMeta(mergeInfos(accInfo, bodyInfo), accCtx, accDefs, rest);
-    }
-
-  /* Skip unrecognized items */
-  | [item, ...rest] =>
-    let itemInfo = inferExpr(accCtx, item);
-    processMeta(mergeInfos(accInfo, itemInfo), accCtx, accDefs, rest);
-  }
-
-/* Parse a meta schema binding from ML-encoded form.
-   Input is the args of Ap(Identifier("schema"), innerItems).
-   Returns (name, annotation, rhs).
-   annotation: None = no annotation, Some(Some(ty)) = valid, Some(None) = invalid */
-and parseMetaBinding = (items: list(ml)): (option(string), option(option(mlType)), ml) =>
-  switch (items) {
-  | [{value: Ap({value: Identifier("="), _}, [{value: Identifier(name), _}, rhs]), _}] =>
-    (Some(name), None, rhs)
-  | [{value: Ap({value: Identifier("="), _}, [
-      {value: Ap({value: Identifier(":"), _}, [{value: Identifier(name), _}, typeExpr]), _},
-      rhs,
-    ]), _}] =>
-    (Some(name), Some(mlExprToType(typeExpr)), rhs)
-  | [rhs] =>
-    (None, None, rhs)
-  | items =>
-    /* Multiple items — combine as application */
-    switch (items) {
-    | [] => (None, None, mkML(Hole(Synthesized)))
-    | [single] => (None, None, single)
-    | [first, ...rest] => (None, None, mkML(Ap(first, rest)))
-    }
-  }
-
-/* Parse a meta let binding.
-   Input: args of Ap(Identifier("="), eqArgs) and the full item for metadata.
-   Returns: (name, annotation, rhs) */
-and parseMetaLetBinding = (eqArgs: list(ml), _item: ml): (option(string), option(mlType), ml) =>
-  switch (eqArgs) {
-  /* name : type = rhs */
-  | [{value: Ap({value: Identifier(":"), _}, [{value: Identifier(name), _}, typeExpr]), _}, rhs] =>
-    (Some(name), mlExprToType(typeExpr), rhs)
-  /* name = rhs */
-  | [{value: Identifier(name), _}, rhs] =>
-    (Some(name), None, rhs)
-  | [_, rhs] =>
-    (None, None, rhs)
-  | _ =>
-    (None, None, mkML(Hole(Synthesized)))
-  }
-
-/* === ML checker — total error localization (mutually recursive with checkTerm) === */
-/* inferExpr and checkExpr always return staticInfo, never fail.
-   Errors are accumulated. inferExpr sets inferred to carry the ML type. */
 
 and checkSchema = (ctx: context, body: ml): staticInfo => {
   let mlCtx = StringMap.union((_, _, v) => Some(v), ctx, mlBuiltins);
@@ -1296,6 +828,10 @@ and inferExpr = (ctx: context, t: ml): staticInfo =>
       setMlType(info, MBool);
     }
 
+  | Asc(_, _) =>
+    withErrors(setMlType(emptyInfo, MTerm),
+      [mark("Unexpected ascription", t.meta.start, t.meta.end_)])
+
   | Shard(_) | BuilderError =>
     withErrors(setMlType(emptyInfo, MTerm),
       [mark("Invalid expression", t.meta.start, t.meta.end_)])
@@ -1412,5 +948,173 @@ and checkExpr = (ctx: context, expected: mlType, t: ml): staticInfo =>
     withErrors(info, mlSubsume(expected, got, t.meta.start, t.meta.end_));
   };
 
-let getStatics = (t: ml): staticInfo =>
-  checkTerm(StringMap.empty, Program, t);
+/* === Program-level checking on structured blocks === */
+
+let rec checkDeclList = (ctx: context, decls: list(decl)): (staticInfo, context) =>
+  List.fold_left(
+    ((accInfo, accCtx), d: decl) => {
+      let lineInfo = checkDeclLine(accCtx, d);
+      let newCtx = mergeBindings(accCtx, lineInfo.bindings);
+      (mergeInfos(accInfo, lineInfo), newCtx);
+    },
+    (emptyInfo, ctx),
+    decls,
+  )
+
+and processMetaDefs =
+    (accInfo: staticInfo, accCtx: context, accDefs: list((string, ml)),
+     defs: list(metaDef))
+    : (staticInfo, context, list((string, ml))) =>
+  switch (defs) {
+  | [] => (accInfo, accCtx, accDefs)
+
+  | [SchemaDef(b), ...rest] =>
+    let schemaInfo = checkSchema(accCtx, b.rhs);
+    let annotErrors =
+      switch (b.annotation, b.rawAnnotation) {
+      | (Some(ty), _) when !eqType(ty, schemaType) =>
+        [mark(
+          "Schema type mismatch: annotated "
+          ++ printType(ty)
+          ++ ", expected "
+          ++ printType(schemaType),
+          b.bindingMeta.start, b.bindingMeta.end_,
+        )]
+      | (None, Some(rawExpr)) =>
+        [mark("Invalid type annotation", rawExpr.meta.start, rawExpr.meta.end_)]
+      | _ => []
+      };
+    let info = withErrors(mergeInfos(accInfo, schemaInfo), annotErrors);
+    let newCtx = StringMap.add(b.name, SchemaBinding(b.rhs), accCtx);
+    processMetaDefs(info, newCtx, accDefs, rest);
+
+  | [LetDef(b), ...rest] =>
+    let (bodyInfo, rhsTy) =
+      switch (b.annotation) {
+      | Some(ty) => (checkExpr(accCtx, ty, b.rhs), ty)
+      | None =>
+        let info = inferExpr(accCtx, b.rhs);
+        (info, getInferredMlType(info));
+      };
+    let newCtx = StringMap.add(b.name, MetaLet(b.rhs, rhsTy), accCtx);
+    let newDefs = accDefs @ [(b.name, b.rhs)];
+    processMetaDefs(mergeInfos(accInfo, bodyInfo), newCtx, newDefs, rest);
+  };
+
+let runConstructSchema =
+    (ctx: context, schemaRefName: string, schemaMeta: meta,
+     decls: list(decl))
+    : list(error) =>
+  switch (StringMap.find_opt(schemaRefName, ctx)) {
+  | Some(SchemaBinding(schemaBody)) =>
+    /* Build eval env from MetaLet definitions in definition order. */
+    let rawEnv = List.fold_left(
+      (acc, (name, defBody)) =>
+        switch (Eval.evalExpr(acc, defBody)) {
+        | Eval.Ok(v) => Eval.StringMap.add(name, v, acc)
+        | Eval.Err(_) => acc
+        },
+      Eval.StringMap.empty,
+      metaDefsRef^,
+    );
+    let evalEnv = Eval.StringMap.map(
+      fun
+      | Eval.Closure(_, pat, body) => Eval.Closure(rawEnv, pat, body)
+      | v => v,
+      rawEnv,
+    );
+    switch (Eval.evalExpr(evalEnv, schemaBody)) {
+    | Eval.Ok(schemaVal) =>
+      switch (Eval.runSchema(schemaVal, decls)) {
+      | Eval.Witnesses(witnesses) =>
+        if (List.length(witnesses) != List.length(decls)) {
+          [mark(
+            "Schema produced " ++ string_of_int(List.length(witnesses))
+            ++ " witnesses but construct has " ++ string_of_int(List.length(decls))
+            ++ " declarations",
+            schemaMeta.start, schemaMeta.end_,
+          )];
+        } else {
+          let (witnessErrs, _) = List.fold_left2(
+            ((accErrs, substEnv), d: decl, witness) => {
+              let witnessCtx =
+                List.fold_left(
+                  (acc, p: param) => {
+                    let resolvedPty = resolveWithParams(substEnv, p.paramType);
+                    StringMap.add(p.paramName, OL(Some(([], resolvedPty))), acc);
+                  },
+                  ctx,
+                  d.params,
+                );
+              let expectedType = resolveWithParams(substEnv, d.retType);
+              let witnessInfo =
+                checkOLTerm(witnessCtx, Expression(Some(expectedType)), mlToOL(witness));
+              let paramNames = List.map((p: param) => p.paramName, d.params);
+              let newSubstEnv =
+                StringMap.add(d.declName, (paramNames, witness), substEnv);
+              (accErrs @ witnessInfo.errors, newSubstEnv);
+            },
+            ([], emptyWitnessEnv),
+            decls,
+            witnesses,
+          );
+          if (List.length(witnessErrs) > 0) {
+            let details =
+              String.concat("; ", List.map((e: error) => e.message, witnessErrs));
+            [mark(
+              schemaRefName ++ " matched but generated ill-typed witnesses: " ++ details,
+              schemaMeta.start, schemaMeta.end_,
+            )];
+          } else {
+            [];
+          };
+        }
+      | Eval.SchemaError(msg) =>
+        [mark("Schema error: " ++ msg, schemaMeta.start, schemaMeta.end_)]
+      }
+    | Eval.Err(msg) =>
+      [mark("Schema evaluation failed: " ++ msg, schemaMeta.start, schemaMeta.end_)]
+    }
+  | Some(_) =>
+    [mark(schemaRefName ++ " is not a schema", schemaMeta.start, schemaMeta.end_)]
+  | None =>
+    [mark("Schema " ++ schemaRefName ++ " not found", schemaMeta.start, schemaMeta.end_)]
+  };
+
+let checkBlock = (ctx: context, block: block): (staticInfo, context) =>
+  switch (block) {
+  | Postulate(decls) =>
+    let (info, finalCtx) = checkDeclList(ctx, decls);
+    (withBindings(info, finalCtx), finalCtx);
+
+  | Meta(defs) =>
+    let mlCtx = StringMap.union((_, _, v) => Some(v), ctx, mlBuiltins);
+    let (metaInfo, metaCtx, metaDefs) =
+      processMetaDefs(emptyInfo, mlCtx, [], defs);
+    metaDefsRef := metaDefs;
+    (withBindings(metaInfo, metaCtx), metaCtx);
+
+  | Construct(schemaName, decls) =>
+    let (bodyInfo, finalCtx) = checkDeclList(ctx, decls);
+    let schemaMeta =
+      switch (decls) {
+      | [d, ..._] => d.declMeta
+      | [] => defaultMeta
+      };
+    let witnessErrors = runConstructSchema(ctx, schemaName, schemaMeta, decls);
+    let info = withErrors(bodyInfo, witnessErrors);
+    (withBindings(info, finalCtx), finalCtx);
+  };
+
+let checkProgram = (ctx: context, prog: program): staticInfo => {
+  let (info, _) =
+    List.fold_left(
+      ((accInfo, accCtx), block) => {
+        let (blockInfo, newCtx) = checkBlock(accCtx, block);
+        (mergeInfos(accInfo, blockInfo), newCtx);
+      },
+      (emptyInfo, ctx),
+      prog,
+    );
+  info;
+};

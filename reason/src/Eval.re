@@ -239,6 +239,8 @@ let rec evalExpr = (env: evalEnv, t: ml): evalResult =>
       }
     }
 
+  | Asc(_, _) => Err("Cannot evaluate ascription")
+
   | Shard(_) | BuilderError => Err("Cannot evaluate syntax error")
   }
 
