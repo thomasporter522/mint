@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import fc from 'fast-check';
+import { readFileSync } from 'fs';
+import { resolve } from 'path';
 // @ts-ignore
 import { processCode, printTerm, parseAndPrint } from '@reason/Lytr_api.js';
 
@@ -1710,5 +1712,43 @@ describe('typed-SK abstraction schema', () => {
     ].join('\n');
     const msgs = errorMessages(code);
     expect(msgs.length).toBeGreaterThan(0);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/*  Regression: standalone construct-by chain                          */
+/*  Guards against the Builder bug where unwinding the construct/by    */
+/*  pair emitted a spurious Construct("_", []) block alongside the     */
+/*  real one, producing a "Schema _ not found" error at position -1.   */
+/* ------------------------------------------------------------------ */
+
+describe('construct-by chain parsing', () => {
+  it('standalone `construct by X ... end` does not emit a phantom schema-_ block', () => {
+    // Minimal reproduction: one postulate+meta chain, then a separate
+    // construct-by chain. Must not produce "Schema _ not found".
+    const code = [
+      'postulate',
+      'U : Sort',
+      'D : U',
+      'a : D',
+      'meta',
+      'schema trivial = fun s => match s with | [(_, [], _)] => (Ok [a]) | _ => (Error "bad") end',
+      'end',
+      '',
+      'construct by trivial',
+      'b : D',
+      'end',
+    ].join('\n');
+    const msgs = errorMessages(code);
+    expect(msgs.every(m => !m.includes('Schema _ not found'))).toBe(true);
+    expect(msgs).toEqual([]);
+  });
+
+  it('enum-coprod-generic.mint example checks clean', () => {
+    // Reads the example file directly so any regression in the Builder,
+    // meta-recursion, or enum schema surfaces here.
+    const path = resolve(__dirname, '../../../../examples/enum-coprod-generic.mint');
+    const code = readFileSync(path, 'utf-8');
+    expect(errors(code)).toEqual([]);
   });
 });
