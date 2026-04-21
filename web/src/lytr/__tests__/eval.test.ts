@@ -55,50 +55,50 @@ describe('eval: lists', () => {
 });
 
 /* ------------------------------------------------------------------ */
-/*  Cons (list spread)                                                  */
+/*  Cons (:: operator)                                                  */
 /* ------------------------------------------------------------------ */
 
 describe('eval: cons', () => {
   it('cons with literal tail', () => {
-    expect(evalOk('[a, ...[b, c]]')).toBe('[a, b, c]');
+    expect(evalOk('a :: [b, c]')).toBe('[a, b, c]');
   });
 
   it('cons with empty tail', () => {
-    expect(evalOk('[a, ...[]]')).toBe('[a]');
+    expect(evalOk('a :: []')).toBe('[a]');
   });
 
-  it('spread of empty list', () => {
-    expect(evalOk('[...[a, b]]')).toBe('[a, b]');
+  it('cons onto singleton', () => {
+    expect(evalOk('a :: [b]')).toBe('[a, b]');
   });
 
   it('cons pattern matches head and tail', () => {
-    expect(evalOk('match [a, b, c] with | [h, ...t] => t end')).toBe('[b, c]');
+    expect(evalOk('match [a, b, c] with | h :: t => t end')).toBe('[b, c]');
   });
 
-  it('cons pattern with multiple heads', () => {
-    expect(evalOk('match [a, b, c] with | [x, y, ...t] => (x, y) end')).toBe('(a, b)');
+  it('cons pattern with nested cons', () => {
+    expect(evalOk('match [a, b, c] with | x :: y :: t => (x, y) end')).toBe('(a, b)');
   });
 
   it('cons pattern fails on too-short list', () => {
-    expect(evalOk('match [a] with | [x, y, ...t] => no | _ => yes end')).toBe('yes');
+    expect(evalOk('match [a] with | x :: y :: t => no | _ => yes end')).toBe('yes');
   });
 
   it('cons pattern with empty tail', () => {
-    expect(evalOk('match [a] with | [h, ...t] => t end')).toBe('[]');
+    expect(evalOk('match [a] with | h :: t => t end')).toBe('[]');
   });
 
   it('cons round-trips through pattern and expression', () => {
-    expect(evalOk('match [x, y, z] with | [h, ...t] => [h, ...t] end')).toBe('[x, y, z]');
+    expect(evalOk('match [x, y, z] with | h :: t => h :: t end')).toBe('[x, y, z]');
   });
 
   it('reverse via foldl and cons', () => {
-    expect(evalOk('foldl (fun acc => fun x => [x, ...acc]) [] [a, b, c]')).toBe('[c, b, a]');
+    expect(evalOk('foldl (fun acc => fun x => x :: acc) [] [a, b, c]')).toBe('[c, b, a]');
   });
 
   it('prepend all via foldl and cons', () => {
     // foldl prepends each element, so [a,b] folded onto [c,d] gives [d,c,a,b]
     expect(evalOk(
-      'foldl (fun acc => fun x => [x, ...acc]) [a, b] [c, d]'
+      'foldl (fun acc => fun x => x :: acc) [a, b] [c, d]'
     )).toBe('[d, c, a, b]');
   });
 });
@@ -345,7 +345,7 @@ describe('eval: schema execution', () => {
       'end',
     ].join(' ');
 
-    const sigs = '[(I, ([], D)), (I-eq, ([], (eq D D I (ap (ap S K) K))))]';
+    const sigs = '[(I, [], D), (I-eq, [], (eq D D I (ap (ap S K) K)))]';
     const code = `(${schema}) ${sigs}`;
     const result = evalOk(code);
     expect(result).toContain('Ok');
@@ -362,7 +362,7 @@ describe('eval: schema execution', () => {
       'end',
     ].join(' ');
 
-    const sigs = '[(I, ([], D))]';
+    const sigs = '[(I, [], D)]';
     const code = `(${schema}) ${sigs}`;
     const result = evalOk(code);
     expect(result).toContain('Error');
@@ -378,7 +378,7 @@ describe('eval: schema execution', () => {
       'end',
     ].join(' ');
 
-    const sigs = '[(I, ([], D)), (J, ([], D))]';
+    const sigs = '[(I, [], D), (J, [], D)]';
     const code = `(${schema}) ${sigs}`;
     const result = evalOk(code);
     expect(result).toContain('Error');

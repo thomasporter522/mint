@@ -92,8 +92,8 @@ describe('ML type checker: pattern matching', () => {
     ok('fun s => match s with | [] => (Error "empty") | _ => (Ok []) end');
   });
 
-  it('accepts match with pair patterns in list', () => {
-    ok('fun s => match s with | [(params, ret)] => (Ok []) | _ => (Error "bad") end');
+  it('accepts match with tuple patterns in list', () => {
+    ok('fun s => match s with | [(name, params, ret)] => (Ok []) | _ => (Error "bad") end');
   });
 
   it('accepts match with multiple branches', () => {
@@ -233,10 +233,8 @@ describe('ML type checker: signature type', () => {
   });
 
   it('old 2-tuple pattern fails on signature', () => {
-    // (params, ret) against (String, (List (String, Term), Term))
-    // params gets String, ret gets (List (String, Term), Term)
-    // Then (Ok [ret]) checks ret against Term but it has pair type
-    fails('fun s => match s with | [(params, ret)] => (Ok [ret]) | _ => (Error "bad") end', 'Expected Term');
+    // 2-tuple pattern against 3-tuple signature — arity mismatch
+    fails('fun s => match s with | [(params, ret)] => (Ok [ret]) | _ => (Error "bad") end', 'Tuple pattern');
   });
 
   it('nested param destructuring works', () => {
@@ -354,14 +352,14 @@ describe('ML type checker: let type annotations', () => {
   });
 
   it('annotated let with List Term -> List Term', () => {
-    ok('fun s => let rev : ((List Term) -> (List Term)) = fun xs => (foldl (fun acc => fun x => [x, ...acc]) [] xs) in (Ok (rev [a, b]))');
+    ok('fun s => let rev : ((List Term) -> (List Term)) = fun xs => (foldl (fun acc => fun x => x :: acc) [] xs) in (Ok (rev [a, b]))');
   });
 
   it('annotation gives param types to lambda', () => {
     // Without annotation, f infers as Term -> Term (param is Term).
     // With annotation (List Term) -> (List Term), param xs gets List Term.
     // Then foldl can properly type-check the callback.
-    ok('fun s => let rev : ((List Term) -> (List Term)) = fun xs => (foldl (fun acc => fun x => [x, ...acc]) [] xs) in (Ok (rev [a]))');
+    ok('fun s => let rev : ((List Term) -> (List Term)) = fun xs => (foldl (fun acc => fun x => x :: acc) [] xs) in (Ok (rev [a]))');
   });
 
   it('annotated let with Result type', () => {
@@ -371,7 +369,7 @@ describe('ML type checker: let type annotations', () => {
   it('annotation propagates through function application', () => {
     // rev has type (List Term) -> (List Term), so (rev xs) returns List Term
     // Then (Ok (rev xs)) should pass since Ok wants List Term
-    ok('fun s => let rev : ((List Term) -> (List Term)) = fun xs => (foldl (fun acc => fun x => [x, ...acc]) [] xs) in match s with | _ => (Ok (rev [a, b])) end');
+    ok('fun s => let rev : ((List Term) -> (List Term)) = fun xs => (foldl (fun acc => fun x => x :: acc) [] xs) in match s with | _ => (Ok (rev [a, b])) end');
   });
 
   /* --- Annotations that should fail --- */

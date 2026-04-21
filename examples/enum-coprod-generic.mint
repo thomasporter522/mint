@@ -25,9 +25,9 @@ star : Unit
 (either-inr (A : U) (B : U) (M : U) (f : (Arr A M)) (g : (Arr B M)) (b : B)) :
   (eq M M (app (Either A B) M (either A B M f g) (inr A B b)) (app B M g b))
 meta
-reverse : ((List Term) -> (List Term)) = fun xs => (foldl (fun acc => fun x => [x, ...acc]) [] xs)
-reverse-triples : ((List (Term, (Term, Term))) -> (List (Term, (Term, Term)))) = fun xs => (foldl (fun acc => fun x => [x, ...acc]) [] xs)
-append : ((List Term) -> ((List Term) -> (List Term))) = fun xs => fun ys => (foldl (fun acc => fun x => [x, ...acc]) ys (reverse xs))
+reverse : ((List Term) -> (List Term)) = fun xs => (foldl (fun acc => fun x => x :: acc) [] xs)
+reverse-triples : ((List (Term, (Term, Term))) -> (List (Term, (Term, Term)))) = fun xs => (foldl (fun acc => fun x => x :: acc) [] xs)
+append : ((List Term) -> ((List Term) -> (List Term))) = fun xs => fun ys => (foldl (fun acc => fun x => x :: acc) ys (reverse xs))
 concat : ((List (List Term)) -> (List Term)) = fun xss => (foldl (fun acc => fun xs => (append acc xs)) [] xss)
 
 build-injs-and-type : ((List Term) -> ((List Term), Term)) = fun rest =>
@@ -36,14 +36,14 @@ build-injs-and-type : ((List Term) -> ((List Term), Term)) = fun rest =>
     let prev-type = (snd acc) in
     let cur-type = (Either Unit prev-type) in
     let wrapped = (reverse (foldl (fun a => fun inj =>
-      [(inr Unit prev-type inj), ...a]) [] prev-injs)) in
-    ([(inl Unit prev-type star), ...wrapped], cur-type)
+      (inr Unit prev-type inj) :: a) [] prev-injs)) in
+    ((inl Unit prev-type star) :: wrapped, cur-type)
   ) ([star], Unit) rest)
 
 build-elim : (Term -> ((List Term) -> ((List Term) -> Term))) = fun mvar => fun case-vars => fun rest =>
   let rev-cvs = (reverse case-vars) in
   match rev-cvs with
-  | [last-cv, ...remaining-cvs] =>
+  | last-cv :: remaining-cvs =>
     (fst (foldl (fun acc => fun cv =>
       let prev-arr = (fst acc) in
       let prev-type = (snd acc) in
@@ -59,7 +59,7 @@ build-elim : (Term -> ((List Term) -> ((List Term) -> Term))) = fun mvar => fun 
 build-proofs : (Term -> ((List Term) -> ((List Term) -> (List Term)))) = fun mvar => fun case-vars => fun rest =>
   let rev-cvs = (reverse case-vars) in
   match rev-cvs with
-  | [last-cv, ...remaining-cvs] =>
+  | last-cv :: remaining-cvs =>
     -- Accumulator: (triples-list, elim-arr, inner-type)
     -- Each triple: (proof, injection, target-tc)
     -- Innermost: proof = const-beta, inj = star, tc = last-cv
@@ -77,7 +77,7 @@ build-proofs : (Term -> ((List Term) -> ((List Term) -> (List Term)))) = fun mva
         cv
         (either-inl Unit prev-type mvar f prev-elim star)
         (const-beta Unit mvar cv star)) in
-      let inl-triple = (inl-proof, (inl Unit prev-type star), cv) in
+      let inl-triple = (inl-proof, ((inl Unit prev-type star), cv)) in
       -- Wrap existing triples with inr:
       -- Wrap existing triples with inr:
       let wrapped = (reverse-triples (foldl (fun a => fun triple =>
@@ -90,14 +90,14 @@ build-proofs : (Term -> ((List Term) -> ((List Term) -> (List Term)))) = fun mva
           old-tc
           (either-inr Unit prev-type mvar f prev-elim old-inj)
           old-proof) in
-        [(new-proof, (inr Unit prev-type old-inj), old-tc), ...a]
+        (new-proof, ((inr Unit prev-type old-inj), old-tc)) :: a
       ) [] prev-triples)) in
-      (([inl-triple, ...wrapped], cur-elim), cur-type)
-    ) (([((const-beta Unit mvar last-cv star), star, last-cv)],
+      ((inl-triple :: wrapped, cur-elim), cur-type)
+    ) (([((const-beta Unit mvar last-cv star), (star, last-cv))],
         (const Unit mvar last-cv)), Unit) remaining-cvs) in
     -- Extract just the proof terms
     (reverse (foldl (fun acc => fun triple =>
-      [(fst triple), ...acc]) [] (fst (fst result))))
+      (fst triple) :: acc) [] (fst (fst result))))
   | _ => []
   end
 
@@ -110,7 +110,7 @@ schema enum = fun s => match s with
      (case-name, [(mvar, U), (tc, mvar), (scrut, type-name)], mvar),
      (eq-name, [(mvar2, U), (tc2, mvar2)], _)]
     => (Ok [Unit, star, (unit-rec mvar tc scrut), (unit-comp mvar2 tc2)])
-  | [(type-name, [], U), ...all-rest] =>
+  | (type-name, [], U) :: all-rest =>
     -- Find case params: scan for first entry with non-empty params.
     -- Seed with [(star, star)] to establish List (Term, Term) element type.
     let found-params = (foldl (fun acc => fun entry =>
@@ -122,13 +122,13 @@ schema enum = fun s => match s with
       end
     ) (false, [(star, star)]) all-rest) in
     match (snd found-params) with
-    | [(mvar, U), ...tc-and-scrut] =>
+    | (mvar, U) :: tc-and-scrut =>
       -- Extract case-vars and scrut: foldl collects names, last one is the scrutinee.
       -- case-vars end up in reverse order, matching what build-elim/build-proofs need.
       let vars-info = (foldl (fun acc => fun p =>
         if (fst (fst acc)) == true
         then ((false, (snd (fst acc))), (fst p))
-        else ((false, [(snd acc), ...(snd (fst acc))]), (fst p))
+        else ((false, (snd acc) :: (snd (fst acc))), (fst p))
         end
       ) ((true, []), star) tc-and-scrut) in
       let rev-case-vars = (snd (fst vars-info)) in
@@ -136,7 +136,7 @@ schema enum = fun s => match s with
       -- case-vars is in original order (foldl reverses rev-tcs, then we reverse back)
       let case-vars = (reverse rev-case-vars) in
       match case-vars with
-      | [_, ...rest-case-vars] =>
+      | _ :: rest-case-vars =>
         let iat = (build-injs-and-type rest-case-vars) in
         let injs = (fst iat) in
         let coprod-type = (snd iat) in

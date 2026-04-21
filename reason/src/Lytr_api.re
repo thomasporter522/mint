@@ -12,33 +12,31 @@ let g = LytrGrammar.grammar;
 type jsMap;
 
 [@mel.new] external createJsMap: unit => jsMap = "Map";
-[@mel.send] external jsMapSet: (jsMap, string, term) => unit = "set";
+[@mel.send] external jsMapSet: (jsMap, string, ml) => unit = "set";
 
-let displayTerm = (name: string, ft: fullType): term => {
+let displayBinding = (name: string, ft: fullType): ml => {
   let (params, retType) = ft;
-  let nameTerm = mk(Identifier(name));
-  switch (params) {
-  | [] => mk(Asc(nameTerm, retType))
+  let nameTerm = mkML(Identifier(name));
+  let retML = embedOL(retType);
+  let paramTerms =
+    List.map(
+      ((pname, ty)) => {
+        let n =
+          switch (pname) {
+          | Some(s) => mkML(Identifier(s))
+          | None => mkML(Hole(Synthesized))
+          };
+        let paramML = embedOL(ty);
+        let t = mkML(Asc(n, paramML));
+        {...t, meta: {...t.meta, parens: true}};
+      },
+      params,
+    );
+  switch (paramTerms) {
+  | [] => mkML(Asc(nameTerm, retML))
   | _ =>
-    let paramTerms =
-      List.map(
-        ((pname, ty)) => {
-          let n =
-            switch (pname) {
-            | Some(s) => mk(Identifier(s))
-            | None => mk(Hole(true))
-            };
-          let asc = mk(Asc(n, ty));
-          {...asc, meta: {...asc.meta, parens: true}};
-        },
-        params,
-      );
-    let spine =
-      switch (paramTerms) {
-      | [] => nameTerm
-      | [first, ...rest] => mk(Ap(nameTerm, [first, ...rest]))
-      };
-    mk(Asc(spine, retType));
+    let spine = mkML(Ap(nameTerm, paramTerms));
+    mkML(Asc(spine, retML));
   };
 };
 
@@ -47,8 +45,8 @@ let contextToJsMap = (ctx: context): jsMap => {
   StringMap.iter(
     (k, v) =>
       switch (v) {
-      | OL(Some(ft)) => jsMapSet(m, k, displayTerm(k, ft))
-      | ML(ty) => jsMapSet(m, k, displayTerm(k, ([], mlTypeToTerm(ty))))
+      | OL(Some(ft)) => jsMapSet(m, k, displayBinding(k, ft))
+      | ML(ty) => jsMapSet(m, k, displayBinding(k, ([], mkOL(OLIdentifier(MLType.printType(ty))))))
       | Builtin(_) | SchemaBinding(_) | MetaLet(_, _) => ()
       | OL(None) => ()
       },
@@ -75,7 +73,7 @@ external makeJsError:
 type jsHoleInfo;
 
 [@mel.obj]
-external makeJsHoleInfo: (~goal: term, ~context: jsMap) => jsHoleInfo = "";
+external makeJsHoleInfo: (~goal: ml, ~context: jsMap) => jsHoleInfo = "";
 
 type jsResult;
 
@@ -86,8 +84,21 @@ external makeJsResult:
 
 /* === Pipeline === */
 
+/* Collect "Unexpected token" errors for top-level shards (unmatched tokens). */
+let shardErrors = (forms: list(sharded(openForm))): list(Error.error) =>
+  List.filter_map(
+    fun
+    | Unform(UShard(tok)) when tok.start >= 0 =>
+      Some(Error.mark("Unexpected token", tok.start, tok.end_))
+    | _ => None,
+    forms,
+  );
+
 let processCode = (code: string): jsResult => {
-  let statics = getStatics(build(parse(g, lex(g, code))));
+  let forms = parse(g, lex(g, code));
+  let prog = buildProgram(forms);
+  let baseStatics = checkProgram(StringMap.empty, prog);
+  let statics = {...baseStatics, errors: baseStatics.errors @ shardErrors(forms)};
 
   let errors =
     Array.of_list(
@@ -115,7 +126,7 @@ let processCode = (code: string): jsResult => {
   makeJsResult(~errors, ~holes);
 };
 
-let printTerm = (t: term): string => Print.printTerm(t);
+let printTerm = (t: ml): string => Print.printML(t);
 
 /* ML type checking */
 type jsMLResult;
@@ -135,11 +146,19 @@ let checkSchemaCode = (code: string): jsMLResult => {
   };
 };
 
-let parseAndPrint = (code: string): string =>
-  Print.printTerm(build(parse(g, lex(g, code))));
+let parseAndPrint = (code: string): string => {
+  let forms = parse(g, lex(g, code));
+  let prog = buildProgram(forms);
+  switch (prog) {
+  | [] => Print.printML(build(forms))
+  | _ => Print.printProgram(prog)
+  };
+};
 
-let parseAndDebug = (code: string): string =>
-  Print.debugTerm(build(parse(g, lex(g, code))));
+let parseAndDebug = (code: string): string => {
+  let forms = parse(g, lex(g, code));
+  Print.debugML(build(forms));
+};
 
 /* ML evaluation */
 type jsEvalResult;
@@ -151,7 +170,7 @@ external makeEvalResult:
 let evalCode = (code: string): jsEvalResult => {
   let ast = build(parse(g, lex(g, code)));
   switch (Eval.evalExpr(Eval.StringMap.empty, ast)) {
-  | Ok(v) => makeEvalResult(~ok=true, ~value=Print.printTerm(Eval.termOf(v)), ~error="")
+  | Ok(v) => makeEvalResult(~ok=true, ~value=Print.printML(Eval.termOf(v)), ~error="")
   | Err(msg) => makeEvalResult(~ok=false, ~value="", ~error=msg)
   };
 };

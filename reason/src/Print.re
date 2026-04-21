@@ -8,91 +8,209 @@ let printPrimaryToken =
   | TAtom(StringLit(s)) => "\"" ++ s ++ "\""
   | TNamed(n) => n;
 
-let rec debugTerm = (t: term): string => {
+let printBinOp =
+  fun
+  | Eq => "=="
+  | Neq => "!="
+  | And => "&&"
+  | Or => "||";
+
+/* --- OL printers --- */
+
+let rec printOL = (t: ol): string => {
+  let inner =
+    switch (t.value) {
+    | OLHole(User) => "?"
+    | OLHole(Synthesized) => ""
+    | OLIdentifier(v) => v
+    | OLAp(f, args) =>
+      printOL(f) ++ " " ++ String.concat(" ", List.map(printOL, args))
+    };
+  t.meta.parens ? "(" ++ inner ++ ")" : inner;
+};
+
+let rec debugOL = (t: ol): string => {
   let p = t.meta.parens ? "P" : "";
   switch (t.value) {
-  | Shard(_) => "Shard"
-  | Hole(ins) => ins ? "Hole_" : "Hole"
-  | Identifier(v) => "Id(" ++ v ++ ")"
-  | StringLit(s) => "Str(" ++ s ++ ")"
-  | Asc(l, r) => p ++ "Asc(" ++ debugTerm(l) ++ "," ++ debugTerm(r) ++ ")"
-  | Arrow(l, r) => p ++ "Arrow(" ++ debugTerm(l) ++ "," ++ debugTerm(r) ++ ")"
-  | Eq(l, r) => p ++ "Eq(" ++ debugTerm(l) ++ "," ++ debugTerm(r) ++ ")"
-  | Comma(l, r) => p ++ "Comma(" ++ debugTerm(l) ++ "," ++ debugTerm(r) ++ ")"
-  | BinOp(op, l, r) => p ++ "BinOp(" ++ op ++ "," ++ debugTerm(l) ++ "," ++ debugTerm(r) ++ ")"
-  | Ap(f, args) => p ++ "Ap(" ++ debugTerm(f) ++ ",[" ++ String.concat(",", List.map(debugTerm, args)) ++ "])"
-  | List(items) => "List([" ++ String.concat(",", List.map(debugTerm, items)) ++ "])"
-  | Cons(heads, tail) => "Cons([" ++ String.concat(",", List.map(debugTerm, heads)) ++ "]," ++ debugTerm(tail) ++ ")"
-  | Fun(pat, body) => "Fun(" ++ debugTerm(pat) ++ "," ++ debugTerm(body) ++ ")"
-  | Match(scrut, branches) =>
-    "Match(" ++ debugTerm(scrut) ++ ",[" ++
-    String.concat(",", List.map(((p, b)) => "(" ++ debugTerm(p) ++ "=>" ++ debugTerm(b) ++ ")", branches)) ++ "])"
-  | Let(b, body) => "Let(" ++ debugTerm(b) ++ "," ++ debugTerm(body) ++ ")"
-  | If(c, t, e) => "If(" ++ debugTerm(c) ++ "," ++ debugTerm(t) ++ "," ++ debugTerm(e) ++ ")"
-  | Postulate(body, _) => "Post([" ++ String.concat(",", List.map(debugTerm, body)) ++ "])"
-  | Meta(_, _) => "Meta"
-  | Construct(_, _, _) => "Construct"
-  | BuilderError => "ERR"
+  | OLHole(User) => "Hole"
+  | OLHole(Synthesized) => "Hole_"
+  | OLIdentifier(v) => "Id(" ++ v ++ ")"
+  | OLAp(f, args) =>
+    p ++ "Ap(" ++ debugOL(f) ++ ",[" ++ String.concat(",", List.map(debugOL, args)) ++ "])"
   };
 };
 
-let rec printTerm = (t: term): string => {
+/* --- Pattern printers --- */
+
+let rec printPat = (t: pat): string => {
+  let inner =
+    switch (t.value) {
+    | PWildcard => "_"
+    | PVar(s) => s
+    | PHole => "?"
+    | PString(s) => "\"" ++ s ++ "\""
+    | PList(items) =>
+      "[" ++ String.concat(", ", List.map(printPat, items)) ++ "]"
+    | PCons(head, tail) =>
+      printPat(head) ++ " :: " ++ printPat(tail)
+    | PTuple(items) =>
+      String.concat(", ", List.map(printPat, items))
+    | PAp(head, args) =>
+      printPat(head) ++ " " ++ String.concat(" ", List.map(printPat, args))
+    };
+  t.meta.parens ? "(" ++ inner ++ ")" : inner;
+};
+
+let rec debugPat = (t: pat): string => {
+  let p = t.meta.parens ? "P" : "";
+  switch (t.value) {
+  | PWildcard => "Wild"
+  | PVar(s) => "PVar(" ++ s ++ ")"
+  | PHole => "PHole"
+  | PString(s) => "PStr(" ++ s ++ ")"
+  | PList(items) =>
+    "PList([" ++ String.concat(",", List.map(debugPat, items)) ++ "])"
+  | PCons(h, t) =>
+    p ++ "PCons(" ++ debugPat(h) ++ "," ++ debugPat(t) ++ ")"
+  | PTuple(items) =>
+    p ++ "PTuple(" ++ String.concat(",", List.map(debugPat, items)) ++ ")"
+  | PAp(head, args) =>
+    p ++ "PAp(" ++ debugPat(head) ++ ",[" ++ String.concat(",", List.map(debugPat, args)) ++ "])"
+  };
+};
+
+/* --- ML printers --- */
+
+let rec printML = (t: ml): string => {
   let inner =
     switch (t.value) {
     | Shard(token) => printPrimaryToken(token)
-    | Hole(inserted) => inserted ? "" : "?"
+    | Hole(User) => "?"
+    | Hole(Synthesized) => ""
     | Identifier(v) => v
     | StringLit(s) => "\"" ++ s ++ "\""
-    | Asc(left, right) =>
-      printTerm(left) ++ " : " ++ printTerm(right)
-    | Arrow(left, right) =>
-      printTerm(left) ++ " -> " ++ printTerm(right)
-    | Eq(left, right) =>
-      printTerm(left) ++ " = " ++ printTerm(right)
-    | Comma(left, right) =>
-      printTerm(left) ++ ", " ++ printTerm(right)
+    | Tuple(items) =>
+      String.concat(", ", List.map(printML, items))
+    | Asc(l, r) =>
+      printML(l) ++ " : " ++ printML(r)
     | BinOp(op, left, right) =>
-      printTerm(left) ++ " " ++ op ++ " " ++ printTerm(right)
+      printML(left) ++ " " ++ printBinOp(op) ++ " " ++ printML(right)
+    /* Infix operators encoded as Ap(Identifier(op), [l, r]) — produced
+       by the catch-all in buildForm for operators like ->, =, etc. */
+    | Ap({value: Identifier("->"), _}, [l, r]) =>
+      printML(l) ++ " -> " ++ printML(r)
+    | Ap({value: Identifier("="), _}, [l, r]) =>
+      printML(l) ++ " = " ++ printML(r)
     | Ap(f, args) =>
-      printTerm(f) ++ " " ++ String.concat(" ", List.map(printTerm, args))
+      printML(f) ++ " " ++ String.concat(" ", List.map(printML, args))
     | List(items) =>
-      "[" ++ String.concat(", ", List.map(printTerm, items)) ++ "]"
-    | Cons(heads, tail) =>
-      "[" ++ String.concat(", ", List.map(printTerm, heads))
-      ++ (List.length(heads) > 0 ? ", " : "")
-      ++ "..." ++ printTerm(tail) ++ "]"
-    | Fun(pat, body) =>
-      "fun " ++ printTerm(pat) ++ " => " ++ printTerm(body)
+      "[" ++ String.concat(", ", List.map(printML, items)) ++ "]"
+    | Cons(head, tail) =>
+      printML(head) ++ " :: " ++ printML(tail)
+    | Fun(pats, body) =>
+      "fun " ++ String.concat(" ", List.map(printPat, pats)) ++ " => " ++ printML(body)
     | Match(scrut, branches) =>
-      "match " ++ printTerm(scrut) ++ " with"
+      "match " ++ printML(scrut) ++ " with"
       ++ String.concat("", List.map(
-           ((p, b)) => " | " ++ printTerm(p) ++ " => " ++ printTerm(b),
+           ((p, b)) => " | " ++ printPat(p) ++ " => " ++ printML(b),
            branches,
          ))
       ++ " end"
-    | Let(binding, body) =>
-      "let " ++ printTerm(binding) ++ " in " ++ printTerm(body)
     | If(cond, thenBr, elseBr) =>
-      "if " ++ printTerm(cond)
-      ++ " then " ++ printTerm(thenBr)
-      ++ " else " ++ printTerm(elseBr)
+      "if " ++ printML(cond)
+      ++ " then " ++ printML(thenBr)
+      ++ " else " ++ printML(elseBr)
       ++ " end"
-    | Postulate(body, rest) =>
-      "postulate "
-      ++ String.concat("\n", List.map(printTerm, body))
-      ++ " end"
-      ++ (switch (rest) { | None => "" | Some(r) => " " ++ printTerm(r) })
-    | Meta(body, rest) =>
-      "meta "
-      ++ String.concat("\n", List.map(printTerm, body))
-      ++ " end"
-      ++ (switch (rest) { | None => "" | Some(r) => " " ++ printTerm(r) })
-    | Construct(by, body, rest) =>
-      "construct " ++ printTerm(by) ++ " "
-      ++ String.concat("\n", List.map(printTerm, body))
-      ++ " end"
-      ++ (switch (rest) { | None => "" | Some(r) => " " ++ printTerm(r) })
+    | Let(b, body) =>
+      "let " ++ b.name
+      ++ (switch (b.annotation) {
+          | Some(ann) => " : " ++ MLType.printType(ann)
+          | None => ""
+          })
+      ++ " = " ++ printML(b.rhs)
+      ++ " in " ++ printML(body)
     | BuilderError => "<BUILDER ERROR>"
     };
   t.meta.parens ? "(" ++ inner ++ ")" : inner;
 };
+
+let rec debugML = (t: ml): string => {
+  let p = t.meta.parens ? "P" : "";
+  switch (t.value) {
+  | Shard(_) => "Shard"
+  | Hole(User) => "Hole"
+  | Hole(Synthesized) => "Hole_"
+  | Identifier(v) => "Id(" ++ v ++ ")"
+  | StringLit(s) => "Str(" ++ s ++ ")"
+  | Tuple(items) =>
+    p ++ "Tuple(" ++ String.concat(",", List.map(debugML, items)) ++ ")"
+  | Asc(l, r) =>
+    p ++ "Asc(" ++ debugML(l) ++ "," ++ debugML(r) ++ ")"
+  | BinOp(op, l, r) =>
+    p ++ "BinOp(" ++ printBinOp(op) ++ "," ++ debugML(l) ++ "," ++ debugML(r) ++ ")"
+  | Ap(f, args) =>
+    p ++ "Ap(" ++ debugML(f) ++ ",[" ++ String.concat(",", List.map(debugML, args)) ++ "])"
+  | List(items) =>
+    "List([" ++ String.concat(",", List.map(debugML, items)) ++ "])"
+  | Cons(h, t) =>
+    "Cons(" ++ debugML(h) ++ "," ++ debugML(t) ++ ")"
+  | Fun(pats, body) =>
+    "Fun([" ++ String.concat(",", List.map(debugPat, pats)) ++ "]," ++ debugML(body) ++ ")"
+  | Match(scrut, branches) =>
+    "Match(" ++ debugML(scrut) ++ ",[" ++
+    String.concat(",", List.map(((p, b)) => "(" ++ debugPat(p) ++ "=>" ++ debugML(b) ++ ")", branches)) ++ "])"
+  | Let(b, body) =>
+    "Let(" ++ b.name ++ "," ++ debugML(b.rhs) ++ "," ++ debugML(body) ++ ")"
+  | If(c, t, e) =>
+    "If(" ++ debugML(c) ++ "," ++ debugML(t) ++ "," ++ debugML(e) ++ ")"
+  | BuilderError => "ERR"
+  };
+};
+
+/* --- Declaration and block printers --- */
+
+let printParam = (p: param): string =>
+  "(" ++ p.paramName ++ " : " ++ printOL(p.paramType) ++ ")";
+
+let printDecl = (d: decl): string =>
+  switch (d.params) {
+  | [] => d.declName ++ " : " ++ printOL(d.retType)
+  | params =>
+    "(" ++ d.declName ++ " " ++ String.concat(" ", List.map(printParam, params)) ++ ")"
+    ++ " : " ++ printOL(d.retType)
+  };
+
+let printBinding = (b: binding): string =>
+  b.name
+  ++ (switch (b.annotation) {
+      | Some(ann) => " : " ++ MLType.printType(ann)
+      | None => ""
+      })
+  ++ " = " ++ printML(b.rhs);
+
+let printMetaDef = (d: metaDef): string =>
+  switch (d) {
+  | LetDef(b) => printBinding(b)
+  | SchemaDef(b) => "schema " ++ printBinding(b)
+  };
+
+let printBlock = (b: block): string =>
+  switch (b) {
+  | Postulate(decls) =>
+    "postulate " ++ String.concat("\n", List.map(printDecl, decls)) ++ " end"
+  | Meta(defs) =>
+    "meta " ++ String.concat("\n", List.map(printMetaDef, defs)) ++ " end"
+  | Construct(schemaName, decls) =>
+    "construct by " ++ schemaName ++ " "
+    ++ String.concat("\n", List.map(printDecl, decls)) ++ " end"
+  };
+
+let printProgram = (p: program): string =>
+  String.concat(" ", List.map(printBlock, p));
+
+/* --- Backward-compatible aliases --- */
+
+/* These are used by Lytr_api.re and Check.re which still need
+   to print ml terms. Will be removed once all consumers are updated. */
+let printTerm = printML;
+let debugTerm = debugML;

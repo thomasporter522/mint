@@ -17,12 +17,17 @@ let grammar = {
     |> addMatch(MatchPairMorph("(", ",", ",p"))
     |> addMatch(MatchPairMorph(",p", ",", ",p"))
     |> addMatch(MatchPair(",p", ")"))
+    /* Param annotation: (name : type) */
+    |> addToken(":p", {kind: AtomIdent, leftPrec: Interior, rightPrec: Interior})
+    |> addMatch(MatchPairMorph("(", ":", ":p"))
+    |> addMatch(MatchPair(":p", ")"))
     |> addMatch(MatchPair("[", "]"))
     |> addMatch(MatchPairMorph("[", ",", ",l"))
     |> addMatch(MatchPairMorph(",l", ",", ",l"))
     |> addMatch(MatchPair(",l", "]"))
     /* Infix operators */
     |> addInfix("=",  ~symbol="=",  ~left=0.2, ~right=0.3)
+    |> addInfix("::",  ~symbol="::", ~left=0.6, ~right=0.5) /* right-assoc cons */
     |> addInfix(":",  ~symbol=":",  ~left=1.0, ~right=1.1)
     |> addInfix("->", ~symbol="->", ~left=2.0, ~right=1.9) /* right-assoc */
     |> addInfix("!=", ~symbol="!=", ~left=4.0, ~right=4.1)
@@ -53,14 +58,19 @@ let grammar = {
     |> addMatch(MatchPair("if", "then"))
     |> addMatch(MatchPair("then", "else"))
     |> addMatch(MatchPair("else", "end"))
-    /* let...in for local bindings in expressions */
-    |> addToken("let", {kind: Keyword("let"), leftPrec: Uninterested, rightPrec: Interior})
-    |> addToken("in",  {kind: Keyword("in"),  leftPrec: Interior,     rightPrec: Precedence(0.1)})
-    |> addMatch(MatchPair("let", "in"))
+    /* let...in for local bindings in expressions.
+       let(name):(type)=(rhs) in(body) or let(name)=(rhs) in(body) */
+    |> addToken("let",  {kind: Keyword("let"), leftPrec: Uninterested, rightPrec: Interior})
+    |> addToken("in",   {kind: Keyword("in"),  leftPrec: Interior,     rightPrec: Precedence(0.1)})
+    |> addToken(":let", {kind: AtomIdent,      leftPrec: Interior,     rightPrec: Interior})
+    |> addToken("=let", {kind: AtomIdent,      leftPrec: Interior,     rightPrec: Interior})
+    |> addMatch(MatchPairMorph("let", ":", ":let"))   /* let name : → :let */
+    |> addMatch(MatchPairMorph(":let", "=", "=let"))  /* :let type = → =let */
+    |> addMatch(MatchPairMorph("let", "=", "=let"))   /* let name = → =let (no annotation) */
+    |> addMatch(MatchPair("=let", "in"))              /* =let rhs in → close */
     /* schema: keyword atom used as definition marker inside meta blocks */
     |> addToken("schema", {kind: Keyword("schema"), leftPrec: Uninterested, rightPrec: Uninterested})
     |> addToken("_",   {kind: Symbol("_"),    leftPrec: Uninterested, rightPrec: Uninterested})
-    |> addToken("...", {kind: Symbol("..."), leftPrec: Uninterested, rightPrec: Uninterested})
     /* construct...by — matched pair, by takes over block-end/block-block matching */
     |> addToken("by", {kind: Keyword("by"), leftPrec: Interior, rightPrec: Interior})
     |> addMatch(MatchPair("construct", "by"));
