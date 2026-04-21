@@ -548,14 +548,18 @@ and buildBlockFromForm = (keyword: string, contents: list(sharded(openForm))): o
    "by" carries the schema name and decls, so we skip the "construct" level. */
 and collectBlocks = (form: closedForm, contents: list(sharded(openForm))): option(list(block)) =>
   switch (form) {
+  /* `construct` is a syntactic opener — the enclosing `by` produces the block.
+     Skip it both when it appears as a bare head (lone `construct by X ... end`
+     chain) and when it appears as the closer of a sub-chain (postulate...
+     meta...construct...by chains). */
+  | CHead({value: TNamed("construct"), _}) => Some([])
+  | CMatch(inner, innerItems, {value: TNamed("construct"), _}) =>
+    collectBlocks(inner, innerItems)
   | CHead({value: TNamed(keyword), _}) =>
     switch (buildBlockFromForm(keyword, contents)) {
     | Some(b) => Some([b])
     | None => None
     }
-  /* Skip `construct` levels — the enclosing `by` represents the whole block */
-  | CMatch(inner, innerItems, {value: TNamed("construct"), _}) =>
-    collectBlocks(inner, innerItems)
   | CMatch(inner, innerItems, {value: TNamed(keyword), _}) =>
     switch (collectBlocks(inner, innerItems), buildBlockFromForm(keyword, contents)) {
     | (Some(prev), Some(b)) => Some(prev @ [b])

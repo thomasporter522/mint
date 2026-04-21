@@ -316,9 +316,7 @@ function App() {
           Errors:
         </span>
         <div>
-          {semanticErrors
-            .filter((e: Error) => e.from >= 0)
-            .map((error: Error, i: number) => (
+          {semanticErrors.map((error: Error, i: number) => (
             <div key={i}>
               <div className="error-message">
                 {messageOfError(error)}
