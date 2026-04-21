@@ -22,6 +22,7 @@ U : Sort
     (ap B C (ap A (to B C) f x) (ap A B g x)))
 -- natural numbers type
 N : U
+zero : N
 plus : (to N (to N N))
 meta
 -- SK abstraction: computes [x : A] e : (to A B) and a proof that applying
@@ -100,4 +101,8 @@ double : (to N N)
 construct by abstraction
 triple : (to N N)
 (triple-beta (n : N)) : (eq N N (ap N N triple n) (ap N N (ap N (to N N) plus n) (ap N N double n)))
+
+construct by abstraction
+aptwice : (to (to N N) N)
+(aptwice-beta (f : (to N N))) : (eq N N (ap (to N N) N aptwice f) (ap N N f (ap N N f zero)))
 end

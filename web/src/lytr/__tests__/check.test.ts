@@ -1648,6 +1648,20 @@ describe('typed-SK abstraction schema', () => {
     expect(errors(code)).toEqual([]);
   });
 
+  it('higher-order: abstraction variable has arrow type ([f] f (f zero))', () => {
+    // aptwice : (to (to N N) N) with body f (f zero), where the bound
+    // variable f is itself function-typed. Exercises abs with A = (to N N)
+    // and subterms whose inner types mix arrows and atomics.
+    const code = [
+      ...preamble(['zero : N']),
+      'construct by abstraction',
+      'aptwice : (to (to N N) N)',
+      '(aptwice-beta (f : (to N N))) : (eq N N (ap (to N N) N aptwice f) (ap N N f (ap N N f zero)))',
+      'end',
+    ].join('\n');
+    expect(errors(code)).toEqual([]);
+  });
+
   /* --- Negative cases: pattern must reject malformed beta declarations --- */
 
   it('rejects equation whose LHS is not an application', () => {
@@ -1750,5 +1764,47 @@ describe('construct-by chain parsing', () => {
     const path = resolve(__dirname, '../../../../examples/enum-coprod-generic.mint');
     const code = readFileSync(path, 'utf-8');
     expect(errors(code)).toEqual([]);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/*  Source locations: paren-wrapped terms include their delimiters     */
+/*  in the meta range. Previously the Builder stripped the outer ( )   */
+/*  positions when unwrapping a paren group, so errors localized to a  */
+/*  paren-wrapped type ended short of the closing parens.              */
+/* ------------------------------------------------------------------ */
+
+describe('paren-wrapped meta ranges', () => {
+  it('declaration error range covers the full paren-wrapped return type', () => {
+    // Single-decl construct block: the schema rejects (wrong arity)
+    // and localizes to the first decl. The decl is a declaration
+    // whose return type is `(to (to N N) (to N N))` — doubly nested
+    // parens. The reported range must include the final `))`.
+    const code = [
+      'postulate',
+      'U : Sort',
+      '(to (A : U) (B : U)) : U',
+      '(ap (A : U) (B : U) (f : (to A B)) (a : A)) : B',
+      '(eq (A : U) (B : U) (a : A) (b : B)) : U',
+      'N : U',
+      'meta',
+      'schema s = fun xs => match xs with',
+      '  | [(f, [], (to A B)), (_, [(x, _)], (eq _ _ (ap _ _ f x) body))]',
+      '    => (Ok [f, (ap A B f x)])',
+      '  | _ => (Error "bad")',
+      '  end',
+      'construct by s',
+      'aptwice : (to (to N N) (to N N))',
+      'end',
+    ].join('\n');
+    const errs = errors(code);
+    expect(errs.length).toBeGreaterThan(0);
+    const e = errs[0];
+    // The reported range should start at `aptwice` and end at the
+    // final `)` of the return type. Check by reconstructing the slice.
+    expect(e.from).toBeGreaterThanOrEqual(0);
+    const slice = code.substring(e.from, e.to);
+    expect(slice).toContain('aptwice');
+    expect(slice.endsWith('(to N N))')).toBe(true);
   });
 });

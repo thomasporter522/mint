@@ -208,13 +208,16 @@ and buildOLTerm = (form: openForm): ol => {
   /* Named token as identifier (e.g. Sort) */
   | (None, CHead({value: TNamed(name), _} as tok), None) =>
     {value: OLIdentifier(name), meta: metaFromRange(tok.start, tok.end_)}
-  /* Parens: (...) — just recurse, preserving parens flag */
-  | (None, CMatch(_, _, {value: TNamed(")"), _}), None) =>
+  /* Parens: (...) — just recurse, preserving parens flag.
+     Meta range spans from the opening ( to the closing ) so error
+     localization on a paren-wrapped term covers the full source. */
+  | (None, CMatch(_, _, {value: TNamed(")"), _} as closeTok), None) =>
     let (_, elementGroups) = collectBracketElements(closed);
     switch (elementGroups) {
     | [single] =>
       let inner = buildOLTerms(single);
-      {...inner, meta: {...inner.meta, parens: true}}
+      let openTok = Parser.headOf(closed);
+      {...inner, meta: {parens: true, start: openTok.start, end_: closeTok.end_}}
     | _ => mkOL(OLHole(Synthesized))
     }
   /* Application: left + head + right form an OLAp */
@@ -234,12 +237,13 @@ and buildOLHead = (cf: closedForm): ol =>
     {value: OLHole(User), meta: metaFromRange(tok.start, tok.end_)}
   | CHead({value: TNamed(name), _} as tok) =>
     {value: OLIdentifier(name), meta: metaFromRange(tok.start, tok.end_)}
-  | CMatch(_, _, {value: TNamed(")"), _}) =>
+  | CMatch(_, _, {value: TNamed(")"), _} as closeTok) =>
     let (_, elementGroups) = collectBracketElements(cf);
     switch (elementGroups) {
     | [single] =>
       let inner = buildOLTerms(single);
-      {...inner, meta: {...inner.meta, parens: true}}
+      let openTok = Parser.headOf(cf);
+      {...inner, meta: {parens: true, start: openTok.start, end_: closeTok.end_}}
     | _ => mkOL(OLHole(Synthesized))
     }
   | _ => mkOL(OLHole(Synthesized))
@@ -686,22 +690,27 @@ and buildForm = (form: openForm): ml => {
     let t = mk(Asc(l, r));
     {...t, meta: {...t.meta, parens: true}}
 
-  /* Bracket forms: (...), [...], with commas */
-  | (None, [], CMatch(_, _, {value: TNamed(")" | "]"), _}), [], None) =>
+  /* Bracket forms: (...), [...], with commas.
+     Meta range spans the full bracket pair so localization on a bracket-
+     wrapped term covers the entire source including the delimiters. */
+  | (None, [], CMatch(_, _, {value: TNamed(")" | "]"), _} as closeTok), [], None) =>
     let (open_, elementGroups) = collectBracketElements(closed);
     let elements = List.map(buildTerms, elementGroups);
+    let openTok = Parser.headOf(closed);
+    let withSpan = (t: ml) =>
+      {...t, meta: {parens: true, start: openTok.start, end_: closeTok.end_}};
     switch (open_, elements) {
-    | ("(", [single]) => {...single, meta: {...single.meta, parens: true}}
-    | ("(", elements) =>
-      let t = mk(Tuple(elements));
-      {...t, meta: {...t.meta, parens: true}}
+    | ("(", [single]) => withSpan(single)
+    | ("(", elements) => withSpan(mk(Tuple(elements)))
     | ("[", items) =>
-      switch (List.rev(items)) {
-      | [{value: Hole(Synthesized), _}] =>
-        /* [] with nothing inside — empty list */
-        mk(List([]))
-      | _ => mk(List(items))
-      }
+      let list =
+        switch (List.rev(items)) {
+        | [{value: Hole(Synthesized), _}] =>
+          /* [] with nothing inside — empty list */
+          mk(List([]))
+        | _ => mk(List(items))
+        };
+      {...list, meta: {...list.meta, start: openTok.start, end_: closeTok.end_}}
     | _ => mk(BuilderError)
     };
 
