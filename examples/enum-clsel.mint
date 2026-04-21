@@ -27,6 +27,7 @@
 -- Even without the beta laws, selN d m1 ... mN : M is well-typed
 -- only if all mi : M. No new M-inhabitants are created.
 postulate
+Sort : Sort
 U : Sort
 (eq (A : U) (B : U) (a : A) (b : B)) : U
 (refl (A : U) (a : A)) : (eq A A a a)

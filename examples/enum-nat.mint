@@ -16,6 +16,7 @@
 -- Minimality: The Nat/Vec/Enum hierarchy is more machinery than Approach 2,
 -- but it's GENERIC — it handles any arity without new postulates.
 postulate
+Sort : Sort
 U : Sort
 (eq (A : U) (B : U) (a : A) (b : B)) : U
 (refl (A : U) (a : A)) : (eq A A a a)

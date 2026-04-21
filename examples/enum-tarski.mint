@@ -16,6 +16,7 @@
 -- Minimality: Code/El add 2 postulates beyond Approach 2.
 -- Trade-off: cleaner structure vs. slightly larger postulate set.
 postulate
+Sort : Sort
 U : Sort
 (eq (A : U) (B : U) (a : A) (b : B)) : U
 (refl (A : U) (a : A)) : (eq A A a a)

@@ -17,6 +17,7 @@
 -- However, the approach is not GENERIC — extending to 3+ constructors
 -- requires adding new postulates for each arity.
 postulate
+Sort : Sort
 U : Sort
 (eq (A : U) (B : U) (a : A) (b : B)) : U
 (refl (A : U) (a : A)) : (eq A A a a)

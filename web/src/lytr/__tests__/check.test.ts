@@ -41,20 +41,20 @@ function goalString(code: string, index = 0): string {
 
 describe('basic postulate blocks', () => {
   it('accepts a simple declaration', () => {
-    expect(errors('postulate\nx : Sort\nend')).toEqual([]);
+    expect(errors('postulate\nSort : Sort\nx : Sort\nend')).toEqual([]);
   });
 
   it('accepts multiple declarations', () => {
-    expect(errors('postulate\nx : Sort\ny : Sort\nend')).toEqual([]);
+    expect(errors('postulate\nSort : Sort\nx : Sort\ny : Sort\nend')).toEqual([]);
   });
 
   it('reports unbound variable', () => {
-    const msgs = errorMessages('postulate\nx : y\nend');
+    const msgs = errorMessages('postulate\nSort : Sort\nx : y\nend');
     expect(msgs).toContainEqual(expect.stringContaining('Unbound variable'));
   });
 
   it('earlier declaration is in scope for later ones', () => {
-    expect(errors('postulate\nx : Sort\ny : x\nend')).toEqual([]);
+    expect(errors('postulate\nSort : Sort\nx : Sort\ny : x\nend')).toEqual([]);
   });
 });
 
@@ -64,25 +64,25 @@ describe('basic postulate blocks', () => {
 
 describe('function declarations', () => {
   it('accepts a function with one typed argument', () => {
-    expect(errors('postulate\nx : Sort\n(f (a : Sort)) : Sort\nend')).toEqual([]);
+    expect(errors('postulate\nSort : Sort\nx : Sort\n(f (a : Sort)) : Sort\nend')).toEqual([]);
   });
 
   it('accepts application with correct arity', () => {
     expect(errors(
-      'postulate\nx : Sort\n(f (a : Sort)) : Sort\ng : (f x)\nend'
+      'postulate\nSort : Sort\nx : Sort\n(f (a : Sort)) : Sort\ng : (f x)\nend'
     )).toEqual([]);
   });
 
   it('reports too many arguments', () => {
     const msgs = errorMessages(
-      'postulate\nx : Sort\n(f (a : Sort)) : Sort\ng : (f x x)\nend'
+      'postulate\nSort : Sort\nx : Sort\n(f (a : Sort)) : Sort\ng : (f x x)\nend'
     );
     expect(msgs).toContainEqual(expect.stringContaining('Too many arguments'));
   });
 
   it('reports too few arguments', () => {
     const msgs = errorMessages(
-      'postulate\nx : Sort\n(f (a : Sort) (b : Sort)) : Sort\ng : (f x)\nend'
+      'postulate\nSort : Sort\nx : Sort\n(f (a : Sort) (b : Sort)) : Sort\ng : (f x)\nend'
     );
     expect(msgs).toContainEqual(expect.stringContaining('Too few arguments'));
   });
@@ -95,20 +95,20 @@ describe('function declarations', () => {
 describe('argument scoping', () => {
   it('argument bindings do not leak to the next line', () => {
     const msgs = errorMessages(
-      'postulate\n(f (a : Sort)) : a\ng : a\nend'
+      'postulate\nSort : Sort\n(f (a : Sort)) : a\ng : a\nend'
     );
     expect(msgs).toContainEqual(expect.stringContaining('Unbound variable a'));
   });
 
   it('argument is in scope for the return type of its own line', () => {
     expect(errors(
-      'postulate\n(f (a : Sort)) : a\nend'
+      'postulate\nSort : Sort\n(f (a : Sort)) : a\nend'
     )).toEqual([]);
   });
 
   it('multiple arguments are in scope for each other and return type', () => {
     expect(errors(
-      'postulate\n(f (a : Sort) (b : a)) : b\nend'
+      'postulate\nSort : Sort\n(f (a : Sort) (b : a)) : b\nend'
     )).toEqual([]);
   });
 });
@@ -120,13 +120,13 @@ describe('argument scoping', () => {
 describe('type consistency', () => {
   it('no error when expected type matches inferred', () => {
     expect(errors(
-      'postulate\nx : Sort\n(f (a : Sort)) : Sort\ng : (f x)\nend'
+      'postulate\nSort : Sort\nx : Sort\n(f (a : Sort)) : Sort\ng : (f x)\nend'
     )).toEqual([]);
   });
 
   it('expected argument type is the TYPE, not the full ascription pattern', () => {
     expect(errors(
-      'postulate\nx : Sort\n(f (a : Sort)) : a\ng : (f x)\nend'
+      'postulate\nSort : Sort\nx : Sort\n(f (a : Sort)) : a\ng : (f x)\nend'
     )).toEqual([]);
   });
 
@@ -134,14 +134,14 @@ describe('type consistency', () => {
     // pi expects (B : (arrow A Sort)). After A=Sort, second arg should be (arrow Sort Sort).
     // Bare Sort is not (arrow Sort Sort), so this should error.
     const msgs = errorMessages(
-      'postulate\n(arrow (A : Sort) (B : Sort)) : Sort\n(pi (A : Sort) (B : (arrow A Sort))) : Sort\nx : (pi Sort Sort)\nend'
+      'postulate\nSort : Sort\n(arrow (A : Sort) (B : Sort)) : Sort\n(pi (A : Sort) (B : (arrow A Sort))) : Sort\nx : (pi Sort Sort)\nend'
     );
     expect(msgs).toContainEqual(expect.stringContaining('Inconsistency'));
   });
 
   it('reports inconsistency for genuinely wrong types', () => {
     const msgs = errorMessages(
-      'postulate\nx : Sort\ny : x\n(f (a : Sort)) : Sort\ng : (f y)\nend'
+      'postulate\nSort : Sort\nx : Sort\ny : x\n(f (a : Sort)) : Sort\ng : (f y)\nend'
     );
     expect(msgs).toContainEqual(expect.stringContaining('Inconsistency'));
   });
@@ -157,7 +157,7 @@ describe('return type substitution', () => {
     // g has type (f Sort), NOT Sort. (f Sort) ≠ Sort — they are different terms.
     // So (f g) should fail: f expects type Sort, but g has type (f Sort).
     const msgs = errorMessages(
-      'postulate\nx : Sort\n(f (a : Sort)) : a\ng : (f Sort)\na : (f g)\nend'
+      'postulate\nSort : Sort\nx : Sort\n(f (a : Sort)) : a\ng : (f Sort)\na : (f g)\nend'
     );
     expect(msgs).toContainEqual(expect.stringContaining('Inconsistency'));
   });
@@ -165,7 +165,7 @@ describe('return type substitution', () => {
   it('return type substitution with non-dependent return type is harmless', () => {
     // f always returns Sort regardless of argument — substitution is a no-op.
     expect(errors(
-      'postulate\nx : Sort\n(f (a : Sort)) : Sort\ng : (f x)\nend'
+      'postulate\nSort : Sort\nx : Sort\n(f (a : Sort)) : Sort\ng : (f x)\nend'
     )).toEqual([]);
   });
 
@@ -175,7 +175,7 @@ describe('return type substitution', () => {
     // (f x y): first arg x checked against Sort ✓, second arg y checked against a[a:=x] = x.
     //   y has type x ✓. Return type = b[a:=x, b:=y] = y.
     expect(errors(
-      'postulate\nx : Sort\ny : x\n(f (a : Sort) (b : a)) : b\ng : (f x y)\nend'
+      'postulate\nSort : Sort\nx : Sort\ny : x\n(f (a : Sort) (b : a)) : b\ng : (f x y)\nend'
     )).toEqual([]);
   });
 
@@ -184,7 +184,7 @@ describe('return type substitution', () => {
     // x : Sort, y : x
     // (f x x): second arg x checked against a[a:=x] = x. But x has type Sort, not x.
     const msgs = errorMessages(
-      'postulate\nx : Sort\ny : x\n(f (a : Sort) (b : a)) : b\ng : (f x x)\nend'
+      'postulate\nSort : Sort\nx : Sort\ny : x\n(f (a : Sort) (b : a)) : b\ng : (f x x)\nend'
     );
     expect(msgs).toContainEqual(expect.stringContaining('Inconsistency'));
   });
@@ -196,7 +196,7 @@ describe('return type substitution', () => {
     //   then c's type = b[a:=x,b:=y] = y, check z:y ✓,
     //   return = c[a:=x,b:=y,c:=z] = z
     expect(errors(
-      'postulate\nx : Sort\ny : x\nz : y\n(f (a : Sort) (b : a) (c : b)) : c\ng : (f x y z)\nend'
+      'postulate\nSort : Sort\nx : Sort\ny : x\nz : y\n(f (a : Sort) (b : a) (c : b)) : c\ng : (f x y z)\nend'
     )).toEqual([]);
   });
 
@@ -205,7 +205,7 @@ describe('return type substitution', () => {
     // g expects type x, but (f Sort) returns a[a:=Sort] = Sort.
     // Sort and x are different, so this should error.
     const msgs = errorMessages(
-      'postulate\nx : Sort\n(f (a : Sort)) : a\ng : x\nh : (f g)\nend'
+      'postulate\nSort : Sort\nx : Sort\n(f (a : Sort)) : a\ng : x\nh : (f g)\nend'
     );
     // (f g): g has type x, checked against Sort — inconsistency
     expect(msgs).toContainEqual(expect.stringContaining('Inconsistency'));
@@ -214,7 +214,7 @@ describe('return type substitution', () => {
   it('non-dependent multi-arg function still works', () => {
     // No parameter names appear in the return type — substitution is vacuous.
     expect(errors(
-      'postulate\nx : Sort\n(f (a : Sort) (b : Sort)) : Sort\ng : (f x x)\nend'
+      'postulate\nSort : Sort\nx : Sort\n(f (a : Sort) (b : Sort)) : Sort\ng : (f x x)\nend'
     )).toEqual([]);
   });
 });
@@ -226,17 +226,17 @@ describe('return type substitution', () => {
 describe('holes', () => {
   it('does not loop on self-referential application in declaration RHS', () => {
     expect(() => errors(
-      'postulate\n(eq (A : Sort) (B : Sort) (a : A) (b : B)) : Sort\n(refl (A : Sort) (a : A)) : (eq A ? ? ?)\nend'
+      'postulate\nSort : Sort\n(eq (A : Sort) (B : Sort) (a : A) (b : B)) : Sort\n(refl (A : Sort) (a : A)) : (eq A ? ? ?)\nend'
     )).not.toThrow();
   });
 
   it('hole gets the expected type as its goal', () => {
-    const g = goalString('postulate\nx : Sort\ng : ?\nend');
+    const g = goalString('postulate\nSort : Sort\nx : Sort\ng : ?\nend');
     expect(g).toBe('?');
   });
 
   it('hole in application position gets the argument type as goal', () => {
-    const h = holes('postulate\nx : Sort\n(f (a : Sort)) : Sort\ng : (f ?)\nend');
+    const h = holes('postulate\nSort : Sort\nx : Sort\n(f (a : Sort)) : Sort\ng : (f ?)\nend');
     expect(h.length).toBe(1);
     const goal = printTerm(h[0][1].goal);
     expect(goal).toBe('Sort');
@@ -245,7 +245,7 @@ describe('holes', () => {
   it('hole in second arg position gets substituted type as goal', () => {
     // f : (a : Sort) -> (b : a) -> b.  (f x ?): second arg expects a[a:=x] = x.
     const h = holes(
-      'postulate\nx : Sort\n(f (a : Sort) (b : a)) : b\ng : (f x ?)\nend'
+      'postulate\nSort : Sort\nx : Sort\n(f (a : Sort) (b : a)) : b\ng : (f x ?)\nend'
     );
     expect(h.length).toBe(1);
     const goal = printTerm(h[0][1].goal);
@@ -255,7 +255,7 @@ describe('holes', () => {
   it('return type with holes is consistent when structure matches', () => {
     // (trans D ? ? ? ? ?) has return type (eq D D ? ?) which is consistent with (eq D D x y)
     expect(errors(
-      'postulate\nU : Sort\n(eq (A : U) (B : U) (a : A) (b : B)) : U\n(trans (A : U) (a : A) (b : A) (c : A) (e1 : (eq A A a b)) (e2 : (eq A A b c))) : (eq A A a c)\nD : U\nx : D\ny : (eq D D x x)\nz : (eq (eq D D x x) (eq D D x x) y (trans D ? ? ? ? ?))\nend'
+      'postulate\nSort : Sort\nU : Sort\n(eq (A : U) (B : U) (a : A) (b : B)) : U\n(trans (A : U) (a : A) (b : A) (c : A) (e1 : (eq A A a b)) (e2 : (eq A A b c))) : (eq A A a c)\nD : U\nx : D\ny : (eq D D x x)\nz : (eq (eq D D x x) (eq D D x x) y (trans D ? ? ? ? ?))\nend'
     )).toEqual([]);
   });
 
@@ -263,7 +263,7 @@ describe('holes', () => {
     // (eq (eq ? ? ? ?) (eq ? ? ? ?) ? ?) is NOT consistent with (eq D D x y)
     // because the first args are eq-applications vs D
     const msgs = errorMessages(
-      'postulate\nU : Sort\n(eq (A : U) (B : U) (a : A) (b : B)) : U\n(trans (A : U) (a : A) (b : A) (c : A) (e1 : (eq A A a b)) (e2 : (eq A A b c))) : (eq A A a c)\nD : U\nx : D\ny : (eq D D x x)\nz : (eq (eq D D x x) (eq D D x x) y (trans (eq ? ? ? ?) ? ? ? ? ?))\nend'
+      'postulate\nSort : Sort\nU : Sort\n(eq (A : U) (B : U) (a : A) (b : B)) : U\n(trans (A : U) (a : A) (b : A) (c : A) (e1 : (eq A A a b)) (e2 : (eq A A b c))) : (eq A A a c)\nD : U\nx : D\ny : (eq D D x x)\nz : (eq (eq D D x x) (eq D D x x) y (trans (eq ? ? ? ?) ? ? ? ? ?))\nend'
     );
     expect(msgs.length).toBeGreaterThan(0);
   });
@@ -277,6 +277,7 @@ describe('schema blocks', () => {
   it('accepts a valid schema in a block chain', () => {
     const code = [
       'postulate',
+      'Sort : Sort',
       'x : Sort',
       'y : x',
       'meta',
@@ -291,6 +292,7 @@ describe('schema blocks', () => {
   it('reports ML type error in schema body', () => {
     const code = [
       'postulate',
+      'Sort : Sort',
       'x : Sort',
       'meta',
       'schema foo = fun s => match s with | _ => "wrong" end',
@@ -305,6 +307,7 @@ describe('schema blocks', () => {
   it('reports error when schema body returns wrong type', () => {
     const code = [
       'postulate',
+      'Sort : Sort',
       'x : Sort',
       'meta',
       'schema foo = fun s => match s with | _ => x end',
@@ -319,6 +322,7 @@ describe('schema blocks', () => {
   it('accepts schema with Ok wrapping terms', () => {
     const code = [
       'postulate',
+      'Sort : Sort',
       'x : Sort',
       'y : x',
       'meta',
@@ -333,7 +337,7 @@ describe('schema blocks', () => {
 
   it('schema definition with non-function body produces type error', () => {
     const msgs = errorMessages(
-      'postulate\nx : Sort\nmeta\nschema foo = x\nend'
+      'postulate\nSort : Sort\nx : Sort\nmeta\nschema foo = x\nend'
     );
     // x is not a function (schema type), so this should error
     expect(msgs.length).toBeGreaterThan(0);
@@ -349,6 +353,7 @@ describe('schema blocks', () => {
   it('accepts correct type annotation with parens', () => {
     const code = [
       'postulate',
+      'Sort : Sort',
       'x : Sort',
       'y : x',
       'meta',
@@ -370,6 +375,7 @@ describe('schema blocks', () => {
     // Without ? convention, unknown identifiers in OL patterns are binders
     const code = [
       'postulate',
+      'Sort : Sort',
       'U : Sort',
       '(eq (A : U) (B : U) (a : A) (b : B)) : U',
       'meta',
@@ -384,7 +390,7 @@ describe('schema blocks', () => {
   });
 
   it('schema errors do not leak into surrounding blocks', () => {
-    const code = 'postulate\nU : Sort\nmeta\nschema declaration = fun x => ?\nend';
+    const code = 'postulate\nSort : Sort\nU : Sort\nmeta\nschema declaration = fun x => ?\nend';
     const errs = errors(code);
     // Should have schema body errors but NOT postulate errors
     const unboundU = errs.filter((e: Error) => e.message.includes('Unbound variable U'));
@@ -402,26 +408,27 @@ describe('schema blocks', () => {
 describe('construct blocks', () => {
   it('checks construct by declarations like postulate', () => {
     expect(errors(
-      'postulate\nx : Sort\nmeta\nschema foo = fun s => (Ok (foldl (fun acc => fun _ => ? :: acc) [] s))\nconstruct by foo\ny : x\nend'
+      'postulate\nSort : Sort\nx : Sort\nmeta\nschema foo = fun s => (Ok (foldl (fun acc => fun _ => ? :: acc) [] s))\nconstruct by foo\ny : x\nend'
     )).toEqual([]);
   });
 
   it('reports unbound variable in construct declaration', () => {
     const msgs = errorMessages(
-      'postulate\nx : Sort\nmeta\nschema foo = fun s => (Ok (foldl (fun acc => fun _ => ? :: acc) [] s))\nconstruct by foo\ny : z\nend'
+      'postulate\nSort : Sort\nx : Sort\nmeta\nschema foo = fun s => (Ok (foldl (fun acc => fun _ => ? :: acc) [] s))\nconstruct by foo\ny : z\nend'
     );
     expect(msgs).toContainEqual(expect.stringContaining('Unbound variable'));
   });
 
   it('postulate context flows into construct declarations', () => {
     expect(errors(
-      'postulate\nx : Sort\ny : x\nmeta\nschema foo = fun s => (Ok (foldl (fun acc => fun _ => ? :: acc) [] s))\nconstruct by foo\nz : y\nend'
+      'postulate\nSort : Sort\nx : Sort\ny : x\nmeta\nschema foo = fun s => (Ok (foldl (fun acc => fun _ => ? :: acc) [] s))\nconstruct by foo\nz : y\nend'
     )).toEqual([]);
   });
 
   it('full chain: postulate context flows through schema to construct', () => {
     const code = [
       'postulate',
+      'Sort : Sort',
       'x : Sort',
       'y : x',
       'z : y',
@@ -437,6 +444,7 @@ describe('construct blocks', () => {
   it('construct declarations extend the context', () => {
     const code = [
       'postulate',
+      'Sort : Sort',
       'x : Sort',
       'meta',
       'schema foo = fun s => (Ok (foldl (fun acc => fun _ => ? :: acc) [] s))',
@@ -451,6 +459,7 @@ describe('construct blocks', () => {
   it('full definition schema example passes with no errors', () => {
     const code = [
       'postulate',
+      'Sort : Sort',
       'U : Sort',
       '(eq (A : U) (B : U) (a : A) (b : B)) : U',
       '(refl (A : U) (a : A)) : (eq A A a a)',
@@ -480,6 +489,7 @@ describe('construct blocks', () => {
   it('definition + arg-definition schemas with full SKK proof', () => {
     const code = [
       'postulate',
+      'Sort : Sort',
       'U : Sort',
       '(eq (A : U) (B : U) (a : A) (b : B)) : U',
       '(refl (A : U) (a : A)) : (eq A A a a)',
@@ -518,6 +528,7 @@ describe('construct blocks', () => {
   it('full equational proof: ap-I reduction via trans/ap-cong', () => {
     const code = [
       'postulate',
+      'Sort : Sort',
       'U : Sort',
       '(eq (A : U) (B : U) (a : A) (b : B)) : U',
       '(refl (A : U) (a : A)) : (eq A A a a)',
@@ -560,6 +571,7 @@ describe('construct blocks', () => {
   it('both schemas in single meta block with full proof', () => {
     const code = [
       'postulate',
+      'Sort : Sort',
       'U : Sort',
       '(eq (A : U) (B : U) (a : A) (b : B)) : U',
       '(refl (A : U) (a : A)) : (eq A A a a)',
@@ -601,6 +613,7 @@ describe('construct blocks', () => {
   it('arg-definition schema produces correct witnesses for parameterized declarations', () => {
     const code = [
       'postulate',
+      'Sort : Sort',
       'U : Sort',
       '(eq (A : U) (B : U) (a : A) (b : B)) : U',
       '(refl (A : U) (a : A)) : (eq A A a a)',
@@ -650,6 +663,7 @@ describe('witness-and-discard (future: schema execution)', () => {
   // Helper: the standard postulate + definition schema preamble
   const preamble = [
     'postulate',
+    'Sort : Sort',
     'U : Sort',
     '(eq (A : U) (B : U) (a : A) (b : B)) : U',
     '(refl (A : U) (a : A)) : (eq A A a a)',
@@ -761,6 +775,7 @@ describe('witness-and-discard (future: schema execution)', () => {
   it('should fail: schema produces witness of wrong type', () => {
     const code = [
       'postulate',
+      'Sort : Sort',
       'U : Sort',
       '(eq (A : U) (B : U) (a : A) (b : B)) : U',
       '(refl (A : U) (a : A)) : (eq A A a a)',
@@ -783,6 +798,7 @@ describe('witness-and-discard (future: schema execution)', () => {
   it('should fail: schema returns wrong number of witnesses', () => {
     const code = [
       'postulate',
+      'Sort : Sort',
       'U : Sort',
       'D : U',
       'K : D',
@@ -802,6 +818,7 @@ describe('witness-and-discard (future: schema execution)', () => {
   it('should fail: schema returns Error for valid-looking input', () => {
     const code = [
       'postulate',
+      'Sort : Sort',
       'U : Sort',
       'D : U',
       'K : D',
@@ -822,6 +839,7 @@ describe('witness-and-discard (future: schema execution)', () => {
   it('should fail: schema pattern binds wrong component as equation', () => {
     const code = [
       'postulate',
+      'Sort : Sort',
       'U : Sort',
       '(eq (A : U) (B : U) (a : A) (b : B)) : U',
       '(refl (A : U) (a : A)) : (eq A A a a)',
@@ -849,6 +867,7 @@ describe('witness-and-discard (future: schema execution)', () => {
   it('should fail: schema swaps witness order', () => {
     const code = [
       'postulate',
+      'Sort : Sort',
       'U : Sort',
       '(eq (A : U) (B : U) (a : A) (b : B)) : U',
       '(refl (A : U) (a : A)) : (eq A A a a)',
@@ -880,7 +899,7 @@ describe('witness-and-discard (future: schema execution)', () => {
 
 describe('shard and syntax errors', () => {
   it('reports shard errors with positions', () => {
-    const errs = errors('postulate\nx : Sort\nend\n)');
+    const errs = errors('postulate\nSort : Sort\nx : Sort\nend\n)');
     const positioned = errs.filter((e: Error) => e.from >= 0);
     expect(positioned.length).toBeGreaterThan(0);
   });
@@ -904,7 +923,7 @@ describe('shard and syntax errors', () => {
 
   it('shard inside construct block does not crash', () => {
     // Shards inside block bodies are filtered by buildItems (known limitation)
-    expect(() => errors('postulate\nx : Sort\nconstruct by foo\n)\nend')).not.toThrow();
+    expect(() => errors('postulate\nSort : Sort\nx : Sort\nconstruct by foo\n)\nend')).not.toThrow();
   });
 });
 
@@ -915,7 +934,7 @@ describe('shard and syntax errors', () => {
 describe('OL scope checking in schemas', () => {
   it('known OL name in schema expression is accepted', () => {
     const code = [
-      'postulate', 'x : Sort',
+      'postulate', 'Sort : Sort', 'x : Sort',
       'meta', 'schema foo = fun s => (Ok [x])',
       'end',
     ].join('\n');
@@ -924,7 +943,7 @@ describe('OL scope checking in schemas', () => {
 
   it('unknown name in schema expression errors', () => {
     const code = [
-      'postulate', 'x : Sort',
+      'postulate', 'Sort : Sort', 'x : Sort',
       'meta', 'schema foo = fun s => (Ok [unknown_thing])',
       'end',
     ].join('\n');
@@ -940,7 +959,7 @@ describe('OL scope checking in schemas', () => {
 
   it('construct declarations not visible in preceding schema', () => {
     const code = [
-      'postulate', 'x : Sort',
+      'postulate', 'Sort : Sort', 'x : Sort',
       'meta', 'schema foo = fun s => (Ok [y])',
       'construct by foo', 'y : x',
       'end',
@@ -951,7 +970,7 @@ describe('OL scope checking in schemas', () => {
 
   it('?-prefixed variables in OL patterns are not scope-checked', () => {
     const code = [
-      'postulate', 'x : Sort',
+      'postulate', 'Sort : Sort', 'x : Sort',
       'meta',
       'schema foo = fun s => match s with',
       '  | [(name, params, anything)] => (Ok [anything])',
@@ -964,7 +983,7 @@ describe('OL scope checking in schemas', () => {
 
   it('deeply nested OL application in pattern scope-checks all identifiers', () => {
     const code = [
-      'postulate', 'U : Sort',
+      'postulate', 'Sort : Sort', 'U : Sort',
       '(eq (A : U) (B : U) (a : A) (b : B)) : U',
       '(refl (A : U) (a : A)) : (eq A A a a)',
       'meta',
@@ -986,14 +1005,14 @@ describe('OL scope checking in schemas', () => {
   it('schema with OL context is strict', () => {
     // With postulate → strict mode, unknown identifiers error
     const msgs = errorMessages(
-      'postulate\ny : Sort\nmeta\nschema foo = fun s => (Ok [x])\nend'
+      'postulate\nSort : Sort\ny : Sort\nmeta\nschema foo = fun s => (Ok [x])\nend'
     );
     expect(msgs).toContainEqual(expect.stringContaining('Unbound variable x'));
   });
 
   it('unbound in expression position errors when OL scope is set', () => {
     const code = [
-      'postulate', 'x : Sort',
+      'postulate', 'Sort : Sort', 'x : Sort',
       'meta', 'schema foo = fun s => (Ok [unbound])',
       'end',
     ].join('\n');
@@ -1025,7 +1044,7 @@ describe('ML holes', () => {
 
   it('hole in Error argument gets String as goal', () => {
     const code = [
-      'postulate', 'x : Sort',
+      'postulate', 'Sort : Sort', 'x : Sort',
       'meta',
       'schema foo = fun s => match s with | _ => (Error ?) end',
       'construct by foo', 'y : x',
@@ -1038,7 +1057,7 @@ describe('ML holes', () => {
 
   it('ML hole context includes OL bindings from postulate', () => {
     const code = [
-      'postulate', 'x : Sort', 'y : x',
+      'postulate', 'Sort : Sort', 'x : Sort', 'y : x',
       'meta', 'schema foo = ?',
       'end',
     ].join('\n');
@@ -1056,7 +1075,7 @@ describe('ML holes', () => {
 
   it('hole in function position of application has goal and context', () => {
     const code = [
-      'postulate', 'x : Sort',
+      'postulate', 'Sort : Sort', 'x : Sort',
       'meta',
       'schema foo = fun s => match s with',
       '  | _ => (Ok [(? x)])',
@@ -1080,7 +1099,7 @@ describe('ML holes', () => {
 
   it('hole in function position of OL application has goal and context', () => {
     const code = [
-      'postulate', 'x : Sort',
+      'postulate', 'Sort : Sort', 'x : Sort',
       'meta',
       'schema foo = fun s => (Ok [(?)])',
       'end',
@@ -1103,7 +1122,7 @@ describe('ML holes', () => {
 
   it('every ML hole always has a context', () => {
     const code = [
-      'postulate', 'x : Sort', 'y : x',
+      'postulate', 'Sort : Sort', 'x : Sort', 'y : x',
       'meta',
       'schema foo = fun s => match s with',
       '  | [(name, params, ret)] => (Ok [?, (? ret)])',
@@ -1127,7 +1146,7 @@ describe('ML holes', () => {
 describe('ML total error localization', () => {
   it('reports errors in multiple match branches, not just the first', () => {
     const code = [
-      'postulate', 'x : Sort',
+      'postulate', 'Sort : Sort', 'x : Sort',
       'meta',
       'schema foo = fun s => match s with',
       '  | [] => "wrong1"',
@@ -1142,7 +1161,7 @@ describe('ML total error localization', () => {
 
   it('reports errors in both if branches', () => {
     const code = [
-      'postulate', 'x : Sort',
+      'postulate', 'Sort : Sort', 'x : Sort',
       'meta',
       'schema foo = fun s => (if s == s then "wrong1" else "wrong2" end)',
       'end',
@@ -1153,7 +1172,7 @@ describe('ML total error localization', () => {
 
   it('reports hole AND error in same expression', () => {
     const code = [
-      'postulate', 'x : Sort',
+      'postulate', 'Sort : Sort', 'x : Sort',
       'meta',
       'schema foo = fun s => match s with',
       '  | _ => (Ok [?, badvar])',
@@ -1171,7 +1190,7 @@ describe('ML total error localization', () => {
 
   it('error in scrutinee does not prevent checking branches', () => {
     const code = [
-      'postulate', 'x : Sort',
+      'postulate', 'Sort : Sort', 'x : Sort',
       'meta',
       'schema foo = fun s => match badvar with',
       '  | _ => "also wrong"',
@@ -1185,7 +1204,7 @@ describe('ML total error localization', () => {
 
   it('multiple unbound variables each get their own error', () => {
     const code = [
-      'postulate', 'x : Sort',
+      'postulate', 'Sort : Sort', 'x : Sort',
       'meta',
       'schema foo = fun s => (Ok [bad1, bad2, bad3])',
       'end',
@@ -1196,7 +1215,7 @@ describe('ML total error localization', () => {
 
   it('error in list element does not prevent checking other elements', () => {
     const code = [
-      'postulate', 'x : Sort',
+      'postulate', 'Sort : Sort', 'x : Sort',
       'meta',
       'schema foo = fun s => (Ok [x, badvar, x])',
       'end',
@@ -1215,7 +1234,7 @@ describe('ML total error localization', () => {
 describe('context isolation', () => {
   it('schema bindings do NOT leak into construct', () => {
     const code = [
-      'postulate', 'x : Sort',
+      'postulate', 'Sort : Sort', 'x : Sort',
       'meta', 'schema foo = fun s => (Ok (foldl (fun acc => fun _ => ? :: acc) [] s))',
       'construct by foo',
       'y : foo',
@@ -1227,7 +1246,7 @@ describe('context isolation', () => {
 
   it('construct declarations see earlier construct declarations', () => {
     const code = [
-      'postulate', 'x : Sort',
+      'postulate', 'Sort : Sort', 'x : Sort',
       'meta', 'schema foo = fun s => (Ok (foldl (fun acc => fun _ => ? :: acc) [] s))',
       'construct by foo',
       'y : x', 'z : y', 'w : z',
@@ -1247,7 +1266,7 @@ describe('context isolation', () => {
   });
 
   it('empty construct body does not crash', () => {
-    expect(errors('postulate\nx : Sort\nmeta\nschema foo = fun s => (Ok (foldl (fun acc => fun _ => ? :: acc) [] s))\nconstruct by foo\nend')).toEqual([]);
+    expect(errors('postulate\nSort : Sort\nx : Sort\nmeta\nschema foo = fun s => (Ok (foldl (fun acc => fun _ => ? :: acc) [] s))\nconstruct by foo\nend')).toEqual([]);
   });
 });
 
@@ -1258,7 +1277,7 @@ describe('context isolation', () => {
 describe('fun morph parser', () => {
   it('fun inside schema does not capture block end', () => {
     const code = [
-      'postulate', 'x : Sort', 'y : x',
+      'postulate', 'Sort : Sort', 'x : Sort', 'y : x',
       'meta', 'schema foo = fun s => match s with | [(name, [], ret)] => (Ok [y]) | _ => (Error "bad") end',
       'construct by foo', 'z : x',
       'end',
@@ -1335,7 +1354,7 @@ describe('schema annotation edge cases', () => {
 describe('shared namespace', () => {
   it('OL postulate names are visible inside schema body', () => {
     const code = [
-      'postulate', 'U : Sort', '(eq (A : U) (B : U) (a : A) (b : B)) : U',
+      'postulate', 'Sort : Sort', 'U : Sort', '(eq (A : U) (B : U) (a : A) (b : B)) : U',
       'meta', 'schema foo = fun s => (Ok [eq U U Sort Sort])',
       'end',
     ].join('\n');
@@ -1344,7 +1363,7 @@ describe('shared namespace', () => {
 
   it('OL name not in scope produces error in schema body', () => {
     const code = [
-      'postulate', 'x : Sort',
+      'postulate', 'Sort : Sort', 'x : Sort',
       'meta', 'schema foo = fun s => (Ok [nonexistent])',
       'end',
     ].join('\n');
@@ -1354,7 +1373,7 @@ describe('shared namespace', () => {
 
   it('ML pattern variable x usable in schema body expression', () => {
     const code = [
-      'postulate', 'x : Sort',
+      'postulate', 'Sort : Sort', 'x : Sort',
       'meta',
       'schema foo = fun s => match s with',
       '  | [(name, [], ret)] => (Ok [ret])',
@@ -1367,7 +1386,7 @@ describe('shared namespace', () => {
 
   it('ML hole in schema sees OL context', () => {
     const code = [
-      'postulate', 'x : Sort', 'y : x',
+      'postulate', 'Sort : Sort', 'x : Sort', 'y : x',
       'meta', 'schema foo = ?',
       'end',
     ].join('\n');
@@ -1381,7 +1400,7 @@ describe('shared namespace', () => {
 
   it('ML hole in match branch sees pattern bindings AND OL context', () => {
     const code = [
-      'postulate', 'x : Sort',
+      'postulate', 'Sort : Sort', 'x : Sort',
       'meta',
       'schema foo = fun s => match s with',
       '  | [(name, [], ret)] => (Ok [?])',
@@ -1399,6 +1418,7 @@ describe('shared namespace', () => {
   it('postulate context flows through to construct after schema', () => {
     const code = [
       'postulate',
+      'Sort : Sort',
       'U : Sort',
       '(eq (A : U) (B : U) (a : A) (b : B)) : U',
       '(refl (A : U) (a : A)) : (eq A A a a)',
@@ -1499,6 +1519,7 @@ describe('typed-SK abstraction schema', () => {
   function preamble(extraPostulates: string[] = []): string[] {
     return [
       'postulate',
+      'Sort : Sort',
       'U : Sort',
       '(eq (A : U) (B : U) (a : A) (b : B)) : U',
       '(refl (A : U) (a : A)) : (eq A A a a)',
@@ -1742,6 +1763,7 @@ describe('construct-by chain parsing', () => {
     // construct-by chain. Must not produce "Schema _ not found".
     const code = [
       'postulate',
+      'Sort : Sort',
       'U : Sort',
       'D : U',
       'a : D',
@@ -1782,6 +1804,7 @@ describe('paren-wrapped meta ranges', () => {
     // parens. The reported range must include the final `))`.
     const code = [
       'postulate',
+      'Sort : Sort',
       'U : Sort',
       '(to (A : U) (B : U)) : U',
       '(ap (A : U) (B : U) (f : (to A B)) (a : A)) : B',
@@ -1818,13 +1841,13 @@ describe('paren-wrapped meta ranges', () => {
 
 describe('argument type well-formedness', () => {
   it('rejects unbound identifier in a parameter type', () => {
-    const msgs = errorMessages('postulate\n(f (a : undeclared)) : Sort\nend');
+    const msgs = errorMessages('postulate\nSort : Sort\n(f (a : undeclared)) : Sort\nend');
     expect(msgs.some(m => m.includes('Unbound') && m.includes('undeclared'))).toBe(true);
   });
 
   it('rejects arity error in a parameter type', () => {
     const msgs = errorMessages(
-      'postulate\nN : Sort\n(f (a : (N extra))) : Sort\nend'
+      'postulate\nSort : Sort\nN : Sort\n(f (a : (N extra))) : Sort\nend'
     );
     expect(msgs.some(m => m.includes('Too many'))).toBe(true);
   });
@@ -1832,7 +1855,7 @@ describe('argument type well-formedness', () => {
   it('rejects inconsistency inside a parameter type', () => {
     // (P (x : N)) takes N, not Sort.
     const msgs = errorMessages(
-      'postulate\nN : Sort\n(P (x : N)) : Sort\n(f (a : (P Sort))) : Sort\nend'
+      'postulate\nSort : Sort\nN : Sort\n(P (x : N)) : Sort\n(f (a : (P Sort))) : Sort\nend'
     );
     expect(msgs.some(m => m.includes('Inconsistency'))).toBe(true);
   });
@@ -1840,28 +1863,29 @@ describe('argument type well-formedness', () => {
   it('rejects parameter type referencing a name declared later in the block', () => {
     // `later` is declared after `f`, so not in scope when checking f.
     const msgs = errorMessages(
-      'postulate\n(f (a : later)) : Sort\nlater : Sort\nend'
+      'postulate\nSort : Sort\n(f (a : later)) : Sort\nlater : Sort\nend'
     );
     expect(msgs.some(m => m.includes('Unbound') && m.includes('later'))).toBe(true);
   });
 
   it('accepts a well-formed parameter type', () => {
-    expect(errors('postulate\nN : Sort\n(f (a : N)) : Sort\nend')).toEqual([]);
+    expect(errors('postulate\nSort : Sort\nN : Sort\n(f (a : N)) : Sort\nend')).toEqual([]);
   });
 
   it('accepts dependent parameter types (later arg references earlier arg)', () => {
-    expect(errors('postulate\n(f (A : Sort) (a : A)) : A\nend')).toEqual([]);
+    expect(errors('postulate\nSort : Sort\n(f (A : Sort) (a : A)) : A\nend')).toEqual([]);
   });
 
   it('accepts chained dependencies across multiple parameters', () => {
     expect(errors(
-      'postulate\n(f (A : Sort) (B : Sort) (a : A) (b : B)) : Sort\nend'
+      'postulate\nSort : Sort\n(f (A : Sort) (B : Sort) (a : A) (b : B)) : Sort\nend'
     )).toEqual([]);
   });
 
   it('checks parameter types inside construct-block declarations', () => {
     const msgs = errorMessages([
       'postulate',
+      'Sort : Sort',
       'N : Sort',
       'meta',
       'schema s = fun xs => match xs with | _ => (Error "bad") end',
@@ -1883,29 +1907,29 @@ describe('argument type well-formedness', () => {
 describe('self-reference in declarations', () => {
   it('accepts self-reference in the return type', () => {
     // H : (x : Sort) → (H x) — H applied in its own retType.
-    expect(errors('postulate\n(H (x : Sort)) : (H x)\nend')).toEqual([]);
+    expect(errors('postulate\nSort : Sort\n(H (x : Sort)) : (H x)\nend')).toEqual([]);
   });
 
   it('accepts self-reference in a zero-ary declaration (F : F)', () => {
     // The degenerate case — the decl's type is its own name.
-    expect(errors('postulate\nF : F\nend')).toEqual([]);
+    expect(errors('postulate\nSort : Sort\nF : F\nend')).toEqual([]);
   });
 
   it('name is in scope for parameter types (no Unbound error)', () => {
     // F takes one arg; its param type mentions F itself. With self-ref the
     // name resolves (even if arity still produces other errors).
-    const msgs = errorMessages('postulate\n(F (x : F)) : Sort\nend');
+    const msgs = errorMessages('postulate\nSort : Sort\n(F (x : F)) : Sort\nend');
     expect(msgs.every(m => !m.includes('Unbound'))).toBe(true);
   });
 
   it('still rejects arity errors in self-reference', () => {
     // F takes one arg, but retType uses F with two.
-    const msgs = errorMessages('postulate\n(F (x : Sort)) : (F x x)\nend');
+    const msgs = errorMessages('postulate\nSort : Sort\n(F (x : Sort)) : (F x x)\nend');
     expect(msgs.some(m => m.includes('Too many'))).toBe(true);
   });
 
   it('still rejects unbound non-self names even when self is in scope', () => {
-    const msgs = errorMessages('postulate\n(F (x : Sort)) : (F other)\nend');
+    const msgs = errorMessages('postulate\nSort : Sort\n(F (x : Sort)) : (F other)\nend');
     expect(msgs.some(m => m.includes('Unbound') && m.includes('other'))).toBe(true);
   });
 
@@ -1915,6 +1939,7 @@ describe('self-reference in declarations', () => {
     // decl well-formedness pass does not emit Unbound for Rec.
     const code = [
       'postulate',
+      'Sort : Sort',
       'N : Sort',
       'meta',
       'schema s = fun xs => match xs with | _ => (Error "bad") end',
@@ -1940,6 +1965,7 @@ describe('witness substitution in construct blocks', () => {
     // For b's check, expected type is a[witness] = N, and zero : N. OK.
     const code = [
       'postulate',
+      'Sort : Sort',
       'N : Sort',
       'zero : N',
       'end',
@@ -1963,6 +1989,7 @@ describe('witness substitution in construct blocks', () => {
     // becomes zero : N. OK.
     const code = [
       'postulate',
+      'Sort : Sort',
       'N : Sort',
       'zero : N',
       'end',
@@ -1977,5 +2004,27 @@ describe('witness substitution in construct blocks', () => {
       'end',
     ].join('\n');
     expect(errors(code)).toEqual([]);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/*  Empty initial context                                              */
+/*  The OL context begins empty — no built-in notions. Sort (and       */
+/*  every other name) must be declared by the user. Self-reference     */
+/*  makes `Sort : Sort` a legal bootstrap declaration.                 */
+/* ------------------------------------------------------------------ */
+
+describe('empty initial context', () => {
+  it('Sort is not a built-in OL identifier', () => {
+    const msgs = errorMessages('postulate\nx : Sort\nend');
+    expect(msgs.some(m => m.includes('Unbound') && m.includes('Sort'))).toBe(true);
+  });
+
+  it('Sort : Sort is accepted as a bootstrap declaration (via self-ref)', () => {
+    expect(errors('postulate\nSort : Sort\nend')).toEqual([]);
+  });
+
+  it('declarations following Sort : Sort can use Sort', () => {
+    expect(errors('postulate\nSort : Sort\nU : Sort\n(f (x : U)) : U\nend')).toEqual([]);
   });
 });

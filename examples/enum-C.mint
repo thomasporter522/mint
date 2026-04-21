@@ -1,6 +1,7 @@
 -- Approach C: Direct postulation at U level
 -- Postulate enum infrastructure directly, use it to witness construct blocks
 postulate
+Sort : Sort
 U : Sort
 (eq (A : U) (B : U) (a : A) (b : B)) : U
 (refl (A : U) (a : A)) : (eq A A a a)

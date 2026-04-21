@@ -177,17 +177,11 @@ type lookupResult =
   | Found(option(fullType))
   | NotFound;
 
-let sortTerm = mkOL(OLIdentifier("Sort"));
-
 let lookupCtx = (ctx: context, x: string): lookupResult =>
-  if (x == "Sort") {
-    Found(Some(([], sortTerm)));
-  } else {
-    switch (StringMap.find_opt(x, ctx)) {
-    | Some(OL(ft)) => Found(ft)
-    | Some(ML(_)) | Some(Builtin(_)) | Some(SchemaBinding(_)) | Some(MetaLet(_, _)) => NotFound
-    | None => NotFound
-    };
+  switch (StringMap.find_opt(x, ctx)) {
+  | Some(OL(ft)) => Found(ft)
+  | Some(ML(_)) | Some(Builtin(_)) | Some(SchemaBinding(_)) | Some(MetaLet(_, _)) => NotFound
+  | None => NotFound
   };
 
 /* --- Error helpers --- */
@@ -344,14 +338,15 @@ let signatureType = MTuple([MTerm, MList(MTuple([MTerm, MTerm])), MTerm]);
 /* Schema type: List Signature -> Result (List Term) */
 let schemaType = MArrow(MList(signatureType), MResult(MList(MTerm)));
 
-/* ML builtins context — every ML builtin must be declared here */
+/* ML builtins context — every ML builtin must be declared here.
+   No OL-level built-ins: the OL context begins empty, so Sort must be
+   declared by the user (typically `Sort : Sort` at the top of the first
+   postulate block). */
 let mlBuiltins: context =
   List.fold_left(
     (acc, (name, b)) => StringMap.add(name, b, acc),
     StringMap.empty,
     [
-      /* OL constant available in ML */
-      ("Sort", ML(MTerm)),
       /* Polymorphic builtins — need custom typing rules */
       ("fst", Builtin("fst")),
       ("snd", Builtin("snd")),

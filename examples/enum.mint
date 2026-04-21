@@ -9,6 +9,7 @@
 -- Case elimination applies the embedded scrutinee to embedded branches.
 -- Equations proved by SK-reduction + retraction.
 postulate
+Sort : Sort
 U : Sort
 (eq (A : U) (B : U) (a : A) (b : B)) : U
 (refl (A : U) (a : A)) : (eq A A a a)
