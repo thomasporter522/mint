@@ -165,12 +165,6 @@ let rec termConsistent = (a: ol, b: ol): bool =>
   | _ => false
   };
 
-let consistent = (t1: option(ol), t2: option(ol)): bool =>
-  switch (t1, t2) {
-  | (None, _) | (_, None) => true
-  | (Some(a), Some(b)) => termConsistent(a, b)
-  };
-
 /* --- Context lookup (OL mode) --- */
 
 type lookupResult =
@@ -190,32 +184,23 @@ let subsume =
     (expected: option(ol), inferred: option(fullType), from, to_)
     : list(error) => {
   let tooFewArgs =
-    switch (inferred) {
-    | Some((params, _)) when List.length(params) > 0 && expected != None =>
-      [mark("Too few arguments", from, to_)]
+    switch (inferred, expected) {
+    | (Some(([_, ..._], _)), Some(_)) => [mark("Too few arguments", from, to_)]
     | _ => []
     };
-  let inferredOut =
-    switch (inferred) {
-    | Some((_, out)) => Some(out)
-    | None => None
-    };
+  let inferredOut = Option.map(((_, out)) => out, inferred);
   let inconsistency =
-    if (!consistent(expected, inferredOut)) {
-      switch (expected, inferredOut) {
-      | (Some(exp), Some(inf)) =>
-        [mark(
-           "Inconsistency (expected "
-           ++ printOL(exp)
-           ++ ", got "
-           ++ printOL(inf)
-           ++ ")",
-           from, to_,
-         )]
-      | _ => []
-      };
-    } else {
-      [];
+    switch (expected, inferredOut) {
+    | (Some(exp), Some(inf)) when !termConsistent(exp, inf) =>
+      [mark(
+         "Inconsistency (expected "
+         ++ printOL(exp)
+         ++ ", got "
+         ++ printOL(inf)
+         ++ ")",
+         from, to_,
+       )]
+    | _ => []
     };
   tooFewArgs @ inconsistency;
 };
@@ -329,7 +314,10 @@ let getInferredMlType = (info: staticInfo): mlType =>
 /* --- OL scope checking: strict when OL bindings exist, permissive otherwise --- */
 
 let hasOLBindings = (ctx: context): bool =>
-  StringMap.exists((_, v) => switch (v) { | OL(_) => true | ML(_) | Builtin(_) | SchemaBinding(_) | MetaLet(_, _) => false }, ctx);
+  StringMap.exists(
+    (_, v) => switch (v) { | OL(_) => true | _ => false },
+    ctx,
+  );
 
 /* Signature = (Term, List (Term, Term), Term) — name, params, return type.
    Matches Eval.declToSignature: Tuple([name, List(params), retType]) */
@@ -403,17 +391,13 @@ and checkOLTerm = (ctx: context, mode: checkingMode, t: ol): staticInfo =>
       ["expression", "spine", "identifier"], mode, t.meta.start, t.meta.end_,
     );
     switch (mode) {
-    | Expression(_) =>
+    | Expression(expected) =>
       switch (lookupCtx(ctx, v)) {
       | NotFound =>
         let err = mark("Unbound variable " ++ v, t.meta.start, t.meta.end_);
         {errors: [err, ...modeErrors], holes: [], inferred: None, mlInferred: None, bindings: StringMap.empty};
       | Found(inferred) =>
-        let subErrors =
-          switch (mode) {
-          | Expression(expected) => subsume(expected, inferred, t.meta.start, t.meta.end_)
-          | _ => []
-          };
+        let subErrors = subsume(expected, inferred, t.meta.start, t.meta.end_);
         {errors: modeErrors @ subErrors, holes: [], inferred, mlInferred: None, bindings: StringMap.empty};
       }
     | _ =>

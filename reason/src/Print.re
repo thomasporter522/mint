@@ -207,10 +207,3 @@ let printBlock = (b: block): string =>
 
 let printProgram = (p: program): string =>
   String.concat(" ", List.map(printBlock, p));
-
-/* --- Backward-compatible aliases --- */
-
-/* These are used by Lytr_api.re and Check.re which still need
-   to print ml terms. Will be removed once all consumers are updated. */
-let printTerm = printML;
-let debugTerm = debugML;

@@ -1,7 +1,9 @@
 // Types for the JS boundary with ReasonML.
 // Terms are opaque — only printTerm can inspect them.
+// Using `unknown` forces callers to go through printTerm rather than
+// accidentally relying on the Melange runtime shape.
 
-export type Term = any
+export type Term = unknown
 
 export interface Error {
   type: string

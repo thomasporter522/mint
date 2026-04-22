@@ -11,9 +11,9 @@ let combineTerms =
   fun
   | [] => mk(Hole(Synthesized))
   | [t] => t
-  | [first, ..._] as ts => {
-      let last = List.nth(ts, List.length(ts) - 1);
-      let t = mk(Ap(first, List.tl(ts)));
+  | [first, ...rest] => {
+      let last = List.fold_left((_, x) => x, first, rest);
+      let t = mk(Ap(first, rest));
       {...t, meta: {...t.meta, start: first.meta.start, end_: last.meta.end_}};
     };
 
@@ -280,7 +280,7 @@ and combineOLTerms =
   | [] => mkOL(OLHole(Synthesized))
   | [t] => t
   | [first, ...rest] => {
-      let last = List.nth(rest, List.length(rest) - 1);
+      let last = List.fold_left((_, x) => x, first, rest);
       {value: OLAp(first, rest), meta: metaFromRange(first.meta.start, last.meta.end_)};
     }
 

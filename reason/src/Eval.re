@@ -95,14 +95,10 @@ let rec matchPat = (bindings: evalEnv, p: pat, value: mlValue): option(evalEnv) 
 
   | PCons(headPat, tailPat) =>
     switch (value) {
-    | Val({value: List(vals), _}) when List.length(vals) >= 1 =>
-      switch (vals) {
-      | [hd, ...tl] =>
-        switch (matchPat(bindings, headPat, Val(hd))) {
-        | None => None
-        | Some(b) => matchPat(b, tailPat, Val(mk(List(tl))))
-        }
-      | [] => None  /* unreachable due to length check */
+    | Val({value: List([hd, ...tl]), _}) =>
+      switch (matchPat(bindings, headPat, Val(hd))) {
+      | None => None
+      | Some(b) => matchPat(b, tailPat, Val(mk(List(tl))))
       }
     | _ => None
     }
