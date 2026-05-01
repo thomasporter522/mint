@@ -1,6 +1,10 @@
 postulate
-Sort : Sort
-U : Sort
+sort : sort 
+level : sort
+level-zero : level
+(level-suc (l : level)) : level
+(U (l : level)) : (U (level-suc l))
+U : sort
 (eq (A : U) (B : U) (a : A) (b : B)) : U
 (refl (A : U) (a : A)) : (eq A A a a)
 (trans (A : U) (a : A) (b : A) (c : A) (e1 : (eq A A a b)) (e2 : (eq A A b c))) : (eq A A a c)
@@ -13,6 +17,10 @@ U : Sort
 (K (A : U) (B : U)) : (to A (to B A))
 (S (A : U) (B : U) (C : U)) : (to (to A (to B C)) (to (to A B) (to A C)))
 (K-eq (A : U) (B : U) (x : A) (y : B)) : (eq A A (ap B A (ap A (to B A) (K A B) x) y) x)
+-- insight: use combinators to abstract anything by giving it its own version of the S combinator
+-- the regular S combinator does this for 'ap'. The version for 'to' would I think be like:
+-- (S-to (A : U)) : to (to A U) (to (to A U) (to A U))
+-- where S-to x y z = (to (x z) (y z))
 (S-eq (A : U) (B : U) (C : U) (f : (to A (to B C))) (g : (to A B)) (x : A)) :
   (eq C C
     (ap A C
@@ -25,6 +33,9 @@ U : Sort
 N : U
 zero : N
 plus : (to N (to N N))
+-- pi types
+(pi (A : U) (B : to A U)) : U
+(ap-pi (A : U) (B : to A U) (f : (pi A B)) (a : A)) : (ap A U B a)
 meta
 -- SK abstraction: computes [x : A] e : (to A B) and a proof that applying
 -- the resulting combinator to x yields e.
