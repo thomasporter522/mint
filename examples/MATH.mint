@@ -12,6 +12,8 @@ lz : level
 (sym (l : level) (A : (Ul l)) (B : (Ul l)) (a : A) (b : B) (e : eq l A B a b)) : (eq l B A b a)
 (trans (l : level) (A : (Ul l)) (B : (Ul l)) (C : (Ul l)) (a : A) (b : B) (c : C) (e1 : (eq l A B a b)) (e2 : (eq l B C b c))) : (eq l A C a c)
 (cast (l : level) (A : (Ul l)) (B : (Ul l)) (e : eq (ls l) (Ul l) (Ul l) A B) (a : A)) : B
+-- level equations
+(lmax-idem (l : level)) : (eq ? ? ? (lmax l l) l)
 -- function types
 (to (l1 : level) (l2 : level) (A : (Ul l1)) (B : (Ul l2))) : (Ul (lmax l1 l2))
 (ap (l1 : level) (l2 : level) (A : (Ul l1)) (B : (Ul l2)) (f : (to l1 l2 A B)) (a : A)) : B
@@ -161,10 +163,190 @@ star : unit
 (unit-rec (Ml : level) (M : (Ul Ml)) (star-case : M) (u : unit)) : M
 (unit-comp (Ml : level) (M : (Ul Ml)) (star-case : M)) :
   (eq Ml M M (unit-rec Ml M star-case star) star-case)
+(sum (lA : level) (lB : level) (A : (Ul lA)) (B : (Ul lB))) : (Ul (lmax lA lB))
+(inl (lA : level) (lB : level) (A : (Ul lA)) (B : (Ul lB)) (a : A)) : (sum lA lB A B)
+(inr (lA : level) (lB : level) (A : (Ul lA)) (B : (Ul lB)) (b : B)) : (sum lA lB A B)
+(sum-case (lA : level) (lB : level) (lM : level)
+          (A : (Ul lA)) (B : (Ul lB)) (M : (Ul lM))
+          (f : (to lA lM A M)) (g : (to lB lM B M))) :
+  (to (lmax lA lB) lM (sum lA lB A B) M)
+(sum-case-inl (lA : level) (lB : level) (lM : level)
+              (A : (Ul lA)) (B : (Ul lB)) (M : (Ul lM))
+              (f : (to lA lM A M)) (g : (to lB lM B M))
+              (a : A)) :
+  (eq lM M M
+    (ap (lmax lA lB) lM (sum lA lB A B) M (sum-case lA lB lM A B M f g) (inl lA lB A B a))
+    (ap lA lM A M f a))
+(sum-case-inr (lA : level) (lB : level) (lM : level)
+              (A : (Ul lA)) (B : (Ul lB)) (M : (Ul lM))
+              (f : (to lA lM A M)) (g : (to lB lM B M))
+              (b : B)) :
+  (eq lM M M
+    (ap (lmax lA lB) lM (sum lA lB A B) M (sum-case lA lB lM A B M f g) (inr lA lB A B b))
+    (ap lB lM B M g b))
 N : (Ul lz)
 zero : N
 plus : (to lz (lmax lz lz) N (to lz lz N N))
 construct by abstraction
 double : (to lz lz N N)
 (double-beta (n : N)) : (eq lz N N (ap lz lz N N double n) (ap lz lz N N (ap lz (lmax lz lz) N (to lz lz N N) plus n) n))
+meta
+reverse : ((List Term) -> (List Term)) = fun xs => (foldl (fun acc => fun x => x :: acc) [] xs)
+reverse-triples : ((List (Term, (Term, Term))) -> (List (Term, (Term, Term)))) = fun xs => (foldl (fun acc => fun x => x :: acc) [] xs)
+append : ((List Term) -> ((List Term) -> (List Term))) = fun xs => fun ys => (foldl (fun acc => fun x => x :: acc) ys (reverse xs))
+concat : ((List (List Term)) -> (List Term)) = fun xss => (foldl (fun acc => fun xs => (append acc xs)) [] xss)
+build-injs-and-type : ((List Term) -> ((List Term), (Term, Term))) = fun rest =>
+  (foldl (fun acc => fun _ =>
+    let prev-injs = (fst acc) in
+    let prev-pair = (snd acc) in
+    let prev-type = (fst prev-pair) in
+    let prev-level = (snd prev-pair) in
+    let cur-type = (sum lz prev-level unit prev-type) in
+    let cur-level = (lmax lz prev-level) in
+    let wrapped = (reverse (foldl (fun a => fun inj =>
+      (inr lz prev-level unit prev-type inj) :: a) [] prev-injs)) in
+    ((inl lz prev-level unit prev-type star) :: wrapped, (cur-type, cur-level))
+  ) ([star], (unit, lz)) rest)
+build-elim : (Term -> (Term -> ((List Term) -> ((List Term) -> Term)))) = fun lM => fun mvar => fun case-vars => fun rest =>
+  let rev-cvs = (reverse case-vars) in
+  match rev-cvs with
+  | last-cv :: remaining-cvs =>
+    let last-f = (ap lM (lmax lz lM) mvar (to lz lM unit mvar)
+                     (combinator-constant lM lz mvar unit)
+                     last-cv) in
+    (fst (foldl (fun acc => fun cv =>
+      let prev-arr = (fst acc) in
+      let prev-pair = (snd acc) in
+      let prev-type = (fst prev-pair) in
+      let prev-level = (snd prev-pair) in
+      let cur-type = (sum lz prev-level unit prev-type) in
+      let cur-level = (lmax lz prev-level) in
+      let f = (ap lM (lmax lz lM) mvar (to lz lM unit mvar)
+                  (combinator-constant lM lz mvar unit)
+                  cv) in
+      let new-arr = (sum-case lz prev-level lM unit prev-type mvar f prev-arr) in
+      (new-arr, (cur-type, cur-level))
+    ) (last-f, (unit, lz)) remaining-cvs))
+  | _ => star
+  end
+build-proofs : (Term -> (Term -> ((List Term) -> ((List Term) -> (List Term))))) = fun lM => fun mvar => fun case-vars => fun rest =>
+  let rev-cvs = (reverse case-vars) in
+  match rev-cvs with
+  | last-cv :: remaining-cvs =>
+    let last-f = (ap lM (lmax lz lM) mvar (to lz lM unit mvar)
+                     (combinator-constant lM lz mvar unit)
+                     last-cv) in
+    let last-proof = (combinator-constant-eq lM lz mvar unit last-cv star) in
+    let result = (foldl (fun acc => fun cv =>
+      let prev-triples-and-elim = (fst acc) in
+      let prev-triples = (fst prev-triples-and-elim) in
+      let prev-elim = (snd prev-triples-and-elim) in
+      let prev-pair = (snd acc) in
+      let prev-type = (fst prev-pair) in
+      let prev-level = (snd prev-pair) in
+      let cur-type = (sum lz prev-level unit prev-type) in
+      let cur-level = (lmax lz prev-level) in
+      let f = (ap lM (lmax lz lM) mvar (to lz lM unit mvar)
+                  (combinator-constant lM lz mvar unit)
+                  cv) in
+      let cur-elim = (sum-case lz prev-level lM unit prev-type mvar f prev-elim) in
+      let inl-proof = (trans lM mvar mvar mvar
+        (ap cur-level lM cur-type mvar cur-elim (inl lz prev-level unit prev-type star))
+        (ap lz lM unit mvar f star)
+        cv
+        (sum-case-inl lz prev-level lM unit prev-type mvar f prev-elim star)
+        (combinator-constant-eq lM lz mvar unit cv star)) in
+      let inl-triple = (inl-proof, ((inl lz prev-level unit prev-type star), cv)) in
+      let wrapped = (reverse-triples (foldl (fun a => fun triple =>
+        let old-proof = (fst triple) in
+        let old-inj = (fst (snd triple)) in
+        let old-tc = (snd (snd triple)) in
+        let new-proof = (trans lM mvar mvar mvar
+          (ap cur-level lM cur-type mvar cur-elim (inr lz prev-level unit prev-type old-inj))
+          (ap prev-level lM prev-type mvar prev-elim old-inj)
+          old-tc
+          (sum-case-inr lz prev-level lM unit prev-type mvar f prev-elim old-inj)
+          old-proof) in
+        (new-proof, ((inr lz prev-level unit prev-type old-inj), old-tc)) :: a
+      ) [] prev-triples)) in
+      ((inl-triple :: wrapped, cur-elim), (cur-type, cur-level))
+    ) (([(last-proof, (star, last-cv))], last-f), (unit, lz)) remaining-cvs) in
+    (reverse (foldl (fun acc => fun triple =>
+      (fst triple) :: acc) [] (fst (fst result))))
+  | _ => []
+  end
+
+schema enum = fun s => match s with
+  | [(type-name, [], (Ul lT)),
+     (case-name, [(_, level), (mvar, (Ul lM)), (scrut, type-name)], mvar)]
+    => (Ok [void, (absurd lM mvar scrut)])
+  | [(type-name, [], (Ul lT)),
+     (ctor, [], type-name),
+     (case-name, [(_, level), (mvar, (Ul lM)), (tc, mvar), (scrut, type-name)], mvar),
+     (eq-name, [(_, level), (mvar2, (Ul lM2)), (tc2, mvar2)], _)]
+    => (Ok [unit, star, (unit-rec lM mvar tc scrut), (unit-comp lM2 mvar2 tc2)])
+  | (type-name, [], (Ul lT)) :: all-rest =>
+    let found-params = (foldl (fun acc => fun entry =>
+      if (fst acc) == true then acc
+      else match entry with
+        | (_, [], _) => acc
+        | (_, params, _) => (true, params)
+        end
+      end
+    ) (false, [(star, star)]) all-rest) in
+    match (snd found-params) with
+    | (_, level) :: (mvar, (Ul lM)) :: tc-and-scrut =>
+      let vars-info = (foldl (fun acc => fun p =>
+        if (fst (fst acc)) == true
+        then ((false, (snd (fst acc))), (fst p))
+        else ((false, (snd acc) :: (snd (fst acc))), (fst p))
+        end
+      ) ((true, []), star) tc-and-scrut) in
+      let rev-case-vars = (snd (fst vars-info)) in
+      let scrut = (snd vars-info) in
+      let case-vars = (reverse rev-case-vars) in
+      match case-vars with
+      | _ :: rest-case-vars =>
+        let iat = (build-injs-and-type rest-case-vars) in
+        let injs = (fst iat) in
+        let coprod-pair = (snd iat) in
+        let coprod-type = (fst coprod-pair) in
+        let coprod-level = (snd coprod-pair) in
+        let elim-arr = (build-elim lM mvar case-vars rest-case-vars) in
+        let case-witness = (ap coprod-level lM coprod-type mvar elim-arr scrut) in
+        let proofs = (build-proofs lM mvar case-vars rest-case-vars) in
+        (Ok (concat [[coprod-type], injs, [case-witness], proofs]))
+      | _ => (Error "no ctors") end
+    | _ => (Error "bad params") end
+  | _ => (Error "unrecognized") end
+construct by enum
+falsity : (Ul lz)
+(falsity-case (lM : level) (M : (Ul lM)) (scrutinee : falsity)) : M
+construct by enum
+myunit : (Ul lz)
+trivial : myunit
+(myunit-case (lM : level) (M : (Ul lM)) (trivial-case : M) (scrutinee : myunit)) : M
+(myunit-case-trivial (lM : level) (M : (Ul lM)) (trivial-case : M)) :
+  (eq lM M M (myunit-case lM M trivial-case trivial) trivial-case)
+construct by enum
+mybool : (Ul lz)
+yes : mybool
+no : mybool
+(mybool-case (lM : level) (M : (Ul lM)) (yes-case : M) (no-case : M) (scrutinee : mybool)) : M
+(mybool-case-yes (lM : level) (M : (Ul lM)) (yes-case : M) (no-case : M)) :
+  (eq lM M M (mybool-case lM M yes-case no-case yes) yes-case)
+(mybool-case-no (lM : level) (M : (Ul lM)) (yes-case : M) (no-case : M)) :
+  (eq lM M M (mybool-case lM M yes-case no-case no) no-case)
+construct by enum
+triple : (Ul lz)
+a : triple
+b : triple
+c : triple
+(triple-case (lM : level) (M : (Ul lM)) (a-case : M) (b-case : M) (c-case : M) (scrutinee : triple)) : M
+(triple-case-a (lM : level) (M : (Ul lM)) (a-case : M) (b-case : M) (c-case : M)) :
+  (eq lM M M (triple-case lM M a-case b-case c-case a) a-case)
+(triple-case-b (lM : level) (M : (Ul lM)) (a-case : M) (b-case : M) (c-case : M)) :
+  (eq lM M M (triple-case lM M a-case b-case c-case b) b-case)
+(triple-case-c (lM : level) (M : (Ul lM)) (a-case : M) (b-case : M) (c-case : M)) :
+  (eq lM M M (triple-case lM M a-case b-case c-case c) c-case)
 end
