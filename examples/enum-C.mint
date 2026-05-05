@@ -1,3 +1,5 @@
+-- Approach C: Direct postulation at U level
+-- Postulate enum infrastructure directly, use it to witness construct blocks
 postulate
 Sort : Sort
 U : Sort
@@ -18,7 +20,36 @@ bool-elim (M : U) (true-case : M) (false-case : M) (scrut : El bool-code) : M
 bool-beta-tt (M : U) (true-case : M) (false-case : M) : eq M M (bool-elim M true-case false-case tt) true-case
 bool-beta-ff (M : U) (true-case : M) (false-case : M) : eq M M (bool-elim M true-case false-case ff) false-case
 meta
-schema enum-from-codes = fun s => match s with | [(type_name, [], U), (case_name, [(mvar, U), (scrut_var, type_name)], mvar)] => (Ok [(El falsity-code), (falsity-elim mvar scrut_var)]) | [(type_name, [], U), (ctor_name, [], type_name), (case_name, [(mvar, U), (tc_var, mvar), (scrut_var, type_name)], mvar), (eq_name, [(mvar2, U), (tc2, mvar2)], _)] => (Ok [(El unit-code), triv, (unit-elim mvar tc_var scrut_var), (unit-beta mvar2 tc2)]) | [(type_name, [], U), (true_name, [], type_name), (false_name, [], type_name), (case_name, [(mvar, U), (tc_var, mvar), (fc_var, mvar), (scrut_var, type_name)], mvar), (eq_true, [(mvar2, U), (tc2, mvar2), (fc2, mvar2)], _), (eq_false, [(mvar3, U), (tc3, mvar3), (fc3, mvar3)], _)] => (Ok [(El bool-code), tt, ff, (bool-elim mvar tc_var fc_var scrut_var), (bool-beta-tt mvar2 tc2 fc2), (bool-beta-ff mvar3 tc3 fc3)]) | _ => (Error "unknown enum shape") end
+schema enum-from-codes = fun s => match s with
+  | [(type_name, [], U),
+     (case_name, [(mvar, U), (scrut_var, type_name)], mvar)]
+    => (Ok [(El falsity-code), (falsity-elim mvar scrut_var)])
+  | [(type_name, [], U),
+     (ctor_name, [], type_name),
+     (case_name, [(mvar, U), (tc_var, mvar), (scrut_var, type_name)], mvar),
+     (eq_name, [(mvar2, U), (tc2, mvar2)], _)]
+    => (Ok [
+      (El unit-code),
+      triv,
+      (unit-elim mvar tc_var scrut_var),
+      (unit-beta mvar2 tc2)
+    ])
+  | [(type_name, [], U),
+     (true_name, [], type_name),
+     (false_name, [], type_name),
+     (case_name, [(mvar, U), (tc_var, mvar), (fc_var, mvar), (scrut_var, type_name)], mvar),
+     (eq_true, [(mvar2, U), (tc2, mvar2), (fc2, mvar2)], _),
+     (eq_false, [(mvar3, U), (tc3, mvar3), (fc3, mvar3)], _)]
+    => (Ok [
+      (El bool-code),
+      tt,
+      ff,
+      (bool-elim mvar tc_var fc_var scrut_var),
+      (bool-beta-tt mvar2 tc2 fc2),
+      (bool-beta-ff mvar3 tc3 fc3)
+    ])
+  | _ => (Error "unknown enum shape")
+  end
 construct by enum-from-codes
 falsity : U
 falsity-case (M : U) (scrutinee : falsity) : M
@@ -35,4 +66,3 @@ bool-case (M : U) (true-case : M) (false-case : M) (scrutinee : bool) : M
 bool-case-true (M : U) (true-case : M) (false-case : M) : eq M M (bool-case M true-case false-case true) true-case
 bool-case-false (M : U) (true-case : M) (false-case : M) : eq M M (bool-case M true-case false-case false) false-case
 end
-

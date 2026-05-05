@@ -21,8 +21,75 @@ plus : to N (to N N)
 pi (A : U) (B : to A U) : U
 ap-pi (A : U) (B : to A U) (f : pi A B) (a : A) : ap A U B a
 meta
-abs = fun x => fun e => fun A => fun B => if e == x then ((ap (to A (to A A)) (to A A) (ap (to A (to (to A A) A)) (to (to A (to A A)) (to A A)) (S A (to A A) A) (K A (to A A))) (K A A)), (trans A (ap A A (ap (to A (to A A)) (to A A) (ap (to A (to (to A A) A)) (to (to A (to A A)) (to A A)) (S A (to A A) A) (K A (to A A))) (K A A)) x) (ap (to A A) A (ap A (to (to A A) A) (K A (to A A)) x) (ap A (to A A) (K A A) x)) x (S-eq A (to A A) A (K A (to A A)) (K A A) x) (K-eq A (to A A) x (ap A (to A A) (K A A) x)))) else match e with | (ap Aprime Bprime f a) => let f-res = (abs x f A (to Aprime B)) in let a-res = (abs x a A Aprime) in let fw = (fst f-res) in let fp = (snd f-res) in let aw = (fst a-res) in let ap2 = (snd a-res) in let witness = (ap (to A Aprime) (to A B) (ap (to A (to Aprime B)) (to (to A Aprime) (to A B)) (S A Aprime B) fw) aw) in let proof = (trans B (ap A B witness x) (ap Aprime B (ap A (to Aprime B) fw x) (ap A Aprime aw x)) (ap Aprime B f a) (S-eq A Aprime B fw aw x) (cong-ap Aprime B (ap A (to Aprime B) fw x) f (ap A Aprime aw x) a fp ap2)) in (witness, proof) | _ => ((ap B (to A B) (K B A) e), (K-eq B A e x)) end end
-schema abstraction = fun s => match s with | [(f, [], (to A B)), (_, [(x, _)], (eq _ _ (ap _ _ f x) body))] => let result = (abs x body A B) in (Ok [(fst result), (snd result)]) | _ => (Error "abstraction: expected (f : to A B) and (f-beta (x : A) : eq B B (ap A B f x) body)") end
+-- SK abstraction: computes [x : A] e : (to A B) and a proof that applying
+-- the resulting combinator to x yields e.
+abs = fun x => fun e => fun A => fun B =>
+  if e == x
+  then (
+      (ap (to A (to A A)) (to A A)
+        (ap (to A (to (to A A) A)) (to (to A (to A A)) (to A A))
+          (S A (to A A) A)
+          (K A (to A A)))
+        (K A A))
+    ,
+      (trans A
+        (ap A A
+          (ap (to A (to A A)) (to A A)
+            (ap (to A (to (to A A) A)) (to (to A (to A A)) (to A A))
+              (S A (to A A) A)
+              (K A (to A A)))
+            (K A A))
+          x)
+        (ap (to A A) A
+          (ap A (to (to A A) A) (K A (to A A)) x)
+          (ap A (to A A) (K A A) x))
+        x
+        (S-eq A (to A A) A (K A (to A A)) (K A A) x)
+        (K-eq A (to A A) x (ap A (to A A) (K A A) x)))
+    )
+  else match e with
+  | (ap Aprime Bprime f a) =>
+      let f-res = (abs x f A (to Aprime B)) in
+      let a-res = (abs x a A Aprime) in
+      let fw = (fst f-res) in
+      let fp = (snd f-res) in
+      let aw = (fst a-res) in
+      let ap2 = (snd a-res) in
+      let witness =
+        (ap (to A Aprime) (to A B)
+          (ap (to A (to Aprime B)) (to (to A Aprime) (to A B))
+            (S A Aprime B)
+            fw)
+          aw) in
+      let proof =
+        (trans B
+          (ap A B witness x)
+          (ap Aprime B (ap A (to Aprime B) fw x) (ap A Aprime aw x))
+          (ap Aprime B f a)
+          (S-eq A Aprime B fw aw x)
+          (cong-ap Aprime B
+            (ap A (to Aprime B) fw x)
+            f
+            (ap A Aprime aw x)
+            a
+            fp
+            ap2)) in
+      (witness, proof)
+  | _ => ((ap B (to A B) (K B A) e), (K-eq B A e x))
+  end
+  end
+
+-- Pattern enforces the LHS structure: the second decl's equation must be
+-- (eq B B (ap A B f x) body) where f is the first decl's name and x is the
+-- equation's bound parameter. Nonlinear occurrences of f and x in the
+-- pattern check structural equality.
+schema abstraction = fun s => match s with
+  | [(f, [], (to A B)), (_, [(x, _)], (eq _ _ (ap _ _ f x) body))] =>
+      let result = (abs x body A B) in
+      (Ok [(fst result), (snd result)])
+  | _ => (Error "abstraction: expected (f : to A B) and (f-beta (x : A) : eq B B (ap A B f x) body)")
+  end
+
 construct by abstraction
 double : to N N
 double-beta (n : N) : eq N N (ap N N double n) (ap N N (ap N (to N N) plus n) n)
@@ -33,4 +100,3 @@ construct by abstraction
 aptwice : to (to N N) N
 aptwice-beta (f : to N N) : eq N N (ap (to N N) N aptwice f) (ap N N f (ap N N f zero))
 end
-
