@@ -1,88 +1,33 @@
-import { NodeProp, NodeSet, NodeType, Parser, Tree } from '@lezer/common'
-import type { TreeFragment, Input, PartialParse } from '@lezer/common'
+import { LRLanguage, LanguageSupport } from '@codemirror/language'
 import { styleTags, tags as t } from '@lezer/highlight'
-import { Language, defineLanguageFacet } from '@codemirror/language'
-// @ts-ignore
-import { lexToTokens } from '@reason/Lytr_api.js'
+// @ts-ignore — generated module
+import { parser } from './grammar/lytr.grammar.js'
 
-/* ------------------------------------------------------------------ */
-/*  Node types (IDs must match Lytr_api.re lexToTokens)                */
-/* ------------------------------------------------------------------ */
+const lytrParser = parser.configure({
+  props: [
+    styleTags({
+      'Postulate_kw Construct_kw Meta_kw By_kw End_kw Schema_kw Let_kw In_kw Match_kw With_kw Fun_kw If_kw Then_kw Else_kw': t.keyword,
+      Identifier: t.variableName,
+      Hole: t.punctuation,
+      StringLit: t.string,
+      LineComment: t.lineComment,
+      LParen: t.paren,
+      RParen: t.paren,
+      LBracket: t.squareBracket,
+      RBracket: t.squareBracket,
+      'Wildcard ":" "=" "|" "->" "=>" "==" "!=" "&&" "||" "::"': t.operator,
+    }),
+  ],
+})
 
-const nodeTypes = [
-  /* 0 */ NodeType.define({ id: 0, name: "Document", top: true }),
-  /* 1 */ NodeType.define({ id: 1, name: "Keyword" }),
-  /* 2 */ NodeType.define({ id: 2, name: "Identifier" }),
-  /* 3 */ NodeType.define({ id: 3, name: "Hole" }),
-  /* 4 */ NodeType.define({ id: 4, name: "Operator" }),
-  /* 5 */ NodeType.define({ id: 5, name: "OpenBracket", props: [[NodeProp.closedBy, ["CloseBracket"]]] }),
-  /* 6 */ NodeType.define({ id: 6, name: "CloseBracket", props: [[NodeProp.openedBy, ["OpenBracket"]]] }),
-  /* 7 */ NodeType.define({ id: 7, name: "Invalid" }),
-  /* 8 */ NodeType.define({ id: 8, name: "String" }),
-]
+const lytrLanguage = LRLanguage.define({
+  parser: lytrParser,
+  languageData: {
+    commentTokens: { line: '--' },
+    closeBrackets: { brackets: ['(', '['] },
+  },
+})
 
-const nodeSet = new NodeSet(nodeTypes).extend(
-  styleTags({
-    Keyword: t.keyword,
-    Identifier: t.variableName,
-    Hole: t.punctuation,
-    Operator: t.operator,
-    OpenBracket: t.paren,
-    CloseBracket: t.paren,
-    Invalid: t.invalid,
-    String: t.string,
-  })
-)
-
-/* ------------------------------------------------------------------ */
-/*  Parser implementation                                              */
-/* ------------------------------------------------------------------ */
-
-class LytrParser extends Parser {
-  createParse(
-    input: Input,
-    _fragments: readonly TreeFragment[],
-    _ranges: readonly { from: number; to: number }[]
-  ): PartialParse {
-    const code = input.read(0, input.length)
-    const length = input.length
-
-    return {
-      parsedPos: length,
-      stopAt(_pos: number) {},
-      stoppedAt: null,
-      advance(): Tree | null {
-        const buf = lexToTokens(code) as number[]
-        const children: Tree[] = []
-        const positions: number[] = []
-
-        for (let i = 0; i < buf.length; i += 3) {
-          const type = buf[i]
-          const from = buf[i + 1]
-          const to = buf[i + 2]
-          children.push(new Tree(nodeSet.types[type], [], [], to - from))
-          positions.push(from)
-        }
-
-        return new Tree(nodeSet.types[0], children, positions, length)
-      }
-    }
-  }
-}
-
-/* ------------------------------------------------------------------ */
-/*  Language definition                                                 */
-/* ------------------------------------------------------------------ */
-
-const lytrParser = new LytrParser()
-
-const lytrLanguage = new Language(
-  defineLanguageFacet(),
-  lytrParser,
-  [],
-  "lytr"
-)
-
-export function lytr() {
-  return lytrLanguage.extension
+export function lytr(): LanguageSupport {
+  return new LanguageSupport(lytrLanguage)
 }

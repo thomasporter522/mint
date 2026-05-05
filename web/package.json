@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build-grammar": "lezer-generator src/grammar/my.grammar -o src/grammar/parser.js",
+    "build-grammar": "lezer-generator src/lytr/grammar/lytr.grammar -o src/lytr/grammar/lytr.grammar && sed -i '' 's|from \"./tokens\"|from \"./tokens.ts\"|g' src/lytr/grammar/lytr.grammar.js && sed -i '' 's|from \"./lytr.grammar.terms\"|from \"./lytr.grammar.terms.js\"|g' src/lytr/grammar/lytr.grammar.js src/lytr/grammar/tokens.ts",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview"

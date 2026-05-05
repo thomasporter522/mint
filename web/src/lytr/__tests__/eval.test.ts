@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 // @ts-ignore
-import { evalCode, parseAndPrint } from '@reason/Lytr_api.js';
+import { evalCode, parseAndPrint } from '../reason-bridge';
 
 type EvalResult = { ok: boolean; value: string; error: string };
 

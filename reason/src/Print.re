@@ -1,13 +1,5 @@
 open Term;
 
-let printPrimaryToken =
-  fun
-  | Grammar.BOF | Grammar.EOF => ""
-  | TAtom(Grammar.Hole) => "?"
-  | TAtom(Identifier(v)) => v
-  | TAtom(StringLit(s)) => "\"" ++ s ++ "\""
-  | TNamed(n) => n;
-
 let printBinOp =
   fun
   | Eq => "=="
@@ -84,7 +76,7 @@ let rec debugPat = (t: pat): string => {
 let rec printML = (t: ml): string => {
   let inner =
     switch (t.value) {
-    | Shard(token) => printPrimaryToken(token)
+    | Shard(text) => text
     | Hole(User) => "?"
     | Hole(Synthesized) => ""
     | Identifier(v) => v
@@ -167,17 +159,24 @@ let rec debugML = (t: ml): string => {
   };
 };
 
-/* --- Declaration and block printers --- */
+/* --- Declaration and block printers ---
+   We strip the outer `parens` flag on retType/paramType before printing
+   so that round-tripping a paren-heavy file produces the cleaner form.
+   Parens that mark genuine grouping (e.g., on Ap args inside a larger Ap)
+   are unaffected. */
+
+let stripOuterParensOL = (t: ol): ol =>
+  {...t, meta: {...t.meta, parens: false}};
 
 let printParam = (p: param): string =>
-  "(" ++ p.paramName ++ " : " ++ printOL(p.paramType) ++ ")";
+  "(" ++ p.paramName ++ " : " ++ printOL(stripOuterParensOL(p.paramType)) ++ ")";
 
 let printDecl = (d: decl): string =>
   switch (d.params) {
-  | [] => d.declName ++ " : " ++ printOL(d.retType)
+  | [] => d.declName ++ " : " ++ printOL(stripOuterParensOL(d.retType))
   | params =>
-    "(" ++ d.declName ++ " " ++ String.concat(" ", List.map(printParam, params)) ++ ")"
-    ++ " : " ++ printOL(d.retType)
+    d.declName ++ " " ++ String.concat(" ", List.map(printParam, params))
+    ++ " : " ++ printOL(stripOuterParensOL(d.retType))
   };
 
 let printBinding = (b: binding): string =>
@@ -197,13 +196,13 @@ let printMetaDef = (d: metaDef): string =>
 let printBlock = (b: block): string =>
   switch (b) {
   | Postulate(decls) =>
-    "postulate " ++ String.concat("\n", List.map(printDecl, decls)) ++ " end"
+    "postulate\n" ++ String.concat("\n", List.map(printDecl, decls))
   | Meta(defs) =>
-    "meta " ++ String.concat("\n", List.map(printMetaDef, defs)) ++ " end"
+    "meta\n" ++ String.concat("\n", List.map(printMetaDef, defs))
   | Construct(schemaName, decls) =>
-    "construct by " ++ schemaName ++ " "
-    ++ String.concat("\n", List.map(printDecl, decls)) ++ " end"
+    "construct by " ++ schemaName ++ "\n"
+    ++ String.concat("\n", List.map(printDecl, decls))
   };
 
 let printProgram = (p: program): string =>
-  String.concat(" ", List.map(printBlock, p));
+  String.concat("\n", List.map(printBlock, p)) ++ "\nend\n";

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 // @ts-ignore
-import { checkSchemaCode } from '@reason/Lytr_api.js';
+import { checkSchemaCode } from '../reason-bridge';
 
 type MLResult = { ok: boolean; error: string; from: number; to: number };
 

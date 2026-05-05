@@ -3,7 +3,7 @@ import fc from 'fast-check';
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
 // @ts-ignore
-import { processCode, printTerm, parseAndPrint } from '@reason/Lytr_api.js';
+import { processCode, printTerm, parseAndPrint } from '../reason-bridge';
 
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                            */
@@ -894,36 +894,49 @@ describe('witness-and-discard (future: schema execution)', () => {
 });
 
 /* ------------------------------------------------------------------ */
-/*  Shard and BuilderError reporting                                   */
+/*  Syntax error reporting (Lezer error nodes)                         */
 /* ------------------------------------------------------------------ */
 
-describe('shard and syntax errors', () => {
-  it('reports shard errors with positions', () => {
-    const errs = errors('postulate\nSort : Sort\nx : Sort\nend\n)');
-    const positioned = errs.filter((e: Error) => e.from >= 0);
-    expect(positioned.length).toBeGreaterThan(0);
-  });
-
-  it('shard at position 0 has from=0', () => {
-    const errs = errors(')');
-    expect(errs.length).toBeGreaterThan(0);
-    expect(errs[0].from).toBe(0);
-  });
-
-  it('multiple shards get distinct positions', () => {
-    const errs = errors(') )');
-    const shardErrs = errs.filter(e => e.message === 'Unexpected token');
-    expect(shardErrs.length).toBe(2);
-    expect(shardErrs[0].from).not.toBe(shardErrs[1].from);
-  });
-
+describe('syntax errors', () => {
   it('empty file does not crash', () => {
     expect(() => errors('')).not.toThrow();
   });
 
-  it('shard inside construct block does not crash', () => {
-    // Shards inside block bodies are filtered by buildItems (known limitation)
-    expect(() => errors('postulate\nSort : Sort\nx : Sort\nconstruct by foo\n)\nend')).not.toThrow();
+  it('valid program produces no syntax errors', () => {
+    const errs = errors('postulate\nSort : Sort\nend');
+    expect(errs.filter(e => e.type === 'syntax')).toEqual([]);
+  });
+
+  it('reports a syntax error from a stray close paren', () => {
+    const errs = errors('postulate\n)\nend');
+    const syntax = errs.filter(e => e.type === 'syntax');
+    expect(syntax.length).toBeGreaterThan(0);
+    expect(syntax[0].message).toBe('Syntax error');
+  });
+
+  it('syntax error has a localized span', () => {
+    const code = 'postulate\n)\nend';
+    const errs = errors(code).filter(e => e.type === 'syntax');
+    const e = errs[0];
+    expect(e.from).toBeGreaterThanOrEqual(code.indexOf(')'));
+    expect(e.to).toBeGreaterThan(e.from);
+  });
+
+  it('multiple errors at distinct positions are not collapsed', () => {
+    const code = 'postulate\n)\nx : Sort\n)\nend';
+    const syntax = errors(code).filter(e => e.type === 'syntax');
+    // Same-position duplicates are deduped, but distinct ones are kept.
+    const positions = new Set(syntax.map(e => e.from));
+    expect(positions.size).toBe(syntax.length);
+    expect(syntax.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('syntax errors do not suppress kernel errors', () => {
+    // Unbound variable AND a stray paren — both should be reported.
+    const code = 'postulate\nSort : Sort\nx : not_a_thing\n)\nend';
+    const errs = errors(code);
+    expect(errs.some(e => e.type === 'syntax')).toBe(true);
+    expect(errs.some(e => e.message.includes('Unbound variable'))).toBe(true);
   });
 });
 

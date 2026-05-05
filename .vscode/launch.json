@@ -1,0 +1,17 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+  
+    {
+      "name": "Run Mint Extension",
+      "type": "extensionHost",
+      "request": "launch",
+      "args": [
+        "--extensionDevelopmentPath=${workspaceFolder}/vscode-mint",
+        "${workspaceFolder}/examples"
+      ],
+      "outFiles": ["${workspaceFolder}/vscode-mint/dist/**/*.js"],
+      "preLaunchTask": "Build Mint Extension"
+    }
+  ]
+}

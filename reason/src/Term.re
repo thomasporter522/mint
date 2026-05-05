@@ -76,7 +76,7 @@ and pat = {
    that mirror the OL constructors but take ml subterms, since ML
    expressions can mix OL identifiers with ML-bound variables. */
 type cML =
-  | Shard(Grammar.primaryToken)              /* parse artifact */
+  | Shard(string)                             /* parse artifact: unrecognized text */
   | Hole(holeKind)
   | Identifier(string)                       /* x — could be OL or ML, resolved by checker */
   | StringLit(string)
