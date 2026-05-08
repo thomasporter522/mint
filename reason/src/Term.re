@@ -146,13 +146,14 @@ let mkML = (t: cML): ml => {value: t, meta: defaultMeta};
 let mkPat = (p: cPat): pat => {value: p, meta: defaultMeta};
 
 /* Embed an OL term into the ML language, preserving structure and metadata.
-   Metas don't exist in ML — degrade to synthesized holes (which render as `?`
-   in tooltips, the same way unsolved metas render in inlay hints). */
+   An unsolved meta degrades to Hole(User) so it prints as `?` in goal
+   tooltips — Hole(Synthesized) would print as empty (parser-fallback
+   convention) and turn `Ul ?M` into the misleading `Ul`. */
 let rec embedOL = (t: ol): ml => {
   let value =
     switch (t.value) {
     | OLHole(k) => Hole(k)
-    | OLMeta(_) => Hole(Synthesized)
+    | OLMeta(_) => Hole(User)
     | OLIdentifier(s) => Identifier(s)
     | OLAp(f, args) => Ap(embedOL(f), List.map(embedOL, args))
     };

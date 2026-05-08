@@ -106,14 +106,18 @@ let resultOfStatics = (statics: staticInfo): jsResult => {
       ),
     );
   /* Inlay hints carry ghost terms (already zonked at the decl boundary).
-     Check.renderHintRun decides between the values rendering (with `?`
-     for any unsolved meta) and the collapsed `…` rendering (when every
-     ghost in the run resolved). */
+     Each entry surfaces both a label (collapsed to `…` when every ghost
+     resolved, or the values rendering otherwise) and a tooltip (always
+     the values rendering). Hovering the ellipsis shows the expansion. */
   let inlayHints =
     Array.of_list(
       List.map(
         ((pos, ghosts): (int, list(ol))) =>
-          [|Obj.repr(pos), Obj.repr(Check.renderHintRun(ghosts))|],
+          [|
+            Obj.repr(pos),
+            Obj.repr(Check.renderHintLabel(ghosts)),
+            Obj.repr(Check.renderHintValues(ghosts)),
+          |],
         statics.inlayHints,
       ),
     );

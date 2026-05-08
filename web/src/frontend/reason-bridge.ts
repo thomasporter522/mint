@@ -42,7 +42,9 @@ export function processCode(
 ): {
   errors: Error[]
   holes: [number, holeInfo][]
-  inlayHints: [number, string][]
+  /* (offset, label, tooltip) — label may be collapsed to `…` when every
+     ghost in the run is solved; tooltip is always the full values. */
+  inlayHints: [number, string, string][]
   /* (useFrom, useTo, defFrom, defTo) for each OL identifier reference
      that resolves to an OL binding. */
   definitions: [number, number, number, number][]

@@ -21,3 +21,10 @@ Mint's design is centered around the virtue of _objectivity_. That is, the seman
 - Object-level identifiers should inhabit an abstract type from the perspective of the meta-level code
 - Warnings for shadowing
 - Expose context to schemas
+- Allow multi-line declarations (tab sensitive)
+- Allow grouping multiple arguments of the same type
+
+## Bugs
+
+- Hover goal does not reflect solved metavariables
+- Solved implicits are not reflected in witness checking

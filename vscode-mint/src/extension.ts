@@ -10,9 +10,12 @@ const MINT_LANGUAGE = 'mint'
 let diagnostics: vscode.DiagnosticCollection
 
 // Latest inlay hints per document URI, populated by refresh() and read by
-// the InlayHintsProvider. Each entry is (offset, content): render `content`
-// (a printed form of one or more ghost subterms) anchored just before `offset`.
-const inlayHintsByDoc = new Map<string, [number, string][]>()
+// the InlayHintsProvider. Each entry is (offset, label, tooltip): render
+// `label` anchored just before `offset`; show `tooltip` on hover. The
+// label may be collapsed (e.g. `…` when every implicit was solved); the
+// tooltip always carries the full values so hovering reveals the
+// expansion.
+const inlayHintsByDoc = new Map<string, [number, string, string][]>()
 const inlayHintsChanged = new vscode.EventEmitter<void>()
 
 // Per-doc definition records: (useFrom, useTo, defFrom, defTo). Read by
@@ -39,11 +42,16 @@ export function activate(context: vscode.ExtensionContext): void {
       provideInlayHints(document, range) {
         const hints = inlayHintsByDoc.get(document.uri.toString()) ?? []
         const result: vscode.InlayHint[] = []
-        for (const [offset, content] of hints) {
+        for (const [offset, label, tooltip] of hints) {
           const pos = document.positionAt(offset)
           if (!range.contains(pos)) continue
-          const hint = new vscode.InlayHint(pos, content)
+          const hint = new vscode.InlayHint(pos, label)
           hint.paddingRight = true
+          /* Always set the tooltip so hovering an `…` reveals the
+           * solved-implicit expansion. When label === tooltip it's
+           * harmless redundancy; users only "see" the tooltip when
+           * they pause on the hint. */
+          hint.tooltip = tooltip
           result.push(hint)
         }
         return result

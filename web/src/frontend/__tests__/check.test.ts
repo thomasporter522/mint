@@ -14,7 +14,7 @@ type HoleInfo = { goal: any; context: any };
 type Result = {
   errors: Error[];
   holes: [number, HoleInfo][];
-  inlayHints: [number, string][];
+  inlayHints: [number, string, string][];
   definitions: [number, number, number, number][];
 };
 
@@ -22,7 +22,7 @@ function check(code: string): Result {
   return processCode(code) as Result;
 }
 
-function inlayHints(code: string): [number, string][] {
+function inlayHints(code: string): [number, string, string][] {
   return check(code).inlayHints;
 }
 
@@ -168,6 +168,101 @@ describe('function declarations', () => {
     expect(inlayHints(code)).toEqual([]);
   });
 
+  it('parenthesized singleton (C) elaborates with one ghost per param', () => {
+    /* Bare parens around a constructor with params trigger elaboration —
+       same machinery as `(C arg)`, anchored just before the closing
+       paren. Each param gets a meta; unsolved ones render as `?`. */
+    const code = [
+      'postulate',
+      'Sort : Sort',
+      '(Ul (l : Sort)) : Sort',
+      'g : (Ul)',
+      'end',
+    ].join('\n');
+    const hints = inlayHints(code);
+    expect(hints.length).toBe(1);
+    const [offset, label] = hints[0];
+    expect(code[offset]).toBe(')');
+    expect(label).toBe('?');
+  });
+
+  it('multi-line declaration: indented continuations are part of the decl', () => {
+    /* Whitespace-sensitive: an indented line following a decl head is
+       treated as a continuation, so a single decl can span several
+       lines for readability. */
+    const code = [
+      'postulate',
+      'Sort : Sort',
+      'A : Sort',
+      'foo (a : Sort)',
+      '    (b : Sort)',
+      '    (c : Sort)',
+      '    : Sort',
+      'bar : foo A A A',
+      'end',
+    ].join('\n');
+    expect(errorMessages(code)).toEqual([]);
+  });
+
+  it('unparenthesized singleton does NOT elaborate', () => {
+    /* Bare `C` (no parens) keeps the original wildcard semantics — no
+       elaboration. The existing subsume pathway emits "Too few arguments". */
+    const code = [
+      'postulate',
+      'Sort : Sort',
+      '(Ul (l : Sort)) : Sort',
+      'g : Ul',
+      'end',
+    ].join('\n');
+    expect(inlayHints(code)).toEqual([]);
+    expect(errorMessages(code)).toContainEqual(
+      expect.stringContaining('Too few arguments'),
+    );
+  });
+
+  it('parenthesized singleton (C) collapses to (C …) when all metas solve', () => {
+    /* (refl) appears where the expected type is fully concrete — so all
+       its implicits get solved by unification. Inlay collapses; no
+       "Too few arguments" promoted. */
+    const code = [
+      'postulate',
+      'Sort : Sort',
+      '(Ul (l : Sort)) : Sort',
+      '(eq (l : Sort) (x : Ul l)) : Sort',
+      'll : Sort',
+      'my : Ul ll',
+      '(refl (l : Sort) (x : Ul l)) : eq x',
+      '(use (e : eq ll my)) : Sort',
+      'test : (use (refl))',
+      'end',
+    ].join('\n');
+    expect(errorMessages(code)).toEqual([]);
+    const hints = inlayHints(code);
+    /* All hints in this code (there are several underapplied terms)
+       fully solve, so every label is the ellipsis. */
+    hints.forEach(([, label]) => expect(label).toBe('…'));
+  });
+
+  it('hover tooltip on collapsed run shows the full values', () => {
+    /* When the label is `…`, the tooltip carries the expansion so
+       hovering reveals what was solved. */
+    const code = [
+      'postulate',
+      'Sort : Sort',
+      'A : Sort',
+      '(Ul (l : Sort)) : Sort',
+      'my-thing : (Ul A)',
+      '(eq (l : Sort) (x : Ul l)) : Sort',
+      'g : (eq my-thing)',
+      'end',
+    ].join('\n');
+    const hints = inlayHints(code);
+    expect(hints.length).toBe(1);
+    const [, label, tooltip] = hints[0];
+    expect(label).toBe('…');
+    expect(tooltip).toBe('A');
+  });
+
   it('collapses fully-solved ghost run to a single ellipsis', () => {
     /* (eq (l : Sort) (x : Ul l)) — `l` is missing, `x` provided as `my-thing`.
        my-thing has type `Ul A`, so unifying solves ?l := A. With every
@@ -253,6 +348,57 @@ describe('function declarations', () => {
     ].join('\n');
     const msgs = errorMessages(code);
     expect(msgs).toContainEqual(expect.stringContaining('Too few arguments'));
+  });
+
+  it('refl-style decl: underapplied retType elaborates and is exposed', () => {
+    /* `refl`'s retType `eq B b` is underapplied (eq takes 3 here). The
+       missing leading `l` solves to refl's own param `l` via dependent
+       unification on the trailing arg. The decl checks cleanly (no
+       "Too few arguments"), the inlay collapses to `…`, and refl's
+       binding now exposes the elaborated `eq l B b` so downstream uses
+       see the full arity. (Repro of the MATH.mint refl issue.) */
+    const code = [
+      'postulate',
+      'Sort : Sort',
+      '(Ul (l : Sort)) : Sort',
+      '(eq (l : Sort) (B : Ul l) (b : B)) : Sort',
+      '(refl (l : Sort) (B : Ul l) (b : B)) : eq B b',
+      'end',
+    ].join('\n');
+    expect(errorMessages(code)).toEqual([]);
+    const hints = inlayHints(code);
+    expect(hints.length).toBe(1);
+    expect(hints[0][1]).toBe('…');
+  });
+
+  it('construct decl with underapplied retType uses elaborated form for witness check', () => {
+    /* Violation-A guard: if the construct decl's retType `eq B0 x0` were
+       compared raw against the schema-produced witness `(refl A B0 x0)`,
+       arities would mismatch (2 vs 3). With elaboration applied to the
+       construct decl too, both sides are 3-arg `eq A B0 x0` and the
+       witness check succeeds. */
+    const code = [
+      'postulate',
+      'Sort : Sort',
+      '(Ul (l : Sort)) : Sort',
+      'A : Sort',
+      'B0 : Ul A',
+      'x0 : B0',
+      '(eq (l : Sort) (B : Ul l) (x : B)) : Sort',
+      '(refl (l : Sort) (B : Ul l) (x : B)) : eq B x',
+      'meta',
+      'schema sch = fun s => match s with',
+      '| [(g, [], _)] => (Ok [(refl A B0 x0)])',
+      '| _ => (Error "x")',
+      'end',
+      'construct by sch',
+      'foo-eq : eq B0 x0',
+      'end',
+    ].join('\n');
+    const msgs = errorMessages(code);
+    expect(
+      msgs.filter(m => m.includes('Inconsistency') || m.includes('ill-typed'))
+    ).toEqual([]);
   });
 
   it('per-decl meta scoping: solutions do not leak between decls', () => {
