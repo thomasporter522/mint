@@ -1,9 +1,9 @@
 import { LRLanguage, LanguageSupport } from '@codemirror/language'
 import { styleTags, tags as t } from '@lezer/highlight'
 // @ts-ignore — generated module
-import { parser } from './grammar/lytr.grammar.js'
+import { parser } from './grammar/mint.grammar.js'
 
-const lytrParser = parser.configure({
+const mintParser = parser.configure({
   props: [
     styleTags({
       'Postulate_kw Construct_kw Meta_kw By_kw End_kw Schema_kw Let_kw In_kw Match_kw With_kw Fun_kw If_kw Then_kw Else_kw': t.keyword,
@@ -20,14 +20,14 @@ const lytrParser = parser.configure({
   ],
 })
 
-const lytrLanguage = LRLanguage.define({
-  parser: lytrParser,
+const mintLanguage = LRLanguage.define({
+  parser: mintParser,
   languageData: {
     commentTokens: { line: '--' },
     closeBrackets: { brackets: ['(', '['] },
   },
 })
 
-export function lytr(): LanguageSupport {
-  return new LanguageSupport(lytrLanguage)
+export function mint(): LanguageSupport {
+  return new LanguageSupport(mintLanguage)
 }

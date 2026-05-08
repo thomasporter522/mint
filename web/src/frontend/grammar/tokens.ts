@@ -1,6 +1,6 @@
 import { ContextTracker, ExternalTokenizer } from '@lezer/lr'
 // @ts-ignore — generated alongside the parser by lezer-generator
-import { LParen, RParen, LBracket, RBracket, Terminator } from './lytr.grammar.terms.js'
+import { LParen, RParen, LBracket, RBracket, Terminator } from './mint.grammar.terms.js'
 
 /* The grammar uses a single external token, `Terminator`, plus a
    bracket-depth context tracker. A run of whitespace containing a

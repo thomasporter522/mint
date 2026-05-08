@@ -125,7 +125,7 @@ let resultOfStatics = (statics: staticInfo): jsResult => {
 };
 
 /* === Pipeline entry points ===
-   These accept the JS-encoded AST produced by web/src/lytr/builder.ts. */
+   These accept the JS-encoded AST produced by web/src/frontend/builder.ts. */
 
 let processProgramJs = (jsArr: array(jsObj)): jsResult => {
   let prog = decodeProgram(jsArr);

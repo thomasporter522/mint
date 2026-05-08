@@ -1,6 +1,6 @@
-declare module '@reason/Lytr_api.js' {
+declare module '@reason/Api.js' {
   /* New AST-based entry points. The TS builder produces values matching
-     web/src/lytr/ast.ts and these are decoded by reason/src/Decode.re. */
+     web/src/frontend/ast.ts and these are decoded by reason/src/Decode.re. */
   export function processProgramJs(jsArr: unknown[]): {
     errors: Array<{ type: string; message: string; from: number; to: number }>;
     holes: Array<[number, { goal: any; context: Map<string, any> }]>;

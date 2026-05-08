@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { readFileSync, readdirSync } from 'fs'
 import { resolve, join } from 'path'
 // @ts-ignore — generated module
-import { parser } from '../lytr.grammar.js'
+import { parser } from '../mint.grammar.js'
 
 function tree(code: string): string {
   return parser.parse(code).toString()

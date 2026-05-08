@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 // @ts-ignore
-import { parser } from '../grammar/lytr.grammar.js'
+import { parser } from '../grammar/mint.grammar.js'
 import { buildProgram } from '../builder'
 
 function build(code: string) {

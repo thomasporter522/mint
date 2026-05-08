@@ -8,10 +8,10 @@ import { linter, type Diagnostic } from '@codemirror/lint'
 import './App.css'
 
 import { mintTheme } from "./CodeTheme"
-import { getStaticsFromCode, printTerm } from './lytr/reason-bridge'
-import { lytr } from './lytr/language'
+import { getStaticsFromCode, printTerm } from './frontend/reason-bridge'
+import { mint } from './frontend/language'
 
-import type { holeInfo, Term, Error } from './lytr/types'
+import type { holeInfo, Term, Error } from './frontend/types'
 // import {prettyProposition} from './semantics/Pretty'
 
 
@@ -55,7 +55,7 @@ function App() {
   setSemanticErrorsRef.current = setSemanticErrors
   const updateHolesRef = useRef<(h: [Number, holeInfo][]) => void>(() => {})
 
-  const lytrLinter = useMemo(() =>
+  const mintLinter = useMemo(() =>
     linter((view) => {
       const code = view.state.doc.toString()
       const statics = getStaticsFromCode(code)
@@ -393,7 +393,7 @@ function App() {
                   height="100%"
                   theme={mintTheme}
                   extensions={[
-                    lytr(),
+                    mint(),
                     EditorView.theme({
                       '.cm-editor': {
                         width: '100%',
@@ -408,7 +408,7 @@ function App() {
                         whiteSpace: 'pre'  // Prevent line wrapping
                       }
                     }),
-                    lytrLinter,
+                    mintLinter,
                     autoReplace,
                   ]}
                   basicSetup={{

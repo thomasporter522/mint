@@ -11,5 +11,5 @@
     "allowImportingTsExtensions": true,
     "isolatedModules": true
   },
-  "include": ["src/**/*", "../web/src/lytr/**/*"]
+  "include": ["src/**/*", "../web/src/frontend/**/*"]
 }

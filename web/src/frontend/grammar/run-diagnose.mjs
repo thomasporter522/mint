@@ -1,4 +1,4 @@
-import { parser } from './lytr.grammar.js'
+import { parser } from './mint.grammar.js'
 
 const samples = {
   G: 'postulate\nA : U\n(refl (A : U) (a : A)) : (eq A A a a)\n(trans (A : U) (a : A) (b : A) (c : A) (e1 : (eq A A a b)) (e2 : (eq A A b c))) : (eq A A a c)\nend',

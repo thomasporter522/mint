@@ -2,7 +2,7 @@ import { describe, it } from 'vitest'
 import { readFileSync } from 'fs'
 import { resolve } from 'path'
 // @ts-ignore
-import { parser } from '../lytr.grammar.js'
+import { parser } from '../mint.grammar.js'
 
 /* Parse a file, find the first ⚠ error position, and dump a window of source
    around it along with the parse tree slice. */

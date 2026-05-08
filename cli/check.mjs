@@ -4,7 +4,7 @@
    the same `processCode` the web app and tests use, so syntax errors and
    kernel errors surface uniformly. */
 
-import { processCode, printTerm } from '../web/src/lytr/reason-bridge.ts'
+import { processCode, printTerm } from '../web/src/frontend/reason-bridge.ts'
 import { readFileSync } from 'fs'
 import { resolve } from 'path'
 

@@ -1,6 +1,6 @@
 // Quick smoke test: parse a small input and dump the tree.
 import { LRParser } from '@lezer/lr'
-import { parser } from './lytr.grammar.js'
+import { parser } from './mint.grammar.js'
 import { newlineTerminator, bracketDepth } from './tokens.ts'
 
 const samples = [

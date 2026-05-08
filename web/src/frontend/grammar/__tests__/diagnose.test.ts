@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 // @ts-ignore
-import { parser } from '../lytr.grammar.js'
+import { parser } from '../mint.grammar.js'
 
 function check(code: string): { errs: number; tree: string } {
   const t = parser.parse(code).toString()

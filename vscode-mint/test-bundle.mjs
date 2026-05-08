@@ -91,7 +91,7 @@ ext.activate({ subscriptions: subs })
 // via dispatching an open event — but the mock doesn't actually wire those.
 // Instead, we verify that the bundle loaded cleanly and the engine works by
 // importing the bridge directly through the bundle's resolver.
-import('../web/src/lytr/reason-bridge.ts').then(({ processCode }) => {
+import('../web/src/frontend/reason-bridge.ts').then(({ processCode }) => {
   const r = processCode('postulate\n)\nend')
   const syntax = r.errors.filter((e) => e.type === 'syntax')
   console.log('syntax errors:', syntax.length, syntax[0])

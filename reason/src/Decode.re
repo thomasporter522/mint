@@ -1,4 +1,4 @@
-/* Decode the JS AST produced by web/src/lytr/builder.ts into the native
+/* Decode the JS AST produced by web/src/frontend/builder.ts into the native
    OCaml AST defined in Term.re. Field names and `kind` discriminators
    match ast.ts exactly — keep them in sync. */
 

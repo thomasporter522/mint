@@ -3,7 +3,7 @@
    or printing. Replaces the prior OCaml-only processCode. */
 
 // @ts-ignore — generated module
-import { parser } from './grammar/lytr.grammar.js'
+import { parser } from './grammar/mint.grammar.js'
 import { buildProgram, buildML } from './builder.ts'
 import { collectSyntaxErrors } from './syntax-errors.ts'
 // @ts-ignore — Melange-compiled module (relative path so Node and Vite agree)
@@ -14,7 +14,7 @@ import {
   printMLJs,
   checkSchemaMLJs,
   evalMLJs,
-} from '../../../reason/_build/default/src/output/src/Lytr_api.js'
+} from '../../../reason/_build/default/src/output/src/Api.js'
 
 import type { Term, Error, holeInfo } from './types'
 import type { ML } from './ast'

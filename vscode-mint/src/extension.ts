@@ -1,9 +1,9 @@
 import * as vscode from 'vscode'
-// The engine lives at web/src/lytr/reason-bridge.ts so the web app, the
+// The engine lives at web/src/frontend/reason-bridge.ts so the web app, the
 // CLI, and this extension all use the same canonical processCode.
 // Esbuild bundles it (along with the Lezer parser and the Melange-compiled
 // OCaml output) into dist/extension.js at build time.
-import { processCode, printTerm } from '../../web/src/lytr/reason-bridge'
+import { processCode, printTerm } from '../../web/src/frontend/reason-bridge'
 
 const MINT_LANGUAGE = 'mint'
 

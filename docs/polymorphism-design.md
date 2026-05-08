@@ -55,7 +55,7 @@ schema enum = fun sigs =>
 - `inferExpr` for `Cons`: infer heads element type, check tail is a list, return `MList(elemTy)`
 - `checkPat` for `Cons`: when expected is `MList(elemTy)`, check head pats against `elemTy`, check tail pat against `MList(elemTy)`. When expected is `MTerm`, pass `MTerm` through.
 
-**Files**: Term.re, LytrGrammar.re, Builder.re, Print.re, Eval.re, Check.re
+**Files**: Term.re, web/src/frontend/grammar/mint.grammar, web/src/frontend/builder.ts, Print.re, Eval.re, Check.re
 **Size**: ~60 lines
 **Risk**: Low-medium (builder spread detection is the tricky part)
 

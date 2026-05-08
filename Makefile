@@ -33,12 +33,12 @@ check:
 try:
 	$(MAKE) grammar
 	$(MAKE) reason
-	@node --no-warnings --experimental-strip-types --input-type=module -e "import { parseAndPrint } from './web/src/lytr/reason-bridge.ts'; console.log(parseAndPrint(process.argv[1]));" -- "$(EXPR)"
+	@node --no-warnings --experimental-strip-types --input-type=module -e "import { parseAndPrint } from './web/src/frontend/reason-bridge.ts'; console.log(parseAndPrint(process.argv[1]));" -- "$(EXPR)"
 
 # `parseAndDebug` is gone; the new architecture's debug equivalent is
 # the Lezer tree, which can be inspected via tests or the grammar build.
 debug:
-	@echo "make debug is currently unwired (parseAndDebug was removed in the parser swap). Inspect the Lezer tree via web/src/lytr/grammar/__tests__/diagnose.test.ts if needed."
+	@echo "make debug is currently unwired (parseAndDebug was removed in the parser swap). Inspect the Lezer tree via web/src/frontend/grammar/__tests__/diagnose.test.ts if needed."
 
 .PHONY: init vscode-init vscode-build vscode-smoke vscode-install vscode-uninstall
 init:

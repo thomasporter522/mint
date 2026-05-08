@@ -189,7 +189,7 @@ PatAtom {
 
 /* Keywords as @specialize rules so they only match exact-word identifiers
    (not prefixes like `inl` containing `in`). Each rule name is exported
-   in lytr.grammar.terms for the context tracker. */
+   in mint.grammar.terms for the context tracker. */
 Postulate_kw { @specialize<Identifier, "postulate"> }
 Construct_kw { @specialize<Identifier, "construct"> }
 Meta_kw      { @specialize<Identifier, "meta"> }

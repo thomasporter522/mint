@@ -5,10 +5,10 @@
    Run once with: node --experimental-strip-types cli/clean-examples.mjs */
 
 // @ts-ignore — generated grammar
-import { parser } from '../web/src/lytr/grammar/lytr.grammar.js'
-import { buildProgram } from '../web/src/lytr/builder.ts'
+import { parser } from '../web/src/frontend/grammar/mint.grammar.js'
+import { buildProgram } from '../web/src/frontend/builder.ts'
 // @ts-ignore — Melange-compiled module
-import { printProgramJs } from '../reason/_build/default/src/output/src/Lytr_api.js'
+import { printProgramJs } from '../reason/_build/default/src/output/src/Api.js'
 import { readFileSync, writeFileSync, readdirSync } from 'fs'
 import { resolve, join } from 'path'
 
