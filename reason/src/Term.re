@@ -2,6 +2,10 @@ type meta = {
   parens: bool,
   start: int,
   end_: int,
+  /* True if this subterm was synthesized by elaboration rather than
+     written by the user. Inlay-hint extraction walks the elaborated AST
+     and renders ghost subterms at their parent's surrounding positions. */
+  ghost: bool,
 };
 
 /* --- Small enums --- */
@@ -121,7 +125,10 @@ type program = list(block);
 
 /* === Helpers === */
 
-let defaultMeta = {parens: false, start: (-1), end_: (-1)};
+let defaultMeta = {parens: false, start: (-1), end_: (-1), ghost: false};
+
+/* Mark any subterm as ghost (synthesized by elaboration). */
+let asGhost = (m: meta): meta => {...m, ghost: true};
 
 let mkOL = (t: cOL): ol => {value: t, meta: defaultMeta};
 let mkML = (t: cML): ml => {value: t, meta: defaultMeta};

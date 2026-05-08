@@ -27,22 +27,22 @@ let getKind = (j: jsObj): string => _str(j, "kind");
 
 let getMeta = (j: jsObj): meta => {
   let m = _obj(j, "meta");
-  {parens: _bool(m, "parens"), start: _int(m, "start"), end_: _int(m, "end")};
+  {parens: _bool(m, "parens"), start: _int(m, "start"), end_: _int(m, "end"), ghost: false};
 };
 
 let getBindingMeta = (j: jsObj): meta => {
   let m = _obj(j, "bindingMeta");
-  {parens: _bool(m, "parens"), start: _int(m, "start"), end_: _int(m, "end")};
+  {parens: _bool(m, "parens"), start: _int(m, "start"), end_: _int(m, "end"), ghost: false};
 };
 
 let getDeclMeta = (j: jsObj): meta => {
   let m = _obj(j, "declMeta");
-  {parens: _bool(m, "parens"), start: _int(m, "start"), end_: _int(m, "end")};
+  {parens: _bool(m, "parens"), start: _int(m, "start"), end_: _int(m, "end"), ghost: false};
 };
 
 let getParamMeta = (j: jsObj): meta => {
   let m = _obj(j, "paramMeta");
-  {parens: _bool(m, "parens"), start: _int(m, "start"), end_: _int(m, "end")};
+  {parens: _bool(m, "parens"), start: _int(m, "start"), end_: _int(m, "end"), ghost: false};
 };
 
 let decodeHoleKind = (s: string): holeKind =>
