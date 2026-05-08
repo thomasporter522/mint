@@ -74,7 +74,12 @@ type jsResult;
 
 [@mel.obj]
 external makeJsResult:
-  (~errors: array(jsError), ~holes: array(array(Obj.t))) => jsResult =
+  (
+    ~errors: array(jsError),
+    ~holes: array(array(Obj.t)),
+    ~inlayHints: array(array(int)),
+  ) =>
+  jsResult =
   "";
 
 let resultOfStatics = (statics: staticInfo): jsResult => {
@@ -99,7 +104,14 @@ let resultOfStatics = (statics: staticInfo): jsResult => {
         statics.holes,
       ),
     );
-  makeJsResult(~errors, ~holes);
+  let inlayHints =
+    Array.of_list(
+      List.map(
+        ((pos, count): (int, int)) => [|pos, count|],
+        statics.inlayHints,
+      ),
+    );
+  makeJsResult(~errors, ~holes, ~inlayHints);
 };
 
 /* === Pipeline entry points ===

@@ -24,6 +24,9 @@ type holeInfo = {
 type staticInfo = {
   errors: list(error),
   holes: list((int, holeInfo)),
+  /* Inlay hints: (offset, count) — render `count` ghost ?'s anchored
+     just before `offset`. Used to elaborate underapplied OL constructors. */
+  inlayHints: list((int, int)),
   inferred: option(fullType),
   mlInferred: option(mlType),
   bindings: context,
@@ -33,7 +36,7 @@ let olHole: ol = mkOL(OLHole(User));
 let mlHole: ml = mkML(Hole(Synthesized));
 let fullHole: fullType = ([], olHole);
 
-let emptyInfo = {errors: [], holes: [], inferred: None, mlInferred: None, bindings: StringMap.empty};
+let emptyInfo = {errors: [], holes: [], inlayHints: [], inferred: None, mlInferred: None, bindings: StringMap.empty};
 
 /* MetaLet definitions in definition order, for eval env construction.
    Set by Meta block processing, read by Construct block. */
@@ -45,6 +48,7 @@ let mergeBindings = (c1: context, c2: context): context =>
 let mergeInfos = (i1: staticInfo, i2: staticInfo): staticInfo => {
   errors: i1.errors @ i2.errors,
   holes: i1.holes @ i2.holes,
+  inlayHints: i1.inlayHints @ i2.inlayHints,
   inferred: None,
   mlInferred: None,
   bindings: mergeBindings(i1.bindings, i2.bindings),
@@ -395,13 +399,13 @@ and checkOLTerm = (ctx: context, mode: checkingMode, t: ol): staticInfo =>
       switch (lookupCtx(ctx, v)) {
       | NotFound =>
         let err = mark("Unbound variable " ++ v, t.meta.start, t.meta.end_);
-        {errors: [err, ...modeErrors], holes: [], inferred: None, mlInferred: None, bindings: StringMap.empty};
+        {errors: [err, ...modeErrors], holes: [], inlayHints: [], inferred: None, mlInferred: None, bindings: StringMap.empty};
       | Found(inferred) =>
         let subErrors = subsume(expected, inferred, t.meta.start, t.meta.end_);
-        {errors: modeErrors @ subErrors, holes: [], inferred, mlInferred: None, bindings: StringMap.empty};
+        {errors: modeErrors @ subErrors, holes: [], inlayHints: [], inferred, mlInferred: None, bindings: StringMap.empty};
       }
     | _ =>
-      {errors: modeErrors, holes: [], inferred: None, mlInferred: None, bindings: StringMap.empty}
+      {errors: modeErrors, holes: [], inlayHints: [], inferred: None, mlInferred: None, bindings: StringMap.empty}
     };
 
   | OLAp(f, args) =>
@@ -426,31 +430,53 @@ and checkOLTerm = (ctx: context, mode: checkingMode, t: ol): staticInfo =>
       let funInfo = checkOLTerm(ctx, Expression(None), f);
       switch (funInfo.inferred) {
       | Some((params, retType)) =>
+        let paramCount = List.length(params);
+        let argCount = List.length(args);
         let arityErrors =
-          checkArity(List.length(params), List.length(args), f.meta.start, f.meta.end_);
-        let minLen = min(List.length(params), List.length(args));
+          checkArity(paramCount, argCount, f.meta.start, f.meta.end_);
+        /* Underapplication: elaborate by synthesizing leading holes so the
+           given args align with the *trailing* params. The synthesized holes
+           are not type-checked; they only serve as substitutees so dependent
+           param types like `B a` resolve to `B ?` when `a` is missing. */
+        let nMissing = max(0, paramCount - argCount);
+        let leadingHoles =
+          List.init(nMissing, _ => mkOL(OLHole(Synthesized)));
+        let effectiveArgs = leadingHoles @ args;
+        let checkLen = min(paramCount, List.length(effectiveArgs));
         let (argInfos, finalEnv) =
           List.fold_left(
             ((accInfos, env), i) => {
               let (paramName, paramTy) = List.nth(params, i);
               let expectedTy = resolve(env, paramTy);
-              let argInfo = checkOLTerm(ctx, Expression(Some(expectedTy)), List.nth(args, i));
+              let arg = List.nth(effectiveArgs, i);
+              let argInfo =
+                if (i < nMissing) {
+                  emptyInfo;  /* synthesized leading hole — skip checking */
+                } else {
+                  checkOLTerm(ctx, Expression(Some(expectedTy)), arg);
+                };
               let env =
                 switch (paramName) {
-                | Some(name) => StringMap.add(name, List.nth(args, i), env)
+                | Some(name) => StringMap.add(name, arg, env)
                 | None => env
                 };
               (accInfos @ [argInfo], env);
             },
             ([], emptyEnv),
-            List.init(minLen, i => i),
+            List.init(checkLen, i => i),
           );
         let info = List.fold_left(mergeInfos, funInfo, argInfos);
-        let retType = resolve(finalEnv, retType);
-        let inferred =
-          List.length(params) == List.length(args)
-            ? Some(([], retType)) : Some(([], olHole));
+        let resolvedRet = resolve(finalEnv, retType);
+        let inferred = Some(([], resolvedRet));
         let subErrors = subsume(expected, inferred, t.meta.start, t.meta.end_);
+        let inlayHints =
+          if (nMissing > 0 && argCount > 0) {
+            let firstArg = List.nth(args, 0);
+            [(firstArg.meta.start, nMissing)];
+          } else {
+            [];
+          };
+        let info = {...info, inlayHints: info.inlayHints @ inlayHints};
         withErrors({...info, inferred}, arityErrors @ subErrors);
       | None => funInfo
       };
@@ -470,11 +496,11 @@ and checkOLTerm = (ctx: context, mode: checkingMode, t: ol): staticInfo =>
         | Some(e) => embedOL(e)
         | None => mlHole
         };
-      {errors: [], holes: [(t.meta.start, {goal, context: ctx})],
+      {errors: [], holes: [(t.meta.start, {goal, context: ctx})], inlayHints: [],
        inferred: Some(fullHole), mlInferred: None, bindings: StringMap.empty};
     | _ =>
       {errors: [mark("Hole in non-expression", t.meta.start, t.meta.end_)],
-       holes: [], inferred: Some(fullHole), mlInferred: None, bindings: StringMap.empty};
+       holes: [], inlayHints: [], inferred: Some(fullHole), mlInferred: None, bindings: StringMap.empty};
     }
   }
 
@@ -653,7 +679,7 @@ and inferExpr = (ctx: context, t: ml): staticInfo =>
   | StringLit(_) => setMlType(emptyInfo, MString)
 
   | Hole(_) =>
-    {errors: [], holes: [(t.meta.start, {goal: mlHole, context: ctx})],
+    {errors: [], holes: [(t.meta.start, {goal: mlHole, context: ctx})], inlayHints: [],
      inferred: Some(([], olHole)), mlInferred: Some(MTerm), bindings: StringMap.empty}
 
   | Ap({value: Identifier("fst"), _}, [arg]) =>
@@ -834,7 +860,7 @@ and checkExpr = (ctx: context, expected: mlType, t: ml): staticInfo =>
   switch (t.value) {
   | Hole(_) =>
     let goal = mlTypeToTerm(expected);
-    {errors: [], holes: [(t.meta.start, {goal, context: ctx})],
+    {errors: [], holes: [(t.meta.start, {goal, context: ctx})], inlayHints: [],
      inferred: None, mlInferred: None, bindings: StringMap.empty};
 
   | Fun(pats, body) =>

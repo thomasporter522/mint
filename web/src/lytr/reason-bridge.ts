@@ -39,7 +39,11 @@ function parseAsExpr(code: string): ML | null {
    merge syntax errors with the kernel's type errors. */
 export function processCode(
   code: string,
-): { errors: Error[]; holes: [number, holeInfo][] } {
+): {
+  errors: Error[]
+  holes: [number, holeInfo][]
+  inlayHints: [number, number][]
+} {
   const tree = parser.parse(code)
   const syntaxErrors = collectSyntaxErrors(tree)
   const prog = buildProgram(tree, code)
@@ -47,6 +51,7 @@ export function processCode(
   return {
     errors: [...syntaxErrors, ...result.errors],
     holes: result.holes,
+    inlayHints: result.inlayHints,
   }
 }
 

@@ -11,10 +11,18 @@ import { processCode, printTerm, parseAndPrint } from '../reason-bridge';
 
 type Error = { type: string; message: string; from: number; to: number };
 type HoleInfo = { goal: any; context: any };
-type Result = { errors: Error[]; holes: [number, HoleInfo][] };
+type Result = {
+  errors: Error[];
+  holes: [number, HoleInfo][];
+  inlayHints: [number, number][];
+};
 
 function check(code: string): Result {
   return processCode(code) as Result;
+}
+
+function inlayHints(code: string): [number, number][] {
+  return check(code).inlayHints;
 }
 
 function errors(code: string): Error[] {
@@ -85,6 +93,56 @@ describe('function declarations', () => {
       'postulate\nSort : Sort\nx : Sort\n(f (a : Sort) (b : Sort)) : Sort\ng : (f x)\nend'
     );
     expect(msgs).toContainEqual(expect.stringContaining('Too few arguments'));
+  });
+
+  it('emits inlay hints for underapplied constructors', () => {
+    /* `(f x)` — f takes 2, given 1, so one ghost ? before x. */
+    const code = 'postulate\nSort : Sort\nx : Sort\n(f (a : Sort) (b : Sort)) : Sort\ng : (f x)\nend';
+    const hints = inlayHints(code);
+    expect(hints.length).toBe(1);
+    const [offset, count] = hints[0];
+    expect(count).toBe(1);
+    /* Offset should anchor at the `x` in the body of g. */
+    expect(code.slice(offset, offset + 1)).toBe('x');
+  });
+
+  it('two missing args produce a count-2 hint', () => {
+    const code =
+      'postulate\nSort : Sort\nx : Sort\n(f (a : Sort) (b : Sort) (c : Sort)) : Sort\ng : (f x)\nend';
+    const hints = inlayHints(code);
+    expect(hints.length).toBe(1);
+    expect(hints[0][1]).toBe(2);
+  });
+
+  it('checks the given argument against the LAST parameter type', () => {
+    /* f takes (a:A) and (b:B). A and B are distinct. Pass one arg of type B —
+       under last-aligned checking this should NOT produce an inconsistency. */
+    const ok =
+      'postulate\nSort : Sort\nA : Sort\nB : Sort\nb : B\n(f (a : A) (b : B)) : Sort\ng : (f b)\nend';
+    const msgs = errorMessages(ok);
+    /* The arity error is preserved; there should be no consistency error. */
+    expect(msgs.filter(m => m.includes('Inconsistency'))).toEqual([]);
+  });
+
+  it('rejects an underapplied arg that does not match the LAST parameter type', () => {
+    /* Same setup, but pass an `a : A` for the single given slot — should mismatch
+       against B (the trailing param). */
+    const bad =
+      'postulate\nSort : Sort\nA : Sort\nB : Sort\na : A\n(f (a : A) (b : B)) : Sort\ng : (f a)\nend';
+    const msgs = errorMessages(bad);
+    expect(msgs).toContainEqual(expect.stringContaining('Inconsistency'));
+  });
+
+  it('fully-applied constructors emit no inlay hints', () => {
+    const code =
+      'postulate\nSort : Sort\nx : Sort\n(f (a : Sort) (b : Sort)) : Sort\ng : (f x x)\nend';
+    expect(inlayHints(code)).toEqual([]);
+  });
+
+  it('overapplied constructors emit no inlay hints', () => {
+    const code =
+      'postulate\nSort : Sort\nx : Sort\n(f (a : Sort)) : Sort\ng : (f x x)\nend';
+    expect(inlayHints(code)).toEqual([]);
   });
 });
 

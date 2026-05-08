@@ -9,6 +9,12 @@ const MINT_LANGUAGE = 'mint'
 
 let diagnostics: vscode.DiagnosticCollection
 
+// Latest inlay hints per document URI, populated by refresh() and read by
+// the InlayHintsProvider. Each entry is (offset, count): render `count`
+// ghost ?'s anchored just before `offset`.
+const inlayHintsByDoc = new Map<string, [number, number][]>()
+const inlayHintsChanged = new vscode.EventEmitter<void>()
+
 export function activate(context: vscode.ExtensionContext): void {
   diagnostics = vscode.languages.createDiagnosticCollection(MINT_LANGUAGE)
   context.subscriptions.push(diagnostics)
@@ -16,7 +22,29 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     vscode.workspace.onDidOpenTextDocument(refresh),
     vscode.workspace.onDidChangeTextDocument((e) => refresh(e.document)),
-    vscode.workspace.onDidCloseTextDocument((doc) => diagnostics.delete(doc.uri)),
+    vscode.workspace.onDidCloseTextDocument((doc) => {
+      diagnostics.delete(doc.uri)
+      inlayHintsByDoc.delete(doc.uri.toString())
+    }),
+  )
+
+  context.subscriptions.push(
+    vscode.languages.registerInlayHintsProvider(MINT_LANGUAGE, {
+      onDidChangeInlayHints: inlayHintsChanged.event,
+      provideInlayHints(document, range) {
+        const hints = inlayHintsByDoc.get(document.uri.toString()) ?? []
+        const result: vscode.InlayHint[] = []
+        for (const [offset, count] of hints) {
+          const pos = document.positionAt(offset)
+          if (!range.contains(pos)) continue
+          const label = Array(count).fill('?').join(' ')
+          const hint = new vscode.InlayHint(pos, label)
+          hint.paddingRight = true
+          result.push(hint)
+        }
+        return result
+      },
+    }),
   )
 
   // Cover any Mint files already open at activation.
@@ -25,6 +53,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
 export function deactivate(): void {
   diagnostics?.dispose()
+  inlayHintsChanged.dispose()
 }
 
 function refresh(document: vscode.TextDocument): void {
@@ -44,6 +73,8 @@ function refresh(document: vscode.TextDocument): void {
         vscode.DiagnosticSeverity.Error,
       ),
     ])
+    inlayHintsByDoc.set(document.uri.toString(), [])
+    inlayHintsChanged.fire()
     return
   }
 
@@ -71,6 +102,8 @@ function refresh(document: vscode.TextDocument): void {
   }
 
   diagnostics.set(document.uri, items)
+  inlayHintsByDoc.set(document.uri.toString(), result.inlayHints)
+  inlayHintsChanged.fire()
 }
 
 function rangeFromOffsets(

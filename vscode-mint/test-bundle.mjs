@@ -26,9 +26,17 @@ class Diagnostic {
     this.range = range; this.message = message; this.severity = severity
   }
 }
+class InlayHint {
+  constructor(position, label) { this.position = position; this.label = label }
+}
+class EventEmitter {
+  constructor() { this._listeners = []; this.event = (l) => { this._listeners.push(l); return { dispose() {} } } }
+  fire() { for (const l of this._listeners) l() }
+  dispose() { this._listeners = [] }
+}
 
 const vscodeMock = {
-  Position, Range, Diagnostic,
+  Position, Range, Diagnostic, InlayHint, EventEmitter,
   DiagnosticSeverity: { Error: 0, Warning: 1, Information: 2, Hint: 3 },
   workspace: {
     onDidOpenTextDocument: () => ({ dispose() {} }),
@@ -42,6 +50,7 @@ const vscodeMock = {
       delete(uri) { collected.delete(uri) },
       dispose() {},
     }),
+    registerInlayHintsProvider: () => ({ dispose() {} }),
   },
 }
 
