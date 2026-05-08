@@ -1059,8 +1059,8 @@ let runConstructSchema =
             schemaMeta.start, schemaMeta.end_,
           )];
         } else {
-          let (witnessErrs, _) = List.fold_left2(
-            ((accErrs, substEnv), d: decl, witness) => {
+          let (witnessErrs, witnessHoles, _) = List.fold_left2(
+            ((accErrs, accHoles, substEnv), d: decl, witness) => {
               let witnessCtx =
                 List.fold_left(
                   (acc, p: param) => {
@@ -1081,9 +1081,9 @@ let runConstructSchema =
               let paramNames = List.map((p: param) => p.paramName, d.params);
               let newSubstEnv =
                 StringMap.add(d.declName, (paramNames, witness), substEnv);
-              (accErrs @ witnessInfo.errors, newSubstEnv);
+              (accErrs @ witnessInfo.errors, accHoles @ witnessInfo.holes, newSubstEnv);
             },
-            ([], emptyWitnessEnv),
+            ([], [], emptyWitnessEnv),
             decls,
             witnesses,
           );
@@ -1092,6 +1092,11 @@ let runConstructSchema =
               String.concat("; ", List.map((e: error) => e.message, witnessErrs));
             [mark(
               schemaRefName ++ " matched but generated ill-typed witnesses: " ++ details,
+              schemaMeta.start, schemaMeta.end_,
+            )];
+          } else if (List.length(witnessHoles) > 0) {
+              [mark(
+              schemaRefName ++ " matched but generated incomplete witnesses",
               schemaMeta.start, schemaMeta.end_,
             )];
           } else {
