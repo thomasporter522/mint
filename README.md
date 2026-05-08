@@ -4,8 +4,10 @@ Mint's design is centered around the virtue of _objectivity_. That is, the seman
 
 ## Getting Started
 
-- Run `make init` the first time building. 
-- Run `make`. 
+- Run `make init`. 
+- Run `make vscode-init`. 
+- Run `make vscode-install`. 
+- (Re)start VSCode, and open a file in `mint/examples`.
 
 ## Future Directions
 

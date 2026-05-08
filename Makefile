@@ -8,10 +8,10 @@ grammar:
 	cd web && npm run build-grammar
 
 reason:
-	cd reason && eval $$(opam env --switch=hazel) && dune build @reason
+	cd reason && eval $$(opam env) && dune build @reason
 
 clean:
-	cd reason && eval $$(opam env --switch=hazel) && dune clean
+	cd reason && eval $$(opam env) && dune clean
 
 .PHONY: test
 test:
