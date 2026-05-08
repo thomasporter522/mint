@@ -4,6 +4,88 @@ open Error;
 open MLType;
 
 module StringMap = Map.Make(String);
+module IntMap = Map.Make(Int);
+
+/* === Elaboration state (per-declaration) ===
+   Underapplied OL constructors are elaborated by inserting metavariables
+   for the missing leading arguments. Metas are solved by unification
+   whenever two types are compared. Solutions are threaded through the
+   check functionally (no refs); each top-level entry into OL checking
+   (each decl, each schema-generated witness) gets a fresh state. */
+
+type elabState = {
+  solutions: IntMap.t(ol),
+  nextMetaId: int,
+};
+
+let emptyElabState: elabState = {
+  solutions: IntMap.empty,
+  nextMetaId: 0,
+};
+
+/* Allocate a fresh meta as a ghost subterm at the given source meta. */
+let mkMeta = (state: elabState, m: meta): (ol, elabState) => {
+  let id = state.nextMetaId;
+  let t: ol = {value: OLMeta(id), meta: {...m, ghost: true}};
+  (t, {...state, nextMetaId: id + 1});
+};
+
+/* Walk solution chains: return the term a meta currently points to, or
+   the meta itself if unsolved. Non-meta terms are returned unchanged. */
+let rec follow = (sols: IntMap.t(ol), t: ol): ol =>
+  switch (t.value) {
+  | OLMeta(id) =>
+    switch (IntMap.find_opt(id, sols)) {
+    | Some(t') => follow(sols, t')
+    | None => t
+    }
+  | _ => t
+  };
+
+/* Deep-resolve all metas in a term using the current solutions. Metas
+   that remain unsolved survive as OLMeta in the result. */
+let rec zonk = (sols: IntMap.t(ol), t: ol): ol => {
+  let t = follow(sols, t);
+  switch (t.value) {
+  | OLAp(f, args) =>
+    {...t, value: OLAp(zonk(sols, f), List.map(zonk(sols), args))}
+  | _ => t
+  };
+};
+
+/* Functional unification. Returns Some(new solutions) on success, None
+   on failure. User holes match anything (wildcard, like termConsistent
+   used to do). Two unsolved metas are aliased by pointing the higher
+   ID at the lower. */
+let rec unify = (sols: IntMap.t(ol), a: ol, b: ol): option(IntMap.t(ol)) => {
+  let a = follow(sols, a);
+  let b = follow(sols, b);
+  switch (a.value, b.value) {
+  | (OLMeta(idA), OLMeta(idB)) when idA == idB => Some(sols)
+  | (OLMeta(idA), OLMeta(idB)) =>
+    let (lo, hi) = idA < idB ? (idA, idB) : (idB, idA);
+    let aliased: ol = {value: OLMeta(lo), meta: defaultMeta};
+    Some(IntMap.add(hi, aliased, sols));
+  | (OLMeta(id), _) => Some(IntMap.add(id, b, sols))
+  | (_, OLMeta(id)) => Some(IntMap.add(id, a, sols))
+  | (OLHole(_), _) | (_, OLHole(_)) => Some(sols)
+  | (OLIdentifier(x), OLIdentifier(y)) when x == y => Some(sols)
+  | (OLAp(f1, args1), OLAp(f2, args2))
+      when List.length(args1) == List.length(args2) =>
+    let init = unify(sols, f1, f2);
+    List.fold_left2(
+      (acc, x, y) =>
+        switch (acc) {
+        | None => None
+        | Some(s) => unify(s, x, y)
+        },
+      init,
+      args1,
+      args2,
+    );
+  | _ => None
+  };
+};
 
 type fullType = (list((option(string), ol)), ol);
 
@@ -26,12 +108,12 @@ type holeInfo = {
 type staticInfo = {
   errors: list(error),
   holes: list((int, holeInfo)),
-  /* Inlay hints: (offset, content) — render `content` (a printed form of
-     a run of ghost subterms, separated by spaces) anchored just before
-     `offset`. Produced by extracting ghost subterms from the elaborated
-     term, so adding new kinds of insertions only requires marking them
-     with meta.ghost = true. */
-  inlayHints: list((int, string)),
+  /* Inlay hints: (offset, ghost terms) — anchored just before `offset`.
+     Carried as terms (not rendered strings) so they can be zonked at
+     the decl boundary against the local solutions map; the API boundary
+     prints them. Adding new kinds of ghost insertions only requires
+     marking them with meta.ghost = true. */
+  inlayHints: list((int, list(ol))),
   /* Definitions: (use, def) — for each OL identifier reference that
      resolves to an OL binding, the meta of the use and the meta of the
      declaration site. Drives go-to-definition. */
@@ -90,7 +172,7 @@ let rec resolve = (env: env, t: ol): ol =>
       }
     | OLAp(f, args) =>
       {...t, value: OLAp(resolve(env, f), List.map(resolve(env), args))}
-    | OLHole(_) => t
+    | OLHole(_) | OLMeta(_) => t
     };
   }
 
@@ -129,7 +211,7 @@ and resolveWithParams = (wenv: witnessEnv, t: ol): ol =>
       }
     | OLAp(f, args) =>
       {...t, value: OLAp(resolveWithParams(wenv, f), List.map(resolveWithParams(wenv), args))}
-    | OLHole(_) => t
+    | OLHole(_) | OLMeta(_) => t
     };
   }
 
@@ -165,20 +247,6 @@ let stringOfMode =
   | IdentifierMode => "identifier"
   | Expression(_) => "expression";
 
-/* --- Type consistency --- */
-
-/* Structural consistency: like equality but holes match anything */
-let rec termConsistent = (a: ol, b: ol): bool =>
-  switch (a.value, b.value) {
-  | (OLHole(_), _) | (_, OLHole(_)) => true
-  | (OLIdentifier(x), OLIdentifier(y)) => x == y
-  | (OLAp(f1, args1), OLAp(f2, args2)) =>
-    termConsistent(f1, f2)
-    && List.length(args1) == List.length(args2)
-    && List.for_all2(termConsistent, args1, args2)
-  | _ => false
-  };
-
 /* --- Context lookup (OL mode) --- */
 
 type lookupResult =
@@ -194,29 +262,38 @@ let lookupCtx = (ctx: context, x: string): lookupResult =>
 
 /* --- Error helpers --- */
 
+/* Subsume: type-equality check that may solve metas via unification.
+   Returns the (possibly updated) solutions alongside any errors. */
 let subsume =
-    (expected: option(ol), inferred: option(fullType), from, to_)
-    : list(error) => {
+    (sols: IntMap.t(ol),
+     expected: option(ol),
+     inferred: option(fullType),
+     from, to_)
+    : (list(error), IntMap.t(ol)) => {
   let tooFewArgs =
     switch (inferred, expected) {
     | (Some(([_, ..._], _)), Some(_)) => [mark("Too few arguments", from, to_)]
     | _ => []
     };
   let inferredOut = Option.map(((_, out)) => out, inferred);
-  let inconsistency =
+  let (inconsistency, sols') =
     switch (expected, inferredOut) {
-    | (Some(exp), Some(inf)) when !termConsistent(exp, inf) =>
-      [mark(
-         "Inconsistency (expected "
-         ++ printOL(exp)
-         ++ ", got "
-         ++ printOL(inf)
-         ++ ")",
-         from, to_,
-       )]
-    | _ => []
+    | (Some(exp), Some(inf)) =>
+      switch (unify(sols, exp, inf)) {
+      | Some(s) => ([], s)
+      | None =>
+        ([mark(
+           "Inconsistency (expected "
+           ++ printOL(zonk(sols, exp))
+           ++ ", got "
+           ++ printOL(zonk(sols, inf))
+           ++ ")",
+           from, to_,
+         )], sols)
+      }
+    | _ => ([], sols)
     };
-  tooFewArgs @ inconsistency;
+  (tooFewArgs @ inconsistency, sols');
 };
 
 let checkArity = (expected, found, from, to_) =>
@@ -253,13 +330,13 @@ let ensureMode = (allowed, mode, from, to_) =>
 
 let mkGhost = (v: cOL): ol => {value: v, meta: asGhost(defaultMeta)};
 
-/* Print a ghost subterm for inlay-hint display. Distinct from printOL
-   (which renders Synthesized holes as "" for parser-fallback contexts):
-   ghost holes always render as "?", and ghost applications are rendered
-   structurally so wrappers like a ghost `coerce` show up as `coerce ?`. */
+/* Print a (zonked) ghost subterm for inlay-hint display. After zonking,
+   surviving OLMeta(_) subterms are unsolved metavariables and render as
+   "?". OLHole(_) cases (synthesized or user-written holes that ended up
+   in a ghost slot) also render as "?" — the user never sees meta IDs. */
 let rec printGhost = (t: ol): string =>
   switch (t.value) {
-  | OLHole(_) => "?"
+  | OLHole(_) | OLMeta(_) => "?"
   | OLIdentifier(s) => s
   | OLAp(f, args) =>
     let inside =
@@ -267,23 +344,32 @@ let rec printGhost = (t: ol): string =>
     t.meta.parens ? "(" ++ inside ++ ")" : inside;
   };
 
-/* Walk an arg list and emit one inlay hint per maximal run of ghost
-   args, anchored at the first non-ghost arg that follows the run. The
-   hint's content is the printed form of the run, joined by spaces.
-   Trailing ghosts (no anchor) are not currently rendered. */
-let extractArgRunHints = (args: list(ol)): list((int, string)) => {
+/* Top-level rendering of one ghost term in an inlay-hint sequence.
+   Unlike printGhost, this always wraps compound (OLAp) results in
+   parens, so a list of ghosts joined by spaces stays unambiguous —
+   `? ? (Ul l5) ?` rather than `? ? Ul l5 ?`. */
+let renderGhostInline = (t: ol): string =>
+  switch (t.value) {
+  | OLAp(_, _) =>
+    "(" ++ printGhost({...t, meta: {...t.meta, parens: false}}) ++ ")"
+  | _ => printGhost(t)
+  };
+
+/* Walk an arg list and emit one entry per maximal run of ghost args,
+   anchored at the first non-ghost arg that follows the run. The ghost
+   terms are returned as-is so the decl boundary can zonk them with the
+   final solutions map; the API boundary then prints. */
+let extractArgRunHints = (args: list(ol)): list((int, list(ol))) => {
   let rec go =
-          (acc: list((int, string)), run: list(ol), args: list(ol))
-          : list((int, string)) =>
+          (acc: list((int, list(ol))), run: list(ol), args: list(ol))
+          : list((int, list(ol))) =>
     switch (args) {
     | [] => List.rev(acc)
     | [a, ...rest] =>
       if (a.meta.ghost) {
         go(acc, [a, ...run], rest);
       } else if (run != []) {
-        let content =
-          String.concat(" ", List.map(printGhost, List.rev(run)));
-        go([(a.meta.start, content), ...acc], [], rest);
+        go([(a.meta.start, List.rev(run)), ...acc], [], rest);
       } else {
         go(acc, [], rest);
       }
@@ -412,7 +498,23 @@ let mlBuiltins: context =
 
 /* === Unified checker: OL and ML mutually recursive === */
 
-/* Check a single declaration line: (name (p1:T1) ...) : RetType */
+/* Zonk all ghost terms in an info's inlay hints with the given solutions.
+   Called at decl/witness boundaries so the per-decl solutions are applied
+   before the state is discarded. */
+let zonkInlayHints =
+    (sols: IntMap.t(ol), info: staticInfo): staticInfo => {
+  let zonked =
+    List.map(
+      ((pos, ghosts)) => (pos, List.map(zonk(sols), ghosts)),
+      info.inlayHints,
+    );
+  {...info, inlayHints: zonked};
+};
+
+/* Check a single declaration line: (name (p1:T1) ...) : RetType.
+   Per-decl elaboration state is created here, threaded through every
+   sub-check, and consumed at the end via zonkInlayHints. Solutions
+   never escape this scope. */
 let rec checkDeclLine = (ctx: context, d: decl): staticInfo => {
   /* Matches typeDeclaration in the formalism:
        typeArgs(Γ[x ā : T])(ā)
@@ -428,26 +530,34 @@ let rec checkDeclLine = (ctx: context, d: decl): staticInfo => {
     List.map((p: param) => (Some(p.paramName), p.paramType), d.params);
   let selfBinding = OL(Some((paramPairs, d.retType)), Some(d.nameMeta));
   let selfCtx = StringMap.add(d.declName, selfBinding, ctx);
-  /* typeArgs: check each param's type, accumulate param bindings */
-  let (paramInfo, paramCtx) =
+  /* typeArgs: check each param's type, threading the elaboration state. */
+  let (paramInfo, paramCtx, state1) =
     List.fold_left(
-      ((accInfo, accCtx), p: param) => {
-        let typeInfo = checkOLTerm(accCtx, Expression(Some(olHole)), p.paramType);
+      ((accInfo, accCtx, accState), p: param) => {
+        let (typeInfo, newState) =
+          checkOLTerm(accState, accCtx, Expression(Some(olHole)), p.paramType);
         let newCtx =
           StringMap.add(p.paramName, OL(Some(([], p.paramType)), Some(p.nameMeta)), accCtx);
-        (mergeInfos(accInfo, typeInfo), newCtx);
+        (mergeInfos(accInfo, typeInfo), newCtx, newState);
       },
-      (emptyInfo, selfCtx),
+      (emptyInfo, selfCtx, emptyElabState),
       d.params,
     );
   /* typeTerm: check retType in Γ[x ā : T][ā] */
-  let retInfo = checkOLTerm(paramCtx, Expression(Some(olHole)), d.retType);
+  let (retInfo, finalState) =
+    checkOLTerm(state1, paramCtx, Expression(Some(olHole)), d.retType);
+  let merged = mergeInfos(paramInfo, retInfo);
+  let zonked = zonkInlayHints(finalState.solutions, merged);
   let bindings = StringMap.singleton(d.declName, selfBinding);
-  {...mergeInfos(paramInfo, retInfo), bindings};
+  {...zonked, bindings};
 }
 
-/* Check an OL term (used for declaration types in postulate/construct) */
-and checkOLTerm = (ctx: context, mode: checkingMode, t: ol): staticInfo =>
+/* Check an OL term (used for declaration types in postulate/construct).
+   Returns the info plus the updated elaboration state (solutions map +
+   meta counter), threaded through sub-checks. */
+and checkOLTerm =
+    (state: elabState, ctx: context, mode: checkingMode, t: ol)
+    : (staticInfo, elabState) =>
   switch (t.value) {
   | OLIdentifier(v) =>
     let modeErrors = ensureMode(
@@ -458,114 +568,136 @@ and checkOLTerm = (ctx: context, mode: checkingMode, t: ol): staticInfo =>
       switch (lookupCtx(ctx, v)) {
       | NotFound =>
         let err = mark("Unbound variable " ++ v, t.meta.start, t.meta.end_);
-        {errors: [err, ...modeErrors], holes: [], inlayHints: [], definitions: [], inferred: None, mlInferred: None, bindings: StringMap.empty};
+        let info = {errors: [err, ...modeErrors], holes: [], inlayHints: [], definitions: [], inferred: None, mlInferred: None, bindings: StringMap.empty};
+        (info, state);
       | Found(inferred, defSite) =>
-        let subErrors = subsume(expected, inferred, t.meta.start, t.meta.end_);
+        let (subErrors, sols') =
+          subsume(state.solutions, expected, inferred, t.meta.start, t.meta.end_);
         let definitions =
           switch (defSite) {
           | Some(dm) when !t.meta.ghost => [(t.meta, dm)]
           | _ => []
           };
-        {errors: modeErrors @ subErrors, holes: [], inlayHints: [], definitions, inferred, mlInferred: None, bindings: StringMap.empty};
+        let info = {errors: modeErrors @ subErrors, holes: [], inlayHints: [], definitions, inferred, mlInferred: None, bindings: StringMap.empty};
+        (info, {...state, solutions: sols'});
       }
     | _ =>
-      {errors: modeErrors, holes: [], inlayHints: [], definitions: [], inferred: None, mlInferred: None, bindings: StringMap.empty}
+      let info = {errors: modeErrors, holes: [], inlayHints: [], definitions: [], inferred: None, mlInferred: None, bindings: StringMap.empty};
+      (info, state);
     };
 
   | OLAp(f, args) =>
     switch (mode) {
     | Spine =>
-      let (info, _) =
+      let (funInfo, state1) = checkOLTerm(state, ctx, IdentifierMode, f);
+      let initCtx = mergeBindings(ctx, funInfo.bindings);
+      let (info, _, finalState) =
         List.fold_left(
-          ((accInfo, accCtx), arg) => {
-            let argInfo = checkOLTerm(accCtx, Argument, arg);
+          ((accInfo, accCtx, accState), arg) => {
+            let (argInfo, newState) = checkOLTerm(accState, accCtx, Argument, arg);
             let combined = mergeInfos(accInfo, argInfo);
-            (combined, mergeBindings(accCtx, combined.bindings));
+            (combined, mergeBindings(accCtx, combined.bindings), newState);
           },
-          {
-            let funInfo = checkOLTerm(ctx, IdentifierMode, f);
-            (funInfo, mergeBindings(ctx, funInfo.bindings));
-          },
+          (funInfo, initCtx, state1),
           args,
         );
-      info;
+      (info, finalState);
 
     | Expression(expected) =>
-      let funInfo = checkOLTerm(ctx, Expression(None), f);
+      let (funInfo, state1) = checkOLTerm(state, ctx, Expression(None), f);
       switch (funInfo.inferred) {
       | Some((params, retType)) =>
         let paramCount = List.length(params);
         let argCount = List.length(args);
         let arityErrors =
           checkArity(paramCount, argCount, f.meta.start, f.meta.end_);
-        /* Elaborate: when underapplied, prepend ghost holes so the given
-           args align with the *trailing* params. Each synthesized arg is
-           a real OL subterm carrying meta.ghost = true; this is the only
-           way underapplication is expressed structurally. Type-checking
-           skips ghost subterms but uses them for substitution, so a
-           dependent param type like `B a` resolves to `B ?` when `a` is
-           missing. */
+        /* Elaborate: when underapplied, prepend a fresh metavariable for
+           each missing leading arg. Metas flow through dependent-type
+           substitution and may be solved by unification when this
+           expression's inferred type meets a more specific expected type. */
         let nMissing = max(0, paramCount - argCount);
-        let leadingGhosts =
-          List.init(nMissing, _ => mkGhost(OLHole(Synthesized)));
+        let (leadingGhosts, state2) =
+          List.fold_left(
+            ((ghosts, accState), _) => {
+              let (g, newState) = mkMeta(accState, defaultMeta);
+              (ghosts @ [g], newState);
+            },
+            ([], state1),
+            List.init(nMissing, _ => 0),
+          );
         let effectiveArgs = leadingGhosts @ args;
         let checkLen = min(paramCount, List.length(effectiveArgs));
-        let (argInfos, finalEnv) =
+        let (argInfos, finalEnv, state3) =
           List.fold_left(
-            ((accInfos, env), i) => {
+            ((accInfos, env, accState), i) => {
               let (paramName, paramTy) = List.nth(params, i);
               let expectedTy = resolve(env, paramTy);
               let arg = List.nth(effectiveArgs, i);
-              let argInfo =
+              let (argInfo, newState) =
                 if (arg.meta.ghost) {
-                  emptyInfo;  /* elaboration-inserted; not type-checked */
+                  (emptyInfo, accState);  /* elaboration-inserted; not type-checked */
                 } else {
-                  checkOLTerm(ctx, Expression(Some(expectedTy)), arg);
+                  checkOLTerm(accState, ctx, Expression(Some(expectedTy)), arg);
                 };
               let env =
                 switch (paramName) {
                 | Some(name) => StringMap.add(name, arg, env)
                 | None => env
                 };
-              (accInfos @ [argInfo], env);
+              (accInfos @ [argInfo], env, newState);
             },
-            ([], emptyEnv),
+            ([], emptyEnv, state2),
             List.init(checkLen, i => i),
           );
         let info = List.fold_left(mergeInfos, funInfo, argInfos);
         let resolvedRet = resolve(finalEnv, retType);
         let inferred = Some(([], resolvedRet));
-        let subErrors = subsume(expected, inferred, t.meta.start, t.meta.end_);
-        /* Generic hint extraction: walk the elaborated arg list and emit
-           one hint per run of ghost subterms. Anchors land just before
-           the first non-ghost arg, whose meta.start now spans any
-           wrapping parens (builder fix). */
+        let (subErrors, sols') =
+          subsume(state3.solutions, expected, inferred, t.meta.start, t.meta.end_);
+        let state4 = {...state3, solutions: sols'};
+        /* Collect the ghost-arg run as a deferred inlay-hint entry; the
+           ghost terms (containing metas) get zonked at the decl boundary. */
         let hints = extractArgRunHints(effectiveArgs);
         let info = {...info, inlayHints: info.inlayHints @ hints};
-        withErrors({...info, inferred}, arityErrors @ subErrors);
-      | None => funInfo
+        let final = withErrors({...info, inferred}, arityErrors @ subErrors);
+        (final, state4);
+      | None => (funInfo, state1)
       };
 
     | _ =>
       let modeErrors = ensureMode(["spine"], mode, t.meta.start, t.meta.end_);
-      let funInfo = checkOLTerm(ctx, Expression(Some(olHole)), f);
-      let argInfos = List.map(a => checkOLTerm(ctx, Expression(Some(olHole)), a), args);
-      withErrors(List.fold_left(mergeInfos, funInfo, argInfos), modeErrors);
+      let (funInfo, state1) = checkOLTerm(state, ctx, Expression(Some(olHole)), f);
+      let (argInfos, finalState) =
+        List.fold_left(
+          ((accInfos, accState), arg) => {
+            let (argInfo, newState) =
+              checkOLTerm(accState, ctx, Expression(Some(olHole)), arg);
+            (accInfos @ [argInfo], newState);
+          },
+          ([], state1),
+          args,
+        );
+      let info = List.fold_left(mergeInfos, funInfo, argInfos);
+      (withErrors(info, modeErrors), finalState);
     }
 
-  | OLHole(_) =>
+  | OLHole(_) | OLMeta(_) =>
+    /* OLMeta(_) is unreachable from user source (parser doesn't produce
+       metas) but the case is kept for exhaustiveness; treat as a hole. */
     switch (mode) {
     | Expression(expected) =>
       let goal =
         switch (expected) {
-        | Some(e) => embedOL(e)
+        | Some(e) => embedOL(zonk(state.solutions, e))
         | None => mlHole
         };
-      {errors: [], holes: [(t.meta.start, {goal, context: ctx})], inlayHints: [], definitions: [],
-       inferred: Some(fullHole), mlInferred: None, bindings: StringMap.empty};
+      let info = {errors: [], holes: [(t.meta.start, {goal, context: ctx})], inlayHints: [], definitions: [],
+                   inferred: Some(fullHole), mlInferred: None, bindings: StringMap.empty};
+      (info, state);
     | _ =>
-      {errors: [mark("Hole in non-expression", t.meta.start, t.meta.end_)],
-       holes: [], inlayHints: [], definitions: [], inferred: Some(fullHole), mlInferred: None, bindings: StringMap.empty};
+      let info = {errors: [mark("Hole in non-expression", t.meta.start, t.meta.end_)],
+                   holes: [], inlayHints: [], definitions: [], inferred: Some(fullHole), mlInferred: None, bindings: StringMap.empty};
+      (info, state);
     }
   }
 
@@ -1141,8 +1273,10 @@ let runConstructSchema =
                  [x ↦ t][w̄] where the substitution reaches into both
                  subsequent declarations and subsequent witness terms. */
               let witnessOL = resolveWithParams(substEnv, mlToOL(witness));
-              let witnessInfo =
-                checkOLTerm(witnessCtx, Expression(Some(expectedType)), witnessOL);
+              /* Each witness gets a fresh elaboration state — solutions
+                 don't cross witness boundaries. */
+              let (witnessInfo, _state) =
+                checkOLTerm(emptyElabState, witnessCtx, Expression(Some(expectedType)), witnessOL);
               let paramNames = List.map((p: param) => p.paramName, d.params);
               let newSubstEnv =
                 StringMap.add(d.declName, (paramNames, witness), substEnv);

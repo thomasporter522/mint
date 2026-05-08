@@ -14,7 +14,7 @@ lmax-idem (l : level) : level-eq (lmax l l) l
 -- equations
 eq (l : level) (A : Ul l) (B : Ul l) (a : A) (b : B) : Ul l
 refl (l : level) (A : Ul l) (a : A) : eq l A A a a
-sym (l : level) (A : Ul l) (B : Ul l) (a : A) (b : B) (e : eq l A B a b) : eq l B A b a
+sym (l : level) (A : Ul l) (B : Ul l) (a : A) (b : B) (e : eq l A B a b) : eq A b a
 trans (l : level) (A : Ul l) (B : Ul l) (C : Ul l) (a : A) (b : B) (c : C) (e1 : eq l A B a b) (e2 : eq l B C b c) : eq l A C a c
 cast (l : level) (A : Ul l) (B : Ul l) (e : eq (ls l) (Ul l) (Ul l) A B) (a : A) : B
 Ul-cong (l1 : level) (l2 : level) (my-eq : level-eq l1 l2) : (eq ? (Ul (ls l1)) (Ul (ls l2)) (Ul l1) (Ul l2))
@@ -277,7 +277,7 @@ meta
             let case-witness = (ap coprod-level lM coprod-type mvar elim-arr scrut) in
             let proofs = (build-proofs lM mvar case-vars rest-case-vars) in
             (Ok (concat [[coprod-type], injs, [case-witness], proofs]))
-        | _ => (Error "no ctors") end
+        | _ => (Error "false ctors") end
         | _ => (Error "bad params") end
     | _ => (Error "unrecognized") end
 construct by enum
@@ -289,12 +289,12 @@ trivial : myunit
 myunit-case (lM : level) (M : Ul lM) (trivial-case : M) (scrutinee : myunit) : M
 myunit-case-trivial (lM : level) (M : Ul lM) (trivial-case : M) : eq lM M M (myunit-case lM M trivial-case trivial) trivial-case
 construct by enum
-mybool : Ul (lmax lz lz)
-yes : mybool
-no : mybool
-mybool-case (lM : level) (M : Ul lM) (yes-case : M) (no-case : M) (scrutinee : mybool) : M
-mybool-case-yes (lM : level) (M : Ul lM) (yes-case : M) (no-case : M) : eq lM M M (mybool-case lM M yes-case no-case yes) yes-case
-mybool-case-no (lM : level) (M : Ul lM) (yes-case : M) (no-case : M) : eq lM M M (mybool-case lM M yes-case no-case no) no-case
+bool : Ul (lmax lz lz)
+true : bool
+false : bool
+bool-case (lM : level) (M : Ul lM) (true-case : M) (false-case : M) (scrutinee : bool) : M
+bool-case-true (lM : level) (M : Ul lM) (true-case : M) (false-case : M) : eq lM M M (bool-case lM M true-case false-case true) true-case
+bool-case-false (lM : level) (M : Ul lM) (true-case : M) (false-case : M) : eq lM M M (bool-case lM M true-case false-case false) false-case
 construct by enum
 triple : Ul (lmax lz (lmax lz lz))
 a : triple
@@ -304,4 +304,11 @@ triple-case (lM : level) (M : Ul lM) (a-case : M) (b-case : M) (c-case : M) (scr
 triple-case-a (lM : level) (M : Ul lM) (a-case : M) (b-case : M) (c-case : M) : eq lM M M (triple-case lM M a-case b-case c-case a) a-case
 triple-case-b (lM : level) (M : Ul lM) (a-case : M) (b-case : M) (c-case : M) : eq lM M M (triple-case lM M a-case b-case c-case b) b-case
 triple-case-c (lM : level) (M : Ul lM) (a-case : M) (b-case : M) (c-case : M) : eq lM M M (triple-case lM M a-case b-case c-case c) c-case
+meta
+ -- todo: cases schema
+ -- should search through the context for an appropriate eliminator for the input type
+-- construct by cases
+-- not : to (lmax lz lz) (lmax lz lz) bool bool 
+-- not-true : eq (lmax lz lz) bool bool (ap (lmax lz lz) (lmax lz lz) bool bool not true) false
+-- not-false : eq (lmax lz lz) bool bool (ap (lmax lz lz) (lmax lz lz) bool bool not false) true
 end

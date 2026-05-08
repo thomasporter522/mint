@@ -105,11 +105,17 @@ let resultOfStatics = (statics: staticInfo): jsResult => {
         statics.holes,
       ),
     );
+  /* Inlay hints carry ghost terms (already zonked at the decl boundary).
+     Render them here: each compound ghost gets parens for clarity, then
+     the ghosts in a run are joined with spaces. */
   let inlayHints =
     Array.of_list(
       List.map(
-        ((pos, content): (int, string)) =>
-          [|Obj.repr(pos), Obj.repr(content)|],
+        ((pos, ghosts): (int, list(ol))) => {
+          let content =
+            String.concat(" ", List.map(Check.renderGhostInline, ghosts));
+          [|Obj.repr(pos), Obj.repr(content)|];
+        },
         statics.inlayHints,
       ),
     );

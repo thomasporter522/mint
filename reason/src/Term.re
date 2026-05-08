@@ -23,11 +23,14 @@ type binOp =
 /* === Object language === */
 
 /* OL terms: the language inside declarations. Just identifiers,
-   application, and holes. No lambdas, no lists, no matching. */
+   application, holes, and metavariables. Metas are introduced by the
+   elaborator when the user underapplies a constructor; they're never
+   parsed from source. The integer is a per-declaration unique ID. */
 type cOL =
   | OLHole(holeKind)
   | OLIdentifier(string)
   | OLAp(ol, list(ol))                      /* f x y z */
+  | OLMeta(int)
 and ol = {
   value: cOL,
   meta,
@@ -142,11 +145,14 @@ let mkOL = (t: cOL): ol => {value: t, meta: defaultMeta};
 let mkML = (t: cML): ml => {value: t, meta: defaultMeta};
 let mkPat = (p: cPat): pat => {value: p, meta: defaultMeta};
 
-/* Embed an OL term into the ML language, preserving structure and metadata. */
+/* Embed an OL term into the ML language, preserving structure and metadata.
+   Metas don't exist in ML — degrade to synthesized holes (which render as `?`
+   in tooltips, the same way unsolved metas render in inlay hints). */
 let rec embedOL = (t: ol): ml => {
   let value =
     switch (t.value) {
     | OLHole(k) => Hole(k)
+    | OLMeta(_) => Hole(Synthesized)
     | OLIdentifier(s) => Identifier(s)
     | OLAp(f, args) => Ap(embedOL(f), List.map(embedOL, args))
     };

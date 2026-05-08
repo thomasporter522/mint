@@ -14,6 +14,7 @@ let rec printOL = (t: ol): string => {
     switch (t.value) {
     | OLHole(User) => "?"
     | OLHole(Synthesized) => ""
+    | OLMeta(_) => "?"  /* user never sees meta IDs */
     | OLIdentifier(v) => v
     | OLAp(f, args) =>
       printOL(f) ++ " " ++ String.concat(" ", List.map(printOL, args))
@@ -26,6 +27,7 @@ let rec debugOL = (t: ol): string => {
   switch (t.value) {
   | OLHole(User) => "Hole"
   | OLHole(Synthesized) => "Hole_"
+  | OLMeta(id) => "Meta(" ++ string_of_int(id) ++ ")"
   | OLIdentifier(v) => "Id(" ++ v ++ ")"
   | OLAp(f, args) =>
     p ++ "Ap(" ++ debugOL(f) ++ ",[" ++ String.concat(",", List.map(debugOL, args)) ++ "])"

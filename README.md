@@ -14,3 +14,10 @@ Mint's design is centered around the virtue of _objectivity_. That is, the seman
 - Automatic inference of missing arguments to term constructors.
 - User-written conversion procedures.
 - A module-like system for reusable, nested hypothetical reasoning.
+
+## Minor TODOs
+
+- Schema errors should be localized to schema reference, not first line of construction
+- Object-level identifiers should inhabit an abstract type from the perspective of the meta-level code
+- Warnings for shadowing
+- Expose context to schemas

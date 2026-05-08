@@ -167,6 +167,79 @@ describe('function declarations', () => {
       'postulate\nSort : Sort\nx : Sort\n(f (a : Sort)) : Sort\ng : (f x x)\nend';
     expect(inlayHints(code)).toEqual([]);
   });
+
+  it('solves a missing leading arg via unification with the given arg', () => {
+    /* (eq (l : Sort) (x : Ul l)) — `l` is missing, `x` provided as `my-thing`.
+       my-thing has type `Ul A`, so unifying `Ul ?l` ≡ `Ul A` solves ?l := A. */
+    const code = [
+      'postulate',
+      'Sort : Sort',
+      'A : Sort',
+      '(Ul (l : Sort)) : Sort',
+      'my-thing : (Ul A)',
+      '(eq (l : Sort) (x : Ul l)) : Sort',
+      'g : (eq my-thing)',
+      'end',
+    ].join('\n');
+    const hints = inlayHints(code);
+    expect(hints.length).toBe(1);
+    expect(hints[0][1]).toBe('A');
+  });
+
+  it('parenthesizes compound solved values in inlay hints', () => {
+    /* Same shape but the meta solves to a compound term `(Ul-of A)`. */
+    const code = [
+      'postulate',
+      'Sort : Sort',
+      'A : Sort',
+      '(Ul (l : Sort)) : Sort',
+      '(Ul-of (a : Sort)) : Sort',
+      'my-thing : (Ul (Ul-of A))',
+      '(eq (l : Sort) (x : Ul l)) : Sort',
+      'g : (eq my-thing)',
+      'end',
+    ].join('\n');
+    const hints = inlayHints(code);
+    expect(hints.length).toBe(1);
+    expect(hints[0][1]).toBe('(Ul-of A)');
+  });
+
+  it('unsolved metas render as ?', () => {
+    /* No dependency between the two params — the missing leading arg has
+       no constraint and stays unsolved. */
+    const code = [
+      'postulate',
+      'Sort : Sort',
+      'a : Sort',
+      '(eq (l : Sort) (x : Sort)) : Sort',
+      'g : (eq a)',
+      'end',
+    ].join('\n');
+    const hints = inlayHints(code);
+    expect(hints.length).toBe(1);
+    expect(hints[0][1]).toBe('?');
+  });
+
+  it('per-decl meta scoping: solutions do not leak between decls', () => {
+    /* Decl 1 solves its meta to A; decl 2 has no constraint and must
+       stay unsolved (renders as ?), proving solutions reset between decls. */
+    const code = [
+      'postulate',
+      'Sort : Sort',
+      'A : Sort',
+      '(Ul (l : Sort)) : Sort',
+      'my-thing : (Ul A)',
+      '(eq (l : Sort) (x : Ul l)) : Sort',
+      'g1 : (eq my-thing)',
+      '(eq2 (l : Sort) (x : Sort)) : Sort',
+      'g2 : (eq2 A)',
+      'end',
+    ].join('\n');
+    const hints = inlayHints(code);
+    expect(hints.length).toBe(2);
+    const contents = hints.map(h => h[1]).sort();
+    expect(contents).toEqual(['?', 'A']);
+  });
 });
 
 /* ------------------------------------------------------------------ */
