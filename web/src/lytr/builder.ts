@@ -74,7 +74,10 @@ export function buildOL(node: SyntaxNode, src: string): OL {
           return mkOL({ kind: 'OLHole', hk: 'Synthesized' }, m)
         }
         const result = buildOL(inner, src)
-        return { ...result, meta: { ...result.meta, parens: true } }
+        // Extend start/end across the parens so anchors (e.g. inlay hints
+        // before this term) and diagnostics for the whole expression cover
+        // the parens too.
+        return { ...result, meta: { ...result.meta, parens: true, start: m.start, end: m.end } }
       }
       return buildOL(c, src)
     }
@@ -189,7 +192,7 @@ function buildPatParens(node: SyntaxNode, src: string, m: Meta): Pat {
     }
   }
   if (items.length === 1) {
-    return { ...items[0], meta: { ...items[0].meta, parens: true } }
+    return { ...items[0], meta: { ...items[0].meta, parens: true, start: m.start, end: m.end } }
   }
   return mkPat({ kind: 'PTuple', items }, { ...m, parens: true })
 }
@@ -325,7 +328,7 @@ function buildParenExpr(node: SyntaxNode, src: string, m: Meta): ML {
     }
   }
   if (items.length === 1) {
-    return { ...items[0], meta: { ...items[0].meta, parens: true } }
+    return { ...items[0], meta: { ...items[0].meta, parens: true, start: m.start, end: m.end } }
   }
   return mkML({ kind: 'Tuple', items }, { ...m, parens: true })
 }

@@ -42,7 +42,7 @@ export function processCode(
 ): {
   errors: Error[]
   holes: [number, holeInfo][]
-  inlayHints: [number, number][]
+  inlayHints: [number, string][]
 } {
   const tree = parser.parse(code)
   const syntaxErrors = collectSyntaxErrors(tree)

@@ -10,9 +10,9 @@ const MINT_LANGUAGE = 'mint'
 let diagnostics: vscode.DiagnosticCollection
 
 // Latest inlay hints per document URI, populated by refresh() and read by
-// the InlayHintsProvider. Each entry is (offset, count): render `count`
-// ghost ?'s anchored just before `offset`.
-const inlayHintsByDoc = new Map<string, [number, number][]>()
+// the InlayHintsProvider. Each entry is (offset, content): render `content`
+// (a printed form of one or more ghost subterms) anchored just before `offset`.
+const inlayHintsByDoc = new Map<string, [number, string][]>()
 const inlayHintsChanged = new vscode.EventEmitter<void>()
 
 export function activate(context: vscode.ExtensionContext): void {
@@ -34,11 +34,10 @@ export function activate(context: vscode.ExtensionContext): void {
       provideInlayHints(document, range) {
         const hints = inlayHintsByDoc.get(document.uri.toString()) ?? []
         const result: vscode.InlayHint[] = []
-        for (const [offset, count] of hints) {
+        for (const [offset, content] of hints) {
           const pos = document.positionAt(offset)
           if (!range.contains(pos)) continue
-          const label = Array(count).fill('?').join(' ')
-          const hint = new vscode.InlayHint(pos, label)
+          const hint = new vscode.InlayHint(pos, content)
           hint.paddingRight = true
           result.push(hint)
         }

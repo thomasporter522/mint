@@ -100,18 +100,36 @@ describe('function declarations', () => {
     const code = 'postulate\nSort : Sort\nx : Sort\n(f (a : Sort) (b : Sort)) : Sort\ng : (f x)\nend';
     const hints = inlayHints(code);
     expect(hints.length).toBe(1);
-    const [offset, count] = hints[0];
-    expect(count).toBe(1);
+    const [offset, content] = hints[0];
+    expect(content).toBe('?');
     /* Offset should anchor at the `x` in the body of g. */
     expect(code.slice(offset, offset + 1)).toBe('x');
   });
 
-  it('two missing args produce a count-2 hint', () => {
+  it('two missing args produce a two-? hint', () => {
     const code =
       'postulate\nSort : Sort\nx : Sort\n(f (a : Sort) (b : Sort) (c : Sort)) : Sort\ng : (f x)\nend';
     const hints = inlayHints(code);
     expect(hints.length).toBe(1);
-    expect(hints[0][1]).toBe(2);
+    expect(hints[0][1]).toBe('? ?');
+  });
+
+  it('hint anchors at the outer paren of a parenthesized arg', () => {
+    /* Goal 1 from the refactor brief: `eq (ap...)` should render as
+       `eq ? ? ? (ap...)`, not `eq (? ? ? ap...)`. The hint offset must
+       land at the `(`, not at the inner `ap`. */
+    const code =
+      'postulate\nSort : Sort\nA : Sort\nB : Sort\nC : Sort\nD : Sort\n' +
+      '(eq (a : A) (b : B) (c : C) (d : D)) : Sort\n' +
+      '(ap (q : D)) : D\n' +
+      'q : D\n' +
+      'g : (eq (ap q))\nend';
+    const hints = inlayHints(code);
+    expect(hints.length).toBe(1);
+    const [offset, content] = hints[0];
+    expect(content).toBe('? ? ?');
+    /* The character at `offset` should be the open paren of `(ap q)`. */
+    expect(code[offset]).toBe('(');
   });
 
   it('checks the given argument against the LAST parameter type', () => {
@@ -465,9 +483,12 @@ describe('schema blocks', () => {
 
 describe('construct blocks', () => {
   it('checks construct by declarations like postulate', () => {
-    expect(errors(
+    /* Schema produces a `?` per witness. The witness-completeness check
+       flags this; verify there is no OTHER error (no unbound var, etc.). */
+    const msgs = errorMessages(
       'postulate\nSort : Sort\nx : Sort\nmeta\nschema foo = fun s => (Ok (foldl (fun acc => fun _ => ? :: acc) [] s))\nconstruct by foo\ny : x\nend'
-    )).toEqual([]);
+    );
+    expect(msgs).toEqual([expect.stringContaining('incomplete witnesses')]);
   });
 
   it('reports unbound variable in construct declaration', () => {
@@ -478,9 +499,12 @@ describe('construct blocks', () => {
   });
 
   it('postulate context flows into construct declarations', () => {
-    expect(errors(
+    /* `z : y` — checks that `y` (from postulate) is in scope. Witness is `?`,
+       so completeness fires; no Unbound-variable error confirms scope. */
+    const msgs = errorMessages(
       'postulate\nSort : Sort\nx : Sort\ny : x\nmeta\nschema foo = fun s => (Ok (foldl (fun acc => fun _ => ? :: acc) [] s))\nconstruct by foo\nz : y\nend'
-    )).toEqual([]);
+    );
+    expect(msgs).toEqual([expect.stringContaining('incomplete witnesses')]);
   });
 
   it('full chain: postulate context flows through schema to construct', () => {
@@ -500,6 +524,8 @@ describe('construct blocks', () => {
   });
 
   it('construct declarations extend the context', () => {
+    /* `z : y` — checks `y` from earlier construct decl is in scope. Witness
+       is `?`, so completeness fires; absence of Unbound-variable confirms scope. */
     const code = [
       'postulate',
       'Sort : Sort',
@@ -511,7 +537,7 @@ describe('construct blocks', () => {
       'z : y',
       'end',
     ].join('\n');
-    expect(errors(code)).toEqual([]);
+    expect(errorMessages(code)).toEqual([expect.stringContaining('incomplete witnesses')]);
   });
 
   it('full definition schema example passes with no errors', () => {
@@ -1316,6 +1342,8 @@ describe('context isolation', () => {
   });
 
   it('construct declarations see earlier construct declarations', () => {
+    /* `w : z` references `z` from an earlier construct decl. Witness is
+       `?`, so completeness fires; no Unbound-variable error confirms scope. */
     const code = [
       'postulate', 'Sort : Sort', 'x : Sort',
       'meta', 'schema foo = fun s => (Ok (foldl (fun acc => fun _ => ? :: acc) [] s))',
@@ -1323,7 +1351,7 @@ describe('context isolation', () => {
       'y : x', 'z : y', 'w : z',
       'end',
     ].join('\n');
-    expect(errors(code)).toEqual([]);
+    expect(errorMessages(code)).toEqual([expect.stringContaining('incomplete witnesses')]);
   });
 
   it('standalone schema with no postulate context works', () => {

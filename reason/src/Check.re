@@ -24,9 +24,12 @@ type holeInfo = {
 type staticInfo = {
   errors: list(error),
   holes: list((int, holeInfo)),
-  /* Inlay hints: (offset, count) — render `count` ghost ?'s anchored
-     just before `offset`. Used to elaborate underapplied OL constructors. */
-  inlayHints: list((int, int)),
+  /* Inlay hints: (offset, content) — render `content` (a printed form of
+     a run of ghost subterms, separated by spaces) anchored just before
+     `offset`. Produced by extracting ghost subterms from the elaborated
+     term, so adding new kinds of insertions only requires marking them
+     with meta.ghost = true. */
+  inlayHints: list((int, string)),
   inferred: option(fullType),
   mlInferred: option(mlType),
   bindings: context,
@@ -232,6 +235,55 @@ let ensureMode = (allowed, mode, from, to_) =>
      )];
   };
 
+/* === Elaboration: ghost-subterm machinery ===
+
+   An "elaborated" OL term is a term where some subterms were synthesized
+   by the checker rather than written by the user. Such subterms have
+   meta.ghost = true. The genericity is in the flag: anything you mark
+   ghost — a hole inserted as an implicit argument, a wrapper inserted
+   to coerce a subterm, a body inserted to fill a user hole — flows
+   through the same inlay-hint pipeline. */
+
+let mkGhost = (v: cOL): ol => {value: v, meta: asGhost(defaultMeta)};
+
+/* Print a ghost subterm for inlay-hint display. Distinct from printOL
+   (which renders Synthesized holes as "" for parser-fallback contexts):
+   ghost holes always render as "?", and ghost applications are rendered
+   structurally so wrappers like a ghost `coerce` show up as `coerce ?`. */
+let rec printGhost = (t: ol): string =>
+  switch (t.value) {
+  | OLHole(_) => "?"
+  | OLIdentifier(s) => s
+  | OLAp(f, args) =>
+    let inside =
+      printGhost(f) ++ " " ++ String.concat(" ", List.map(printGhost, args));
+    t.meta.parens ? "(" ++ inside ++ ")" : inside;
+  };
+
+/* Walk an arg list and emit one inlay hint per maximal run of ghost
+   args, anchored at the first non-ghost arg that follows the run. The
+   hint's content is the printed form of the run, joined by spaces.
+   Trailing ghosts (no anchor) are not currently rendered. */
+let extractArgRunHints = (args: list(ol)): list((int, string)) => {
+  let rec go =
+          (acc: list((int, string)), run: list(ol), args: list(ol))
+          : list((int, string)) =>
+    switch (args) {
+    | [] => List.rev(acc)
+    | [a, ...rest] =>
+      if (a.meta.ghost) {
+        go(acc, [a, ...run], rest);
+      } else if (run != []) {
+        let content =
+          String.concat(" ", List.map(printGhost, List.rev(run)));
+        go([(a.meta.start, content), ...acc], [], rest);
+      } else {
+        go(acc, [], rest);
+      }
+    };
+  go([], [], args);
+};
+
 /* --- Extracting params (name + type) from OL arg list --- */
 
 /* === ML type utilities === */
@@ -434,14 +486,17 @@ and checkOLTerm = (ctx: context, mode: checkingMode, t: ol): staticInfo =>
         let argCount = List.length(args);
         let arityErrors =
           checkArity(paramCount, argCount, f.meta.start, f.meta.end_);
-        /* Underapplication: elaborate by synthesizing leading holes so the
-           given args align with the *trailing* params. The synthesized holes
-           are not type-checked; they only serve as substitutees so dependent
-           param types like `B a` resolve to `B ?` when `a` is missing. */
+        /* Elaborate: when underapplied, prepend ghost holes so the given
+           args align with the *trailing* params. Each synthesized arg is
+           a real OL subterm carrying meta.ghost = true; this is the only
+           way underapplication is expressed structurally. Type-checking
+           skips ghost subterms but uses them for substitution, so a
+           dependent param type like `B a` resolves to `B ?` when `a` is
+           missing. */
         let nMissing = max(0, paramCount - argCount);
-        let leadingHoles =
-          List.init(nMissing, _ => mkOL(OLHole(Synthesized)));
-        let effectiveArgs = leadingHoles @ args;
+        let leadingGhosts =
+          List.init(nMissing, _ => mkGhost(OLHole(Synthesized)));
+        let effectiveArgs = leadingGhosts @ args;
         let checkLen = min(paramCount, List.length(effectiveArgs));
         let (argInfos, finalEnv) =
           List.fold_left(
@@ -450,8 +505,8 @@ and checkOLTerm = (ctx: context, mode: checkingMode, t: ol): staticInfo =>
               let expectedTy = resolve(env, paramTy);
               let arg = List.nth(effectiveArgs, i);
               let argInfo =
-                if (i < nMissing) {
-                  emptyInfo;  /* synthesized leading hole — skip checking */
+                if (arg.meta.ghost) {
+                  emptyInfo;  /* elaboration-inserted; not type-checked */
                 } else {
                   checkOLTerm(ctx, Expression(Some(expectedTy)), arg);
                 };
@@ -469,14 +524,12 @@ and checkOLTerm = (ctx: context, mode: checkingMode, t: ol): staticInfo =>
         let resolvedRet = resolve(finalEnv, retType);
         let inferred = Some(([], resolvedRet));
         let subErrors = subsume(expected, inferred, t.meta.start, t.meta.end_);
-        let inlayHints =
-          if (nMissing > 0 && argCount > 0) {
-            let firstArg = List.nth(args, 0);
-            [(firstArg.meta.start, nMissing)];
-          } else {
-            [];
-          };
-        let info = {...info, inlayHints: info.inlayHints @ inlayHints};
+        /* Generic hint extraction: walk the elaborated arg list and emit
+           one hint per run of ghost subterms. Anchors land just before
+           the first non-ghost arg, whose meta.start now spans any
+           wrapping parens (builder fix). */
+        let hints = extractArgRunHints(effectiveArgs);
+        let info = {...info, inlayHints: info.inlayHints @ hints};
         withErrors({...info, inferred}, arityErrors @ subErrors);
       | None => funInfo
       };

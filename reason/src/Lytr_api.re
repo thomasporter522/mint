@@ -77,7 +77,7 @@ external makeJsResult:
   (
     ~errors: array(jsError),
     ~holes: array(array(Obj.t)),
-    ~inlayHints: array(array(int)),
+    ~inlayHints: array(array(Obj.t)),
   ) =>
   jsResult =
   "";
@@ -107,7 +107,8 @@ let resultOfStatics = (statics: staticInfo): jsResult => {
   let inlayHints =
     Array.of_list(
       List.map(
-        ((pos, count): (int, int)) => [|pos, count|],
+        ((pos, content): (int, string)) =>
+          [|Obj.repr(pos), Obj.repr(content)|],
         statics.inlayHints,
       ),
     );
