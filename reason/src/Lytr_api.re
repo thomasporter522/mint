@@ -40,10 +40,10 @@ let contextToJsMap = (ctx: context): jsMap => {
   StringMap.iter(
     (k, v) =>
       switch (v) {
-      | OL(Some(ft)) => jsMapSet(m, k, displayBinding(k, ft))
+      | OL(Some(ft), _) => jsMapSet(m, k, displayBinding(k, ft))
       | ML(ty) => jsMapSet(m, k, displayBinding(k, ([], mkOL(OLIdentifier(MLType.printType(ty))))))
       | Builtin(_) | SchemaBinding(_) | MetaLet(_, _) => ()
-      | OL(None) => ()
+      | OL(None, _) => ()
       },
     ctx,
   );
@@ -78,6 +78,7 @@ external makeJsResult:
     ~errors: array(jsError),
     ~holes: array(array(Obj.t)),
     ~inlayHints: array(array(Obj.t)),
+    ~definitions: array(array(int)),
   ) =>
   jsResult =
   "";
@@ -112,7 +113,15 @@ let resultOfStatics = (statics: staticInfo): jsResult => {
         statics.inlayHints,
       ),
     );
-  makeJsResult(~errors, ~holes, ~inlayHints);
+  let definitions =
+    Array.of_list(
+      List.map(
+        ((useM, defM): (meta, meta)) =>
+          [|useM.start, useM.end_, defM.start, defM.end_|],
+        statics.definitions,
+      ),
+    );
+  makeJsResult(~errors, ~holes, ~inlayHints, ~definitions);
 };
 
 /* === Pipeline entry points ===

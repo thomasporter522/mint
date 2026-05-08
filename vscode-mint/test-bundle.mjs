@@ -51,6 +51,7 @@ const vscodeMock = {
       dispose() {},
     }),
     registerInlayHintsProvider: () => ({ dispose() {} }),
+    registerDefinitionProvider: () => ({ dispose() {} }),
   },
 }
 

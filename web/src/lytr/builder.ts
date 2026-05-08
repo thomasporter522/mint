@@ -114,6 +114,7 @@ function buildParam(node: SyntaxNode, src: string): Param {
     paramName: id ? text(id, src) : '_',
     paramType: ty ? buildOL(ty, src) : mkOL({ kind: 'OLHole', hk: 'Synthesized' }),
     paramMeta: metaOf(node),
+    nameMeta: id ? metaOf(id) : metaOf(node),
   }
 }
 
@@ -124,15 +125,19 @@ function buildDecl(node: SyntaxNode, src: string): Decl {
   const ty = firstChildByName(node, 'TypeExpr')
   let name = '_'
   let params: Param[] = []
+  let nameMeta: Meta = metaOf(node)
   if (head) {
     const hid = firstChildByName(head, 'Identifier')
-    if (hid) name = text(hid, src)
+    if (hid) {
+      name = text(hid, src)
+      nameMeta = metaOf(hid)
+    }
     params = childrenByName(head, 'Param').map(p => buildParam(p, src))
   }
   const retType = ty
     ? buildOL(ty, src)
     : mkOL({ kind: 'OLHole', hk: 'Synthesized' })
-  return { declName: name, params, retType, declMeta: metaOf(node) }
+  return { declName: name, params, retType, declMeta: metaOf(node), nameMeta }
 }
 
 /* === Pattern building === */

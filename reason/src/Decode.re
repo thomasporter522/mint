@@ -45,6 +45,11 @@ let getParamMeta = (j: jsObj): meta => {
   {parens: _bool(m, "parens"), start: _int(m, "start"), end_: _int(m, "end"), ghost: false};
 };
 
+let getNameMeta = (j: jsObj): meta => {
+  let m = _obj(j, "nameMeta");
+  {parens: _bool(m, "parens"), start: _int(m, "start"), end_: _int(m, "end"), ghost: false};
+};
+
 let decodeHoleKind = (s: string): holeKind =>
   switch (s) {
   | "User" => User
@@ -84,6 +89,7 @@ let decodeParam = (j: jsObj): param => {
   paramName: _str(j, "paramName"),
   paramType: decodeOL(_obj(j, "paramType")),
   paramMeta: getParamMeta(j),
+  nameMeta: getNameMeta(j),
 };
 
 let decodeDecl = (j: jsObj): decl => {
@@ -91,6 +97,7 @@ let decodeDecl = (j: jsObj): decl => {
   params: Array.map(decodeParam, _arr(j, "params")) |> Array.to_list,
   retType: decodeOL(_obj(j, "retType")),
   declMeta: getDeclMeta(j),
+  nameMeta: getNameMeta(j),
 };
 
 /* === ML types ===

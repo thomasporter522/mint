@@ -38,6 +38,9 @@ type param = {
   paramName: string,
   paramType: ol,
   paramMeta: meta,
+  /* Range of the param's name identifier alone, used as the
+     go-to-definition target. */
+  nameMeta: meta,
 };
 
 type decl = {
@@ -45,6 +48,11 @@ type decl = {
   params: list(param),
   retType: ol,
   declMeta: meta,
+  /* Range of the name identifier itself — narrower than declMeta. Used
+     as the go-to-definition target so a self-reference like the second
+     `Sort` in `Sort : Sort` navigates to the first `Sort` rather than
+     to a range that already contains the click. */
+  nameMeta: meta,
 };
 
 /* === Meta language === */

@@ -27,6 +27,18 @@
           { "scope": "keyword.control.mint",      "settings": { "foreground": "#28DCE5" } },
           { "scope": "keyword.operator.mint",     "settings": { "foreground": "#28DCE5" } }
         ]
+      },
+      "workbench.colorCustomizations": {
+        "[mint]": {
+          "editor.rangeHighlightBackground": "#80808033",
+          "editor.rangeHighlightBorder": "#00000000",
+          "editor.symbolHighlightBackground": "#80808033",
+          "editor.symbolHighlightBorder": "#00000000",
+          "editor.wordHighlightBackground": "#80808033",
+          "editor.wordHighlightBorder": "#00000000",
+          "editor.wordHighlightStrongBackground": "#80808033",
+          "editor.wordHighlightStrongBorder": "#00000000"
+        }
       }
     }
   },

@@ -43,6 +43,9 @@ export function processCode(
   errors: Error[]
   holes: [number, holeInfo][]
   inlayHints: [number, string][]
+  /* (useFrom, useTo, defFrom, defTo) for each OL identifier reference
+     that resolves to an OL binding. */
+  definitions: [number, number, number, number][]
 } {
   const tree = parser.parse(code)
   const syntaxErrors = collectSyntaxErrors(tree)
@@ -52,6 +55,7 @@ export function processCode(
     errors: [...syntaxErrors, ...result.errors],
     holes: result.holes,
     inlayHints: result.inlayHints,
+    definitions: result.definitions,
   }
 }
 

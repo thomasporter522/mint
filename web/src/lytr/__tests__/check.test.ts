@@ -14,15 +14,20 @@ type HoleInfo = { goal: any; context: any };
 type Result = {
   errors: Error[];
   holes: [number, HoleInfo][];
-  inlayHints: [number, number][];
+  inlayHints: [number, string][];
+  definitions: [number, number, number, number][];
 };
 
 function check(code: string): Result {
   return processCode(code) as Result;
 }
 
-function inlayHints(code: string): [number, number][] {
+function inlayHints(code: string): [number, string][] {
   return check(code).inlayHints;
+}
+
+function definitions(code: string): [number, number, number, number][] {
+  return check(code).definitions;
 }
 
 function errors(code: string): Error[] {
@@ -161,6 +166,94 @@ describe('function declarations', () => {
     const code =
       'postulate\nSort : Sort\nx : Sort\n(f (a : Sort)) : Sort\ng : (f x x)\nend';
     expect(inlayHints(code)).toEqual([]);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/*  Go-to-definition                                                   */
+/* ------------------------------------------------------------------ */
+
+describe('go-to-definition', () => {
+  it('identifier reference points to its postulated decl name', () => {
+    const code = 'postulate\nSort : Sort\nx : Sort\ny : x\nend';
+    const defs = definitions(code);
+    /* Find the use range covering the `x` in `y : x`. */
+    const yUseStart = code.lastIndexOf('x');
+    const rec = defs.find(([uf, ut]) => uf <= yUseStart && yUseStart < ut);
+    expect(rec).toBeDefined();
+    const [, , defFrom, defTo] = rec!;
+    /* Target is the name identifier of `x : Sort`, not the whole line. */
+    expect(code.slice(defFrom, defTo)).toBe('x');
+    /* And it's the first occurrence (the decl), not the use. */
+    expect(defFrom).toBeLessThan(yUseStart);
+  });
+
+  it('parameter reference inside a decl signature points to the param name', () => {
+    /* (f (a : Sort)) : a — the `a` in the retType refers to the param. */
+    const code = 'postulate\nSort : Sort\n(f (a : Sort)) : a\nend';
+    const defs = definitions(code);
+    /* The `a` in the retType comes after `: ` near the end. */
+    const aUseStart = code.lastIndexOf('a');
+    const rec = defs.find(([uf, ut]) => uf <= aUseStart && aUseStart < ut);
+    expect(rec).toBeDefined();
+    const [, , defFrom, defTo] = rec!;
+    /* Target is the param's name identifier alone, not the whole `(a : Sort)`. */
+    expect(code.slice(defFrom, defTo)).toBe('a');
+    expect(defFrom).toBeLessThan(aUseStart);
+  });
+
+  it('constructor head application resolves to its decl name', () => {
+    /* `(f x)` — clicking on `f` should jump to the `f` in `(f (a : Sort))`. */
+    const code = 'postulate\nSort : Sort\nx : Sort\n(f (a : Sort)) : Sort\ng : (f x)\nend';
+    const defs = definitions(code);
+    /* Find the `f` use in `(f x)` — it's the one in `g : (f x)`. */
+    const gLine = code.indexOf('g : (f x)');
+    const fUseStart = code.indexOf('f', gLine);
+    const rec = defs.find(([uf, ut]) => uf <= fUseStart && fUseStart < ut);
+    expect(rec).toBeDefined();
+    const [, , defFrom, defTo] = rec!;
+    /* Target is just the `f` identifier in the head. */
+    expect(code.slice(defFrom, defTo)).toBe('f');
+    expect(defFrom).toBeLessThan(fUseStart);
+  });
+
+  it('self-reference: the second `Sort` in `Sort : Sort` jumps to the first', () => {
+    const code = 'postulate\nSort : Sort\nend';
+    const defs = definitions(code);
+    /* Locate the SECOND `Sort` (the one after the colon). */
+    const firstSort = code.indexOf('Sort');
+    const secondSort = code.indexOf('Sort', firstSort + 4);
+    const rec = defs.find(([uf, ut]) => uf <= secondSort && secondSort < ut);
+    expect(rec).toBeDefined();
+    const [, , defFrom, defTo] = rec!;
+    /* Target must be the FIRST `Sort` so that navigation actually moves. */
+    expect(defFrom).toBe(firstSort);
+    expect(code.slice(defFrom, defTo)).toBe('Sort');
+  });
+
+  it('self-reference inside an OLAp retType jumps to the decl name', () => {
+    /* `(Ul (l : level)) : Ul l` — the head `Ul` in the retType refers
+       to the decl being defined; clicking on it should navigate to the
+       `Ul` in the head, not stay on itself. */
+    const code = 'postulate\nlevel : Sort\nSort : Sort\n(Ul (l : level)) : Ul l\nend';
+    const defs = definitions(code);
+    const declLine = code.indexOf('(Ul (l : level))');
+    const declUlStart = code.indexOf('Ul', declLine);
+    const retUlStart = code.indexOf('Ul l', declLine + 1);
+    const rec = defs.find(([uf, ut]) => uf <= retUlStart && retUlStart < ut);
+    expect(rec).toBeDefined();
+    const [, , defFrom, defTo] = rec!;
+    expect(defFrom).toBe(declUlStart);
+    expect(code.slice(defFrom, defTo)).toBe('Ul');
+  });
+
+  it('unbound references emit no definition record', () => {
+    /* `y : z` where z isn't declared — no definition for the use. */
+    const code = 'postulate\nSort : Sort\ny : z\nend';
+    const defs = definitions(code);
+    const zUseStart = code.lastIndexOf('z');
+    const rec = defs.find(([uf, ut]) => uf <= zUseStart && zUseStart < ut);
+    expect(rec).toBeUndefined();
   });
 });
 

@@ -15,6 +15,10 @@ let diagnostics: vscode.DiagnosticCollection
 const inlayHintsByDoc = new Map<string, [number, string][]>()
 const inlayHintsChanged = new vscode.EventEmitter<void>()
 
+// Per-doc definition records: (useFrom, useTo, defFrom, defTo). Read by
+// the DefinitionProvider on ctrl-click / Go-to-Definition.
+const definitionsByDoc = new Map<string, [number, number, number, number][]>()
+
 export function activate(context: vscode.ExtensionContext): void {
   diagnostics = vscode.languages.createDiagnosticCollection(MINT_LANGUAGE)
   context.subscriptions.push(diagnostics)
@@ -25,6 +29,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.workspace.onDidCloseTextDocument((doc) => {
       diagnostics.delete(doc.uri)
       inlayHintsByDoc.delete(doc.uri.toString())
+      definitionsByDoc.delete(doc.uri.toString())
     }),
   )
 
@@ -42,6 +47,36 @@ export function activate(context: vscode.ExtensionContext): void {
           result.push(hint)
         }
         return result
+      },
+    }),
+  )
+
+  context.subscriptions.push(
+    vscode.languages.registerDefinitionProvider(MINT_LANGUAGE, {
+      provideDefinition(document, position) {
+        const offset = document.offsetAt(position)
+        const defs = definitionsByDoc.get(document.uri.toString()) ?? []
+        // Prefer the smallest (most specific) enclosing record, since
+        // identifier-level uses can be nested inside larger ranges.
+        let best: [number, number, number, number] | null = null
+        for (const rec of defs) {
+          const [useFrom, useTo] = rec
+          if (offset < useFrom || offset >= useTo) continue
+          if (!best || useTo - useFrom < best[1] - best[0]) best = rec
+        }
+        if (!best) return null
+        const [useFrom, useTo, defFrom, defTo] = best
+        const targetRange = rangeFromOffsets(document, defFrom, defTo)
+        const link: vscode.LocationLink = {
+          targetUri: document.uri,
+          targetRange,
+          /* Selecting the name on navigation makes the post-jump highlight
+           * use the cursor-selection color rather than VS Code's range-
+           * highlight color (the orange flash). */
+          targetSelectionRange: targetRange,
+          originSelectionRange: rangeFromOffsets(document, useFrom, useTo),
+        }
+        return [link]
       },
     }),
   )
@@ -73,6 +108,7 @@ function refresh(document: vscode.TextDocument): void {
       ),
     ])
     inlayHintsByDoc.set(document.uri.toString(), [])
+    definitionsByDoc.set(document.uri.toString(), [])
     inlayHintsChanged.fire()
     return
   }
@@ -102,6 +138,7 @@ function refresh(document: vscode.TextDocument): void {
 
   diagnostics.set(document.uri, items)
   inlayHintsByDoc.set(document.uri.toString(), result.inlayHints)
+  definitionsByDoc.set(document.uri.toString(), result.definitions)
   inlayHintsChanged.fire()
 }
 

@@ -25,6 +25,10 @@ export type Param = {
   paramName: string
   paramType: OL
   paramMeta: Meta
+  /* Range of the param's name identifier alone — narrower than paramMeta
+   * (which spans the whole `(name : type)` form). Used as the
+   * go-to-definition target for references to the param. */
+  nameMeta: Meta
 }
 
 export type Decl = {
@@ -32,6 +36,10 @@ export type Decl = {
   params: Param[]
   retType: OL
   declMeta: Meta
+  /* Range of the name identifier alone. Used as the go-to-def target so
+   * clicking a self-reference like the second `Sort` in `Sort : Sort`
+   * navigates to the first `Sort` rather than the whole line. */
+  nameMeta: Meta
 }
 
 /* === Meta-language types === */
