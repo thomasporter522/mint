@@ -106,16 +106,14 @@ let resultOfStatics = (statics: staticInfo): jsResult => {
       ),
     );
   /* Inlay hints carry ghost terms (already zonked at the decl boundary).
-     Render them here: each compound ghost gets parens for clarity, then
-     the ghosts in a run are joined with spaces. */
+     Check.renderHintRun decides between the values rendering (with `?`
+     for any unsolved meta) and the collapsed `…` rendering (when every
+     ghost in the run resolved). */
   let inlayHints =
     Array.of_list(
       List.map(
-        ((pos, ghosts): (int, list(ol))) => {
-          let content =
-            String.concat(" ", List.map(Check.renderGhostInline, ghosts));
-          [|Obj.repr(pos), Obj.repr(content)|];
-        },
+        ((pos, ghosts): (int, list(ol))) =>
+          [|Obj.repr(pos), Obj.repr(Check.renderHintRun(ghosts))|],
         statics.inlayHints,
       ),
     );

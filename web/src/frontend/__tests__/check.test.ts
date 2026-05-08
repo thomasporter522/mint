@@ -168,9 +168,10 @@ describe('function declarations', () => {
     expect(inlayHints(code)).toEqual([]);
   });
 
-  it('solves a missing leading arg via unification with the given arg', () => {
+  it('collapses fully-solved ghost run to a single ellipsis', () => {
     /* (eq (l : Sort) (x : Ul l)) — `l` is missing, `x` provided as `my-thing`.
-       my-thing has type `Ul A`, so unifying `Ul ?l` ≡ `Ul A` solves ?l := A. */
+       my-thing has type `Ul A`, so unifying solves ?l := A. With every
+       ghost in the run resolved, the hint collapses to `…`. */
     const code = [
       'postulate',
       'Sort : Sort',
@@ -183,11 +184,31 @@ describe('function declarations', () => {
     ].join('\n');
     const hints = inlayHints(code);
     expect(hints.length).toBe(1);
-    expect(hints[0][1]).toBe('A');
+    expect(hints[0][1]).toBe('…');
   });
 
-  it('parenthesizes compound solved values in inlay hints', () => {
-    /* Same shape but the meta solves to a compound term `(Ul-of A)`. */
+  it('suppresses "Too few arguments" when all metas are solved', () => {
+    /* Same setup as above — fully solved, no `Too few arguments` error. */
+    const code = [
+      'postulate',
+      'Sort : Sort',
+      'A : Sort',
+      '(Ul (l : Sort)) : Sort',
+      'my-thing : (Ul A)',
+      '(eq (l : Sort) (x : Ul l)) : Sort',
+      'g : (eq my-thing)',
+      'end',
+    ].join('\n');
+    const msgs = errorMessages(code);
+    expect(msgs.filter(m => m.includes('Too few arguments'))).toEqual([]);
+  });
+
+  it('parenthesizes compound solved values when run is partially solved', () => {
+    /* 3 params: `l, m, x`. `x : Ul l` ties the third arg's type to the
+       first. With one arg given, we have ghosts `?l ?m`. Unification
+       solves ?l := (Ul-of A) (a compound). ?m has no constraint and
+       stays unsolved. Run is partially solved → values rendering with
+       parens around the compound: `(Ul-of A) ?`. */
     const code = [
       'postulate',
       'Sort : Sort',
@@ -195,13 +216,13 @@ describe('function declarations', () => {
       '(Ul (l : Sort)) : Sort',
       '(Ul-of (a : Sort)) : Sort',
       'my-thing : (Ul (Ul-of A))',
-      '(eq (l : Sort) (x : Ul l)) : Sort',
+      '(eq (l : Sort) (m : Sort) (x : Ul l)) : Sort',
       'g : (eq my-thing)',
       'end',
     ].join('\n');
     const hints = inlayHints(code);
     expect(hints.length).toBe(1);
-    expect(hints[0][1]).toBe('(Ul-of A)');
+    expect(hints[0][1]).toBe('(Ul-of A) ?');
   });
 
   it('unsolved metas render as ?', () => {
@@ -220,9 +241,23 @@ describe('function declarations', () => {
     expect(hints[0][1]).toBe('?');
   });
 
+  it('keeps "Too few arguments" when any meta remains unsolved', () => {
+    /* Independent params — no unification opportunity, error stands. */
+    const code = [
+      'postulate',
+      'Sort : Sort',
+      'a : Sort',
+      '(eq (l : Sort) (x : Sort)) : Sort',
+      'g : (eq a)',
+      'end',
+    ].join('\n');
+    const msgs = errorMessages(code);
+    expect(msgs).toContainEqual(expect.stringContaining('Too few arguments'));
+  });
+
   it('per-decl meta scoping: solutions do not leak between decls', () => {
-    /* Decl 1 solves its meta to A; decl 2 has no constraint and must
-       stay unsolved (renders as ?), proving solutions reset between decls. */
+    /* Decl 1 fully solves (collapses to …); decl 2 stays unsolved (?),
+       proving solutions reset between decls. */
     const code = [
       'postulate',
       'Sort : Sort',
@@ -238,7 +273,7 @@ describe('function declarations', () => {
     const hints = inlayHints(code);
     expect(hints.length).toBe(2);
     const contents = hints.map(h => h[1]).sort();
-    expect(contents).toEqual(['?', 'A']);
+    expect(contents).toEqual(['?', '…']);
   });
 });
 
