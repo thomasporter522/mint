@@ -8,16 +8,6 @@ type meta = {
   ghost: bool,
 };
 
-/* Abstract identifier type used for ML `Identifier` payloads. Wrapping
-   the string in a constructor enforces that the meta-language cannot
-   accidentally treat an identifier as a manipulable string: schemas may
-   only match on identifiers, equality-compare them (driving non-linear
-   pattern matching), and use the ones they bind by pattern-matching.
-   Internal OCaml code that genuinely needs the underlying name (printer,
-   binding lookup) destructures via the `Ident` constructor explicitly. */
-type ident = | Ident(string);
-let identStr = (Ident(s)) => s;
-
 /* --- Small enums --- */
 
 type holeKind =
@@ -103,7 +93,7 @@ and pat = {
 type cML =
   | Shard(string)                             /* parse artifact: unrecognized text */
   | Hole(holeKind)
-  | Identifier(ident)                        /* x — could be OL or ML, resolved by checker */
+  | Identifier(string)                        /* x — could be OL or ML, resolved by checker */
   | StringLit(string)
   | Tuple(list(ml))                          /* (a, b, c) */
   | Asc(ml, ml)                              /* x : T — ascription (mostly syntactic) */
@@ -167,7 +157,7 @@ let rec embedOL = (t: ol): ml => {
     switch (t.value) {
     | OLHole(k) => Hole(k)
     | OLMeta(_) => Hole(User)
-    | OLIdentifier(s) => Identifier(Ident(s))
+    | OLIdentifier(s) => Identifier(s)
     | OLAp(f, args) => Ap(embedOL(f), List.map(embedOL, args))
     };
   {value, meta: t.meta};

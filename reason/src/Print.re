@@ -81,7 +81,7 @@ let rec printML = (t: ml): string => {
     | Shard(text) => text
     | Hole(User) => "?"
     | Hole(Synthesized) => ""
-    | Identifier(Ident(v)) => v
+    | Identifier(v) => v
     | StringLit(s) => "\"" ++ s ++ "\""
     | Tuple(items) =>
       String.concat(", ", List.map(printML, items))
@@ -89,11 +89,11 @@ let rec printML = (t: ml): string => {
       printML(l) ++ " : " ++ printML(r)
     | BinOp(op, left, right) =>
       printML(left) ++ " " ++ printBinOp(op) ++ " " ++ printML(right)
-    /* Infix operators encoded as Ap(Identifier(Ident(op)), [l, r]) — produced
+    /* Infix operators encoded as Ap(Identifier(op), [l, r]) — produced
        by the catch-all in buildForm for operators like ->, =, etc. */
-    | Ap({value: Identifier(Ident("->")), _}, [l, r]) =>
+    | Ap({value: Identifier("->"), _}, [l, r]) =>
       printML(l) ++ " -> " ++ printML(r)
-    | Ap({value: Identifier(Ident("=")), _}, [l, r]) =>
+    | Ap({value: Identifier("="), _}, [l, r]) =>
       printML(l) ++ " = " ++ printML(r)
     | Ap(f, args) =>
       printML(f) ++ " " ++ String.concat(" ", List.map(printML, args))
@@ -134,7 +134,7 @@ let rec debugML = (t: ml): string => {
   | Shard(_) => "Shard"
   | Hole(User) => "Hole"
   | Hole(Synthesized) => "Hole_"
-  | Identifier(Ident(v)) => "Id(" ++ v ++ ")"
+  | Identifier(v) => "Id(" ++ v ++ ")"
   | StringLit(s) => "Str(" ++ s ++ ")"
   | Tuple(items) =>
     p ++ "Tuple(" ++ String.concat(",", List.map(debugML, items)) ++ ")"

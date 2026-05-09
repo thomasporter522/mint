@@ -218,7 +218,7 @@ and mlToOL = (t: ml): ol => {
   let value =
     switch (t.value) {
     | Hole(k) => OLHole(k)
-    | Identifier(Ident(s)) => OLIdentifier(s)
+    | Identifier(s) => OLIdentifier(s)
     | Ap(f, args) => OLAp(mlToOL(f), List.map(mlToOL, args))
     | _ => OLHole(Synthesized)
     };
@@ -512,23 +512,23 @@ let extractArgRunHints = (args: list(ol)): list((int, list(ol))) => {
 
 let addParens = (t: ml): ml =>
   switch (t.value) {
-  | Identifier(Ident(_)) => t
+  | Identifier(_) => t
   | _ => {...t, meta: {...t.meta, parens: true}}
   };
 
 let rec mlTypeToTerm = (ty: mlType): ml =>
   switch (ty) {
-  | MTerm => mkML(Identifier(Ident("Term")))
-  | MSort => mkML(Identifier(Ident("Sort")))
-  | MBool => mkML(Identifier(Ident("Bool")))
-  | MString => mkML(Identifier(Ident("String")))
-  | MList(t) => mkML(Ap(mkML(Identifier(Ident("List"))), [addParens(mlTypeToTerm(t))]))
-  | MResult(t) => mkML(Ap(mkML(Identifier(Ident("Result"))), [addParens(mlTypeToTerm(t))]))
+  | MTerm => mkML(Identifier("Term"))
+  | MSort => mkML(Identifier("Sort"))
+  | MBool => mkML(Identifier("Bool"))
+  | MString => mkML(Identifier("String"))
+  | MList(t) => mkML(Ap(mkML(Identifier("List")), [addParens(mlTypeToTerm(t))]))
+  | MResult(t) => mkML(Ap(mkML(Identifier("Result")), [addParens(mlTypeToTerm(t))]))
   | MTuple(items) => {
       let t = mkML(Tuple(List.map(mlTypeToTerm, items)));
       {...t, meta: {...t.meta, parens: true}};
     }
-  | MArrow(a, b) => mkML(Ap(mkML(Identifier(Ident("->"))), [addParens(mlTypeToTerm(a)), addParens(mlTypeToTerm(b))]))
+  | MArrow(a, b) => mkML(Ap(mkML(Identifier("->")), [addParens(mlTypeToTerm(a)), addParens(mlTypeToTerm(b))]))
   };
 
 /* Set both inferred (OL fullType for display) and mlInferred (exact ML type).
@@ -551,23 +551,23 @@ let mlSubsume = (expected: mlType, got: mlType, from, to_): list(error) =>
 /* Convert an ML expression to an mlType (for parsing type expressions in ML context) */
 let rec mlExprToType = (t: ml): option(mlType) =>
   switch (t.value) {
-  | Identifier(Ident("Term")) => Some(MTerm)
-  | Identifier(Ident("Sort")) => Some(MSort)
-  | Identifier(Ident("Bool")) => Some(MBool)
-  | Identifier(Ident("String")) => Some(MString)
-  | Identifier(Ident("Signature")) =>
+  | Identifier("Term") => Some(MTerm)
+  | Identifier("Sort") => Some(MSort)
+  | Identifier("Bool") => Some(MBool)
+  | Identifier("String") => Some(MString)
+  | Identifier("Signature") =>
     Some(MTuple([MTerm, MList(MTuple([MTerm, MTerm])), MTerm]))
-  | Ap({value: Identifier(Ident("List")), _}, [arg]) =>
+  | Ap({value: Identifier("List"), _}, [arg]) =>
     switch (mlExprToType(arg)) {
     | Some(t) => Some(MList(t))
     | None => None
     }
-  | Ap({value: Identifier(Ident("Result")), _}, [arg]) =>
+  | Ap({value: Identifier("Result"), _}, [arg]) =>
     switch (mlExprToType(arg)) {
     | Some(t) => Some(MResult(t))
     | None => None
     }
-  | Ap({value: Identifier(Ident("->")), _}, [l, r]) =>
+  | Ap({value: Identifier("->"), _}, [l, r]) =>
     switch (mlExprToType(l), mlExprToType(r)) {
     | (Some(lt), Some(rt)) => Some(MArrow(lt, rt))
     | _ => None
@@ -1160,7 +1160,7 @@ and checkOLPat = (ctx: context, p: pat): (context, staticInfo) =>
 
 and inferExpr = (ctx: context, t: ml): staticInfo =>
   switch (t.value) {
-  | Identifier(Ident(name)) =>
+  | Identifier(name) =>
     switch (StringMap.find_opt(name, ctx)) {
     | Some(ML(ty)) => setMlType(emptyInfo, ty)
     | Some(Builtin(_)) => setMlType(emptyInfo, MTerm) /* builtins are typed at application site */
@@ -1183,7 +1183,7 @@ and inferExpr = (ctx: context, t: ml): staticInfo =>
     {errors: [], tentativeErrors: [], holes: [(t.meta.start, {goal: mlHole, context: ctx})], inlayHints: [], definitions: [],
      inferred: Some(([], olHole)), mlInferred: Some(MTerm), elaborated: None, bindings: StringMap.empty}
 
-  | Ap({value: Identifier(Ident("fst")), _}, [arg]) =>
+  | Ap({value: Identifier("fst"), _}, [arg]) =>
     let argInfo = inferExpr(ctx, arg);
     let retTy =
       switch (getInferredMlType(argInfo)) {
@@ -1192,7 +1192,7 @@ and inferExpr = (ctx: context, t: ml): staticInfo =>
       };
     setMlType(argInfo, retTy);
 
-  | Ap({value: Identifier(Ident("snd")), _}, [arg]) =>
+  | Ap({value: Identifier("snd"), _}, [arg]) =>
     let argInfo = inferExpr(ctx, arg);
     let retTy =
       switch (getInferredMlType(argInfo)) {
@@ -1201,7 +1201,7 @@ and inferExpr = (ctx: context, t: ml): staticInfo =>
       };
     setMlType(argInfo, retTy);
 
-  | Ap({value: Identifier(Ident("foldl")), _}, [fArg, initArg, listArg]) =>
+  | Ap({value: Identifier("foldl"), _}, [fArg, initArg, listArg]) =>
     /* Custom typing for foldl: infer init and list types, check f for consistency */
     let initInfo = inferExpr(ctx, initArg);
     let listInfo = inferExpr(ctx, listArg);
@@ -1402,7 +1402,7 @@ and checkExpr = (ctx: context, expected: mlType, t: ml): staticInfo =>
     let elseInfo = checkExpr(ctx, expected, elseBr);
     mergeInfos(condInfo, mergeInfos(thenInfo, elseInfo));
 
-  | Ap({value: Identifier(Ident("Ok")), _}, [arg]) =>
+  | Ap({value: Identifier("Ok"), _}, [arg]) =>
     switch (expected) {
     | MResult(innerTy) => checkExpr(ctx, innerTy, arg)
     | _ =>
@@ -1410,7 +1410,7 @@ and checkExpr = (ctx: context, expected: mlType, t: ml): staticInfo =>
         [mark("Ok but expected " ++ printType(expected), t.meta.start, t.meta.end_)])
     }
 
-  | Ap({value: Identifier(Ident("Error")), _}, [arg]) =>
+  | Ap({value: Identifier("Error"), _}, [arg]) =>
     switch (expected) {
     | MResult(_) => checkExpr(ctx, MString, arg)
     | _ =>
@@ -1447,7 +1447,7 @@ and checkExpr = (ctx: context, expected: mlType, t: ml): staticInfo =>
       mergeInfos(exprInfo, bodyInfo);
     }
 
-  | Ap({value: Identifier(Ident("foldl")), _}, [fArg, initArg, listArg]) =>
+  | Ap({value: Identifier("foldl"), _}, [fArg, initArg, listArg]) =>
     /* When we know the expected type, use it as initTy so that [] gets
        the right element type instead of defaulting to List Term. */
     let initInfo = checkExpr(ctx, expected, initArg);

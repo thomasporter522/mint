@@ -19,6 +19,7 @@ Mint's design is centered around the virtue of _objectivity_. That is, the seman
 
 - Object-level identifiers should inhabit an abstract type from the perspective of the meta-level code
 - Warnings for shadowing
+- Completeness "success messages"
 - Expose context to schemas
 
 <!-- ## Bugs -->

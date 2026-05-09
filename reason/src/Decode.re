@@ -106,23 +106,23 @@ let decodeDecl = (j: jsObj): decl => {
 
 let rec mlToType = (t: ml): option(mlType) =>
   switch (t.value) {
-  | Identifier(Ident("Term")) => Some(MTerm)
-  | Identifier(Ident("Sort")) => Some(MSort)
-  | Identifier(Ident("Bool")) => Some(MBool)
-  | Identifier(Ident("String")) => Some(MString)
-  | Identifier(Ident("Signature")) =>
+  | Identifier("Term") => Some(MTerm)
+  | Identifier("Sort") => Some(MSort)
+  | Identifier("Bool") => Some(MBool)
+  | Identifier("String") => Some(MString)
+  | Identifier("Signature") =>
     Some(MTuple([MTerm, MList(MTuple([MTerm, MTerm])), MTerm]))
-  | Ap({value: Identifier(Ident("List")), _}, [arg]) =>
+  | Ap({value: Identifier("List"), _}, [arg]) =>
     switch (mlToType(arg)) {
     | Some(t) => Some(MList(t))
     | None => None
     }
-  | Ap({value: Identifier(Ident("Result")), _}, [arg]) =>
+  | Ap({value: Identifier("Result"), _}, [arg]) =>
     switch (mlToType(arg)) {
     | Some(t) => Some(MResult(t))
     | None => None
     }
-  | Ap({value: Identifier(Ident("->")), _}, [l, r]) =>
+  | Ap({value: Identifier("->"), _}, [l, r]) =>
     switch (mlToType(l), mlToType(r)) {
     | (Some(lt), Some(rt)) => Some(MArrow(lt, rt))
     | _ => None
@@ -184,7 +184,7 @@ let rec decodeML = (j: jsObj): ml => {
   let value =
     switch (kind) {
     | "Hole" => Hole(decodeHoleKind(_str(v, "hk")))
-    | "Identifier" => Identifier(Ident(_str(v, "name")))
+    | "Identifier" => Identifier(_str(v, "name"))
     | "StringLit" => StringLit(_str(v, "value"))
     | "Tuple" =>
       Tuple(Array.map(decodeML, _arr(v, "items")) |> Array.to_list)
