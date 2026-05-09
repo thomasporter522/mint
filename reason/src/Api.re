@@ -11,14 +11,14 @@ type jsMap;
 
 let displayBinding = (name: string, ft: fullType): ml => {
   let (params, retType) = ft;
-  let nameTerm = mkML(Identifier(name));
+  let nameTerm = mkML(Identifier(Ident(name)));
   let retML = embedOL(retType);
   let paramTerms =
     List.map(
       ((pname, ty)) => {
         let n =
           switch (pname) {
-          | Some(s) => mkML(Identifier(s))
+          | Some(s) => mkML(Identifier(Ident(s)))
           | None => mkML(Hole(Synthesized))
           };
         let paramML = embedOL(ty);

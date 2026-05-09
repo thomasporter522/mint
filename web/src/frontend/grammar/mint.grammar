@@ -50,7 +50,7 @@ ItemHead {
 | LParen Identifier Param* RParen
 }
 
-Param { LParen Identifier ":" TypeExpr RParen }
+Param { LParen Identifier+ ":" TypeExpr RParen }
 
 MetaItem {
   Schema_kw? Identifier (":" Expr)? "=" Expr

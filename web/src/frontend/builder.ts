@@ -106,16 +106,31 @@ export function buildOL(node: SyntaxNode, src: string): OL {
 
 /* === Param and Decl === */
 
-function buildParam(node: SyntaxNode, src: string): Param {
-  // Param { LParen Identifier ":" TypeExpr RParen }
-  const id = firstChildByName(node, 'Identifier')
+function buildParams(node: SyntaxNode, src: string): Param[] {
+  // Param { LParen Identifier+ ":" TypeExpr RParen }
+  // A grouped form like `(l1 l2 : level)` expands into multiple Param
+  // records, each sharing the same paramType — semantically equivalent
+  // to `(l1 : level) (l2 : level)`. paramMeta points at the whole
+  // group so go-to-def / inlay anchors look reasonable; nameMeta is
+  // per-identifier so clicking on `l1` jumps to `l1`.
+  const ids = childrenByName(node, 'Identifier')
   const ty = firstChildByName(node, 'TypeExpr')
-  return {
-    paramName: id ? text(id, src) : '_',
-    paramType: ty ? buildOL(ty, src) : mkOL({ kind: 'OLHole', hk: 'Synthesized' }),
-    paramMeta: metaOf(node),
-    nameMeta: id ? metaOf(id) : metaOf(node),
+  const paramType = ty ? buildOL(ty, src) : mkOL({ kind: 'OLHole', hk: 'Synthesized' })
+  const groupMeta = metaOf(node)
+  if (ids.length === 0) {
+    return [{
+      paramName: '_',
+      paramType,
+      paramMeta: groupMeta,
+      nameMeta: groupMeta,
+    }]
   }
+  return ids.map(id => ({
+    paramName: text(id, src),
+    paramType,
+    paramMeta: groupMeta,
+    nameMeta: metaOf(id),
+  }))
 }
 
 function buildDecl(node: SyntaxNode, src: string): Decl {
@@ -132,7 +147,7 @@ function buildDecl(node: SyntaxNode, src: string): Decl {
       name = text(hid, src)
       nameMeta = metaOf(hid)
     }
-    params = childrenByName(head, 'Param').map(p => buildParam(p, src))
+    params = childrenByName(head, 'Param').flatMap(p => buildParams(p, src))
   }
   const retType = ty
     ? buildOL(ty, src)

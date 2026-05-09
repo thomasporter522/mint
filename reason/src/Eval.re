@@ -23,7 +23,7 @@ type evalResult =
 
 let rec termEqual = (a: ml, b: ml): bool =>
   switch (a.value, b.value) {
-  | (Identifier(x), Identifier(y)) => x == y
+  | (Identifier(Ident(x)), Identifier(Ident(y))) => x == y
   | (StringLit(x), StringLit(y)) => x == y
   | (Ap(f1, args1), Ap(f2, args2)) =>
     termEqual(f1, f2)
@@ -52,7 +52,7 @@ let mlValueEqual = (a: mlValue, b: mlValue): bool =>
 let termOf = (v: mlValue): ml =>
   switch (v) {
   | Val(t) => t
-  | Closure(_, _, _) => mk(Identifier("<closure>"))
+  | Closure(_, _, _) => mk(Identifier(Ident("<closure>")))
   };
 
 /* --- Pattern matching --- */
@@ -145,7 +145,7 @@ let rec matchPat = (bindings: evalEnv, p: pat, value: mlValue): option(evalEnv) 
 
 let rec evalExpr = (env: evalEnv, t: ml): evalResult =>
   switch (t.value) {
-  | Identifier(name) =>
+  | Identifier(Ident(name)) =>
     switch (StringMap.find_opt(name, env)) {
     | Some(v) => Ok(v)
     | None => Ok(Val(t))  /* OL identifier, pass through */
@@ -207,8 +207,8 @@ let rec evalExpr = (env: evalEnv, t: ml): evalResult =>
   | If(cond, thenBr, elseBr) =>
     switch (evalExpr(env, cond)) {
     | Err(_) as e => e
-    | Ok(Val({value: Identifier("true"), _})) => evalExpr(env, thenBr)
-    | Ok(Val({value: Identifier("false"), _})) => evalExpr(env, elseBr)
+    | Ok(Val({value: Identifier(Ident("true")), _})) => evalExpr(env, thenBr)
+    | Ok(Val({value: Identifier(Ident("false")), _})) => evalExpr(env, elseBr)
     | Ok(_) => Err("if condition is not a boolean")
     }
 
@@ -273,31 +273,31 @@ and evalApp = (env: evalEnv, fVal: mlValue, args: list(ml)): evalResult =>
     | Ok(result) => evalApp(env, result, restArgs)
     }
   | (Closure(_), []) => Ok(fVal)
-  | (Val({value: Identifier("Ok"), _}), [arg]) =>
+  | (Val({value: Identifier(Ident("Ok")), _}), [arg]) =>
     switch (evalExpr(env, arg)) {
     | Err(_) as e => e
-    | Ok(argVal) => Ok(Val(mk(Ap(mk(Identifier("Ok")), [termOf(argVal)]))))
+    | Ok(argVal) => Ok(Val(mk(Ap(mk(Identifier(Ident("Ok"))), [termOf(argVal)]))))
     }
-  | (Val({value: Identifier("Error"), _}), [arg]) =>
+  | (Val({value: Identifier(Ident("Error")), _}), [arg]) =>
     switch (evalExpr(env, arg)) {
     | Err(_) as e => e
-    | Ok(argVal) => Ok(Val(mk(Ap(mk(Identifier("Error")), [termOf(argVal)]))))
+    | Ok(argVal) => Ok(Val(mk(Ap(mk(Identifier(Ident("Error"))), [termOf(argVal)]))))
     }
   /* fst and snd — built-in pair projections */
-  | (Val({value: Identifier("fst"), _}), [arg]) =>
+  | (Val({value: Identifier(Ident("fst")), _}), [arg]) =>
     switch (evalExpr(env, arg)) {
     | Err(_) as e => e
     | Ok(Val({value: Tuple([first, ..._]), _})) => Ok(Val(first))
     | Ok(_) => Err("fst: argument is not a tuple")
     }
-  | (Val({value: Identifier("snd"), _}), [arg]) =>
+  | (Val({value: Identifier(Ident("snd")), _}), [arg]) =>
     switch (evalExpr(env, arg)) {
     | Err(_) as e => e
     | Ok(Val({value: Tuple([_, second, ..._]), _})) => Ok(Val(second))
     | Ok(_) => Err("snd: argument is not a tuple")
     }
   /* foldl f init list — built-in left fold (curried: f acc item) */
-  | (Val({value: Identifier("foldl"), _}), [fArg, initArg, listArg]) =>
+  | (Val({value: Identifier(Ident("foldl")), _}), [fArg, initArg, listArg]) =>
     switch (evalExpr(env, fArg)) {
     | Err(_) as e => e
     | Ok(fVal) =>
@@ -351,18 +351,18 @@ and evalMatch = (env: evalEnv, scrutVal: mlValue, branches: list((pat, ml))): ev
 and evalBinOp = (op: binOp, lv: mlValue, rv: mlValue): evalResult =>
   switch (op) {
   | Eq =>
-    Ok(Val(mk(Identifier(mlValueEqual(lv, rv) ? "true" : "false"))))
+    Ok(Val(mk(Identifier(Ident(mlValueEqual(lv, rv) ? "true" : "false")))))
   | Neq =>
-    Ok(Val(mk(Identifier(mlValueEqual(lv, rv) ? "false" : "true"))))
+    Ok(Val(mk(Identifier(Ident(mlValueEqual(lv, rv) ? "false" : "true")))))
   | And =>
     switch (lv, rv) {
-    | (Val({value: Identifier("true"), _}), Val({value: Identifier("true"), _})) =>
-      Ok(Val(mk(Identifier("true"))))
-    | _ => Ok(Val(mk(Identifier("false"))))
+    | (Val({value: Identifier(Ident("true")), _}), Val({value: Identifier(Ident("true")), _})) =>
+      Ok(Val(mk(Identifier(Ident("true")))))
+    | _ => Ok(Val(mk(Identifier(Ident("false")))))
     }
   | Or =>
     switch (lv) {
-    | Val({value: Identifier("true"), _}) => Ok(Val(mk(Identifier("true"))))
+    | Val({value: Identifier(Ident("true")), _}) => Ok(Val(mk(Identifier(Ident("true")))))
     | _ => Ok(rv)
     }
   };
@@ -370,11 +370,11 @@ and evalBinOp = (op: binOp, lv: mlValue, rv: mlValue): evalResult =>
 /* === Top-level: run a schema on construct declarations === */
 
 let declToSignature = (d: decl): ml => {
-  let name = mk(Identifier(d.declName));
+  let name = mk(Identifier(Ident(d.declName)));
   let params =
     List.map(
       (p: param) =>
-        mk(Tuple([mk(Identifier(p.paramName)), embedOL(p.paramType)])),
+        mk(Tuple([mk(Identifier(Ident(p.paramName))), embedOL(p.paramType)])),
       d.params,
     );
   mk(Tuple([name, mk(List(params)), embedOL(d.retType)]));
@@ -395,9 +395,9 @@ let runSchema = (schemaVal: mlValue, decls: list(decl)): schemaResult => {
     | Some(bindings) =>
       let bodyEnv = StringMap.union((_, _, v) => Some(v), closureEnv^, bindings);
       switch (evalExpr(bodyEnv, body)) {
-      | Ok(Val({value: Ap({value: Identifier("Ok"), _}, [{value: List(witnesses), _}]), _})) =>
+      | Ok(Val({value: Ap({value: Identifier(Ident("Ok")), _}, [{value: List(witnesses), _}]), _})) =>
         Witnesses(witnesses)
-      | Ok(Val({value: Ap({value: Identifier("Error"), _}, [{value: StringLit(msg), _}]), _})) =>
+      | Ok(Val({value: Ap({value: Identifier(Ident("Error")), _}, [{value: StringLit(msg), _}]), _})) =>
         SchemaError(msg)
       | Ok(_) => SchemaError("Schema returned invalid result")
       | Err(msg) => SchemaError("Schema evaluation error: " ++ msg)

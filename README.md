@@ -12,16 +12,13 @@ Mint's design is centered around the virtue of _objectivity_. That is, the seman
 ## Future Directions
 
 - Automatic inference of missing arguments to term constructors.
-- User-written conversion procedures.
+- User-written conversion and normalization procedures.
 - A module-like system for reusable, nested hypothetical reasoning.
 
 ## Minor TODOs
 
-- Schema errors should be localized to schema reference, not first line of construction
 - Object-level identifiers should inhabit an abstract type from the perspective of the meta-level code
 - Warnings for shadowing
 - Expose context to schemas
-- Allow multi-line declarations (tab sensitive)
-- Allow grouping multiple arguments of the same type
 
 <!-- ## Bugs -->
