@@ -27,4 +27,3 @@ Mint's design is centered around the virtue of _objectivity_. That is, the seman
 ## Bugs
 
 - Hover goal does not reflect solved metavariables
-- Solved implicits are not reflected in witness checking

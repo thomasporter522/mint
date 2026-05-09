@@ -1488,48 +1488,69 @@ let runConstructSchema =
       rawEnv,
     );
     let evalEnv = rawEnv;
+    /* Replace each decl's paramTypes and retType with their elaborated
+       forms so the schema sees the same arity/structure that downstream
+       type-checking sees. Without this, a user who writes a construct
+       decl with implicits (e.g. `eq <Ul l> <Ul l> U1 <Ul lz>` instead
+       of the fully-applied 5-arg form) would have their schema pattern
+       fail to match because the signature has a different arity than
+       the elaborated reality. */
+    let elaboratedDecls =
+      List.map(
+        (d: decl) => {
+          let (elabParams, elabRetType) = elabDeclTypes(declCtx, d);
+          let elabParamMap =
+            List.fold_left(
+              (acc, (nameOpt, ty)) =>
+                switch (nameOpt) {
+                | Some(n) => StringMap.add(n, ty, acc)
+                | None => acc
+                },
+              StringMap.empty,
+              elabParams,
+            );
+          let newParams =
+            List.map(
+              (p: param) => {
+                let elabPty =
+                  switch (StringMap.find_opt(p.paramName, elabParamMap)) {
+                  | Some(t) => t
+                  | None => p.paramType
+                  };
+                {...p, paramType: elabPty};
+              },
+              d.params,
+            );
+          {...d, params: newParams, retType: elabRetType};
+        },
+        decls,
+      );
     switch (Eval.evalExpr(evalEnv, schemaBody)) {
     | Eval.Ok(schemaVal) =>
-      switch (Eval.runSchema(schemaVal, decls)) {
+      switch (Eval.runSchema(schemaVal, elaboratedDecls)) {
       | Eval.Witnesses(witnesses) =>
-        if (List.length(witnesses) != List.length(decls)) {
+        if (List.length(witnesses) != List.length(elaboratedDecls)) {
           [mark(
             "Schema produced " ++ string_of_int(List.length(witnesses))
-            ++ " witnesses but construct has " ++ string_of_int(List.length(decls))
+            ++ " witnesses but construct has " ++ string_of_int(List.length(elaboratedDecls))
             ++ " declarations",
             schemaMeta.start, schemaMeta.end_,
           )];
         } else {
           let (witnessErrs, witnessHoles, _) = List.fold_left2(
             ((accErrs, accHoles, substEnv), d: decl, witness) => {
-              /* Look up the decl's elaborated types — what consumers
-                 (this witness check, downstream decls) should see. */
-              let (elabParams, elabRetType) = elabDeclTypes(declCtx, d);
-              let elabParamMap =
-                List.fold_left(
-                  (acc, (nameOpt, ty)) =>
-                    switch (nameOpt) {
-                    | Some(n) => StringMap.add(n, ty, acc)
-                    | None => acc
-                    },
-                  StringMap.empty,
-                  elabParams,
-                );
+              /* d here is from elaboratedDecls — paramTypes and retType
+                 are already in their elaborated form. */
               let witnessCtx =
                 List.fold_left(
                   (acc, p: param) => {
-                    let elabPty =
-                      switch (StringMap.find_opt(p.paramName, elabParamMap)) {
-                      | Some(t) => t
-                      | None => p.paramType
-                      };
-                    let resolvedPty = resolveWithParams(substEnv, elabPty);
+                    let resolvedPty = resolveWithParams(substEnv, p.paramType);
                     StringMap.add(p.paramName, OL(Some(([], resolvedPty)), Some(p.nameMeta)), acc);
                   },
                   ctx,
                   d.params,
                 );
-              let expectedType = resolveWithParams(substEnv, elabRetType);
+              let expectedType = resolveWithParams(substEnv, d.retType);
               /* Apply [x_j ↦ t_j] substitutions from earlier witnesses to the
                  current witness body too, matching the formalism's
                  [x ↦ t][w̄] where the substitution reaches into both
@@ -1546,7 +1567,7 @@ let runConstructSchema =
               (accErrs @ witnessInfo.errors, accHoles @ witnessInfo.holes, newSubstEnv);
             },
             ([], [], emptyWitnessEnv),
-            decls,
+            elaboratedDecls,
             witnesses,
           );
           if (List.length(witnessErrs) > 0) {

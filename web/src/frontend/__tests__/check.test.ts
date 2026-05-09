@@ -371,6 +371,34 @@ describe('function declarations', () => {
     expect(hints[0][1]).toBe('…');
   });
 
+  it('schema sees the elaborated decls, not the raw underapplied form', () => {
+    /* The schema's pattern expects `eq` applied to 5 things. The
+       construct decl writes `eq B0 x0` (2 args, missing 3) — implicit.
+       After elaboration the decl looks 5-arg to the schema, so the
+       pattern matches and a witness is produced. Without elaboration
+       happening before runSchema, the pattern would not match. */
+    const code = [
+      'postulate',
+      'Sort : Sort',
+      '(Ul (l : Sort)) : Sort',
+      'A : Sort',
+      'B0 : Ul A',
+      'x0 : B0',
+      '(eq (l : Sort) (B : Ul l) (x : B)) : Sort',
+      '(refl (l : Sort) (B : Ul l) (x : B)) : eq B x',
+      'meta',
+      'schema sch = fun s => match s with',
+      '| [(g, [], eq ll bb xx)] => (Ok [(refl ll bb xx)])',
+      '| _ => (Error "wrong")',
+      'end',
+      'construct by sch',
+      'foo-eq : eq B0 x0',
+      'end',
+    ].join('\n');
+    const msgs = errorMessages(code);
+    expect(msgs.filter(m => m.includes('Schema error') || m.includes('wrong'))).toEqual([]);
+  });
+
   it('construct decl with underapplied retType uses elaborated form for witness check', () => {
     /* Violation-A guard: if the construct decl's retType `eq B0 x0` were
        compared raw against the schema-produced witness `(refl A B0 x0)`,
