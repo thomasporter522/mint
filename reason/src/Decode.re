@@ -265,10 +265,18 @@ let decodeBlock = (j: jsObj): block => {
   | "Postulate" =>
     Postulate(Array.map(decodeDecl, _arr(j, "decls")) |> Array.to_list)
   | "Construct" =>
+    let m = _obj(j, "schemaMeta");
+    let schemaMeta: meta = {
+      parens: _bool(m, "parens"),
+      start: _int(m, "start"),
+      end_: _int(m, "end"),
+      ghost: false,
+    };
     Construct(
       _str(j, "schema"),
+      schemaMeta,
       Array.map(decodeDecl, _arr(j, "decls")) |> Array.to_list,
-    )
+    );
   | "Meta" =>
     Meta(Array.map(decodeMetaDef, _arr(j, "defs")) |> Array.to_list)
   | _ => Postulate([])

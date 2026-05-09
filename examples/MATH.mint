@@ -17,24 +17,24 @@ lmax-idem (l : level) : level-eq (lmax l l) l
 -- equations
 eq (l : level) (A : Ul l) (B : Ul l) (a : A) (b : B) : Ul l
 refl (l : level) (A : Ul l) (a : A) : eq A a a
-sym (l : level) (A : Ul l) (B : Ul l) (a : A) (b : B) (e : eq B a b) : eq l B A b a
-trans (l : level) (A : Ul l) (B : Ul l) (C : Ul l) (a : A) (b : B) (c : C) (e1 : eq l A B a b) (e2 : eq l B C b c) : eq l A C a c
-cast (l : level) (A : Ul l) (B : Ul l) (e : eq (ls l) (Ul l) (Ul l) A B) (a : A) : B
+sym (l : level) (A : Ul l) (B : Ul l) (a : A) (b : B) (e : eq a b) : eq b a
+trans (l : level) (A : Ul l) (B : Ul l) (C : Ul l) (a : A) (b : B) (c : C) (e1 : eq a b) (e2 : eq b c) : eq a c
+cast (l : level) (A : Ul l) (B : Ul l) (e : eq A B) (a : A) : B
 Ul-cong (l1 : level) (l2 : level) (my-eq : level-eq l1 l2) : (eq ? (Ul (ls l1)) (Ul (ls l2)) (Ul l1) (Ul l2))
 -- function types
 to (l1 : level) (l2 : level) (A : Ul l1) (B : Ul l2) : Ul (lmax l1 l2)
 ap (l1 : level) (l2 : level) (A : Ul l1) (B : Ul l2) (f : to A B) (a : A) : B
-cong-ap (l1 : level) (l2 : level) (A : Ul l1) (B : Ul l2) (f : to A B) (g : to l1 l2 A B) (a : A) (b : A) (ef : eq (lmax l1 l2) (to A ?) (to A B) f g) (ea : eq l1 A A a b) : eq l2 B B (ap f a) (ap g b)
+cong-ap (l1 : level) (l2 : level) (A : Ul l1) (B : Ul l2) (f : to A B) (g : to A B) (a : A) (b : A) (ef : eq f g) (ea : eq a b) : eq (ap f a) (ap g b)
 combinator-constant (l1 : level) (l2 : level) (A : Ul l1) (B : Ul l2) : to A (to B A)
-combinator-constant-eq (l1 : level) (l2 : level) (A : Ul l1) (B : Ul l2) (x : A) (y : B) : eq A A (ap (ap (combinator-constant A B) x) y) x
+combinator-constant-eq (l1 : level) (l2 : level) (A : Ul l1) (B : Ul l2) (x : A) (y : B) : eq (ap (ap (combinator-constant ) x) y) x
 combinator-ap (l1 : level) (l2 : level) (l3 : level) (A : Ul l1) (B : Ul l2) (C : Ul l3) : to (to A (to B C)) (to (to A B) (to A C))
 
 combinator-ap-eq (l1 : level) (l2 : level) (l3 : level) 
     (A : Ul l1) (B : Ul l2) (C : Ul l3) 
-    (f : to A (to l3 B C)) 
+    (f : to A (to B C)) 
     (g : to A B) 
     (x : A) 
-    : eq C (ap (ap (ap (combinator-ap ) f) g) x) (ap (ap f x) (ap g x))
+    : eq (ap (ap (ap (combinator-ap ) f) g) x) (ap (ap f x) (ap g x))
 
 meta
     schema definition =
@@ -46,10 +46,10 @@ meta
         end
 construct by definition
 U1 : Ul (ls (ls lz))
-U1-eq : eq (ls (ls (ls lz))) (Ul (ls (ls lz))) (Ul (ls (ls lz))) U1 (Ul (ls lz))
+U1-eq : eq U1 (Ul (ls lz))
 construct by definition
 U : U1
-U-eq : eq (ls (ls lz)) U1 U1 U (cast (ls (ls lz)) (Ul (ls lz)) U1 (sym (ls (ls (ls lz))) (Ul (ls (ls lz))) (Ul (ls (ls lz))) U1 (Ul (ls lz)) U1-eq) (Ul lz))
+U-eq : eq U (cast (sym U1-eq) (Ul lz))
 meta
     abs = fun x => fun e => fun l1 => fun l2 => fun A => fun B =>
   if e == x
@@ -148,19 +148,19 @@ void-case (Ml : level) (M : Ul Ml) (v : void) : M
 unit : Ul lz
 star : unit
 unit-rec (Ml : level) (M : Ul Ml) (star-case : M) (u : unit) : M
-unit-comp (Ml : level) (M : Ul Ml) (star-case : M) : eq Ml M M (unit-rec Ml M star-case star) star-case
+unit-comp (Ml : level) (M : Ul Ml) (star-case : M) : eq (unit-rec star-case star) star-case
 sum (lA : level) (lB : level) (A : Ul lA) (B : Ul lB) : Ul (lmax lA lB)
-inl (lA : level) (lB : level) (A : Ul lA) (B : Ul lB) (a : A) : sum lA lB A B
-inr (lA : level) (lB : level) (A : Ul lA) (B : Ul lB) (b : B) : sum lA lB A B
-sum-case (lA : level) (lB : level) (lM : level) (A : Ul lA) (B : Ul lB) (M : Ul lM) (f : to lA lM A M) (g : to lB lM B M) : to (lmax lA lB) lM (sum lA lB A B) M
-sum-case-inl (lA : level) (lB : level) (lM : level) (A : Ul lA) (B : Ul lB) (M : Ul lM) (f : to lA lM A M) (g : to lB lM B M) (a : A) : eq lM M M (ap (lmax lA lB) lM (sum lA lB A B) M (sum-case lA lB lM A B M f g) (inl lA lB A B a)) (ap lA lM A M f a)
-sum-case-inr (lA : level) (lB : level) (lM : level) (A : Ul lA) (B : Ul lB) (M : Ul lM) (f : to lA lM A M) (g : to lB lM B M) (b : B) : eq lM M M (ap (lmax lA lB) lM (sum lA lB A B) M (sum-case lA lB lM A B M f g) (inr lA lB A B b)) (ap lB lM B M g b)
+inl (lA : level) (lB : level) (A : Ul lA) (B : Ul lB) (a : A) : sum A B
+inr (lA : level) (lB : level) (A : Ul lA) (B : Ul lB) (b : B) : sum A B
+sum-case (lA : level) (lB : level) (lM : level) (A : Ul lA) (B : Ul lB) (M : Ul lM) (f : to A M) (g : to B M) : to (sum A B) M
+sum-case-inl (lA : level) (lB : level) (lM : level) (A : Ul lA) (B : Ul lB) (M : Ul lM) (f : to A M) (g : to B M) (a : A) : eq (ap (sum-case f g) (inl a)) (ap f a)
+sum-case-inr (lA : level) (lB : level) (lM : level) (A : Ul lA) (B : Ul lB) (M : Ul lM) (f : to A M) (g : to B M) (b : B) : eq (ap (sum-case f g) (inr b)) (ap g b)
 N : Ul lz
 zero : N
-plus : to lz (lmax lz lz) N (to lz lz N N)
+plus : to N (to N N)
 construct by abstraction
-double : to lz lz N N
-double-beta (n : N) : eq lz N N (ap lz lz N N double n) (ap lz lz N N (ap lz (lmax lz lz) N (to lz lz N N) plus n) n)
+double : to N N
+double-beta (n : N) : eq (ap double n) (ap (ap plus n) n)
 meta
     reverse : ((List Term) -> (List Term)) = fun xs => (foldl (fun acc => fun x => x :: acc) [] xs)
     reverse-triples : ((List (Term, (Term, Term))) -> (List (Term, (Term, Term)))) = fun xs => (foldl (fun acc => fun x => x :: acc) [] xs)
@@ -297,28 +297,28 @@ construct by enum
 myunit : Ul lz
 trivial : myunit
 myunit-case (lM : level) (M : Ul lM) (trivial-case : M) (scrutinee : myunit) : M
-myunit-case-trivial (lM : level) (M : Ul lM) (trivial-case : M) : eq lM M M (myunit-case lM M trivial-case trivial) trivial-case
+myunit-case-trivial (lM : level) (M : Ul lM) (trivial-case : M) : eq (myunit-case trivial-case trivial) trivial-case
 construct by enum
 bool : Ul (lmax lz lz)
 true : bool
 false : bool
 bool-case (lM : level) (M : Ul lM) (true-case : M) (false-case : M) (scrutinee : bool) : M
-bool-case-true (lM : level) (M : Ul lM) (true-case : M) (false-case : M) : eq lM M M (bool-case lM M true-case false-case true) true-case
-bool-case-false (lM : level) (M : Ul lM) (true-case : M) (false-case : M) : eq lM M M (bool-case lM M true-case false-case false) false-case
+bool-case-true (lM : level) (M : Ul lM) (true-case : M) (false-case : M) : eq (bool-case true-case false-case true) true-case
+bool-case-false (lM : level) (M : Ul lM) (true-case : M) (false-case : M) : eq (bool-case true-case false-case false) false-case
 construct by enum
 triple : Ul (lmax lz (lmax lz lz))
 a : triple
 b : triple
 c : triple
 triple-case (lM : level) (M : Ul lM) (a-case : M) (b-case : M) (c-case : M) (scrutinee : triple) : M
-triple-case-a (lM : level) (M : Ul lM) (a-case : M) (b-case : M) (c-case : M) : eq lM M M (triple-case lM M a-case b-case c-case a) a-case
-triple-case-b (lM : level) (M : Ul lM) (a-case : M) (b-case : M) (c-case : M) : eq lM M M (triple-case lM M a-case b-case c-case b) b-case
-triple-case-c (lM : level) (M : Ul lM) (a-case : M) (b-case : M) (c-case : M) : eq lM M M (triple-case lM M a-case b-case c-case c) c-case
+triple-case-a (lM : level) (M : Ul lM) (a-case : M) (b-case : M) (c-case : M) : eq (triple-case a-case b-case c-case a) a-case
+triple-case-b (lM : level) (M : Ul lM) (a-case : M) (b-case : M) (c-case : M) : eq (triple-case a-case b-case c-case b) b-case
+triple-case-c (lM : level) (M : Ul lM) (a-case : M) (b-case : M) (c-case : M) : eq (triple-case a-case b-case c-case c) c-case
 -- meta
 -- --  todo: cases schema
 -- --  should search through the context for an appropriate eliminator for the input type
 -- construct by cases
--- not : to (lmax lz lz) (lmax lz lz) bool bool 
--- not-true : eq (lmax lz lz) bool bool (ap (lmax lz lz) (lmax lz lz) bool bool not true) false
--- not-false : eq (lmax lz lz) bool bool (ap (lmax lz lz) (lmax lz lz) bool bool not false) true
+-- not : to bool bool 
+-- not-true : eq (ap not true) false
+-- not-false : eq (ap not false) true
 end

@@ -371,6 +371,52 @@ describe('function declarations', () => {
     expect(hints[0][1]).toBe('…');
   });
 
+  it('type-level propagation: meta solved transitively via solution-type unification', () => {
+    /* `eq b a` underapplies eq's first three args (l, A, B). Solving
+       ?A := b's type (B sym-param) and ?B := a's type (A sym-param)
+       happens directly. Then propagation: ?A's recorded expected was
+       Ul ?l; B's actual type is Ul l; unifying solves ?l := l.
+       Without type-level propagation, ?l would stay unsolved. */
+    const code = [
+      'postulate',
+      'sort : sort',
+      'level : sort',
+      'Ul (l : level) : sort',
+      'eq (l : level) (A : Ul l) (B : Ul l) (a : A) (b : B) : Ul l',
+      'sym (l : level) (A : Ul l) (B : Ul l) (a : A) (b : B) (e : eq B a b) : eq b a',
+      'end',
+    ].join('\n');
+    expect(errorMessages(code)).toEqual([]);
+    /* All inlay hints should fully collapse — every meta solved via
+       direct unification or type-level propagation. */
+    const hints = inlayHints(code);
+    hints.forEach(([, label]) => expect(label).toBe('…'));
+  });
+
+  it('mlBuiltins (true/false/etc.) do not leak out of meta blocks', () => {
+    /* `true` is an ML builtin (bool). When the user declares `true : bool`
+       as an OL constructor in an earlier postulate block, a subsequent
+       meta block must not shadow that with the ML builtin in the outer
+       context — references to `true` after the meta block should still
+       resolve to the user's OL constructor. */
+    const code = [
+      'postulate',
+      'Sort : Sort',
+      'bool : Sort',
+      'true : bool',
+      'false : bool',
+      'meta',
+      '    discard = "hi"',
+      'end',
+      'postulate',
+      'use-true : true',
+      'use-false : false',
+      'end',
+    ].join('\n');
+    const msgs = errorMessages(code);
+    expect(msgs.filter(m => m.includes('Unbound'))).toEqual([]);
+  });
+
   it('schema sees the elaborated decls, not the raw underapplied form', () => {
     /* The schema's pattern expects `eq` applied to 5 things. The
        construct decl writes `eq B0 x0` (2 args, missing 3) — implicit.
@@ -2264,18 +2310,13 @@ describe('construct-by chain parsing', () => {
 });
 
 /* ------------------------------------------------------------------ */
-/*  Source locations: paren-wrapped terms include their delimiters     */
-/*  in the meta range. Previously the Builder stripped the outer ( )   */
-/*  positions when unwrapping a paren group, so errors localized to a  */
-/*  paren-wrapped type ended short of the closing parens.              */
+/*  Source locations: schema-related errors localize to the schema    */
+/*  reference (`construct by s` ← here on `s`), not to the first      */
+/*  decl in the construct block.                                       */
 /* ------------------------------------------------------------------ */
 
-describe('paren-wrapped meta ranges', () => {
-  it('declaration error range covers the full paren-wrapped return type', () => {
-    // Single-decl construct block: the schema rejects (wrong arity)
-    // and localizes to the first decl. The decl is a declaration
-    // whose return type is `(to (to N N) (to N N))` — doubly nested
-    // parens. The reported range must include the final `))`.
+describe('construct schema error ranges', () => {
+  it('ill-typed witness errors are localized to the schema reference', () => {
     const code = [
       'postulate',
       'Sort : Sort',
@@ -2297,12 +2338,24 @@ describe('paren-wrapped meta ranges', () => {
     const errs = errors(code);
     expect(errs.length).toBeGreaterThan(0);
     const e = errs[0];
-    // The reported range should start at `aptwice` and end at the
-    // final `)` of the return type. Check by reconstructing the slice.
-    expect(e.from).toBeGreaterThanOrEqual(0);
-    const slice = code.substring(e.from, e.to);
-    expect(slice).toContain('aptwice');
-    expect(slice.endsWith('(to N N))')).toBe(true);
+    expect(code.substring(e.from, e.to)).toBe('s');
+    /* And the error message is the schema-witness one. */
+    expect(e.message).toMatch(/(matched but generated|not found|not a schema|Schema error)/);
+  });
+
+  it('schema-not-found error is localized to the schema reference', () => {
+    const code = [
+      'postulate',
+      'Sort : Sort',
+      'x : Sort',
+      'construct by missing-schema',
+      'y : Sort',
+      'end',
+    ].join('\n');
+    const errs = errors(code);
+    const schemaErrs = errs.filter(e => e.message.includes('not found'));
+    expect(schemaErrs.length).toBe(1);
+    expect(code.substring(schemaErrs[0].from, schemaErrs[0].to)).toBe('missing-schema');
   });
 });
 

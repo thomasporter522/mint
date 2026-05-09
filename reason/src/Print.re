@@ -201,7 +201,7 @@ let printBlock = (b: block): string =>
     "postulate\n" ++ String.concat("\n", List.map(printDecl, decls))
   | Meta(defs) =>
     "meta\n" ++ String.concat("\n", List.map(printMetaDef, defs))
-  | Construct(schemaName, decls) =>
+  | Construct(schemaName, _, decls) =>
     "construct by " ++ schemaName ++ "\n"
     ++ String.concat("\n", List.map(printDecl, decls))
   };

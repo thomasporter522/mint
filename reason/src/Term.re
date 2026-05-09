@@ -130,7 +130,10 @@ type metaDef =
 type block =
   | Postulate(list(decl))
   | Meta(list(metaDef))
-  | Construct(string, list(decl))            /* schema name, declarations */
+  /* Construct(schemaName, schemaMeta, decls) — schemaMeta is the source
+     range of the schema-name identifier, used to localize errors like
+     "schema not found" or "ill-typed witnesses" at the reference. */
+  | Construct(string, meta, list(decl))
 
 type program = list(block);
 

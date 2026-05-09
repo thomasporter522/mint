@@ -458,11 +458,12 @@ function buildBlock(node: SyntaxNode, src: string): Block | null {
       // First Identifier child is the schema name
       const id = firstChildByName(node, 'Identifier')
       const schema = id ? text(id, src) : '_'
+      const schemaMeta = id ? metaOf(id) : metaOf(node)
       const decls = childrenByName(node, 'PostItem')
         .map(p => firstChildByName(p, 'Decl'))
         .filter((d): d is SyntaxNode => d !== null)
         .map(d => buildDecl(d, src))
-      return { kind: 'Construct', schema, decls }
+      return { kind: 'Construct', schema, schemaMeta, decls }
     }
     case 'Meta': {
       const defs = childrenByName(node, 'MetaItem').map(m => buildMetaDef(m, src))

@@ -105,7 +105,7 @@ export type MetaDef =
 export type Block =
   | { kind: 'Postulate'; decls: Decl[] }
   | { kind: 'Meta'; defs: MetaDef[] }
-  | { kind: 'Construct'; schema: string; decls: Decl[] }
+  | { kind: 'Construct'; schema: string; schemaMeta: Meta; decls: Decl[] }
 
 export type Program = Block[]
 

@@ -6,6 +6,22 @@ open MLType;
 module StringMap = Map.Make(String);
 module IntMap = Map.Make(Int);
 
+/* OL typing context: a binding is either an OL constructor (with full
+   type signature and defSite for go-to-definition) or one of the ML
+   forms. Defined up here because computeType and unify (below) consult
+   it for type-level propagation. */
+
+type fullType = (list((option(string), ol)), ol);
+
+type binding =
+  | OL(option(fullType), option(meta))
+  | ML(mlType)
+  | Builtin(string)
+  | SchemaBinding(ml)
+  | MetaLet(ml, mlType);
+
+type context = StringMap.t(binding);
+
 /* === Elaboration state (per-declaration) ===
    Underapplied OL constructors are elaborated by inserting metavariables
    for the missing leading arguments. Metas are solved by unification
@@ -15,19 +31,33 @@ module IntMap = Map.Make(Int);
 
 type elabState = {
   solutions: IntMap.t(ol),
+  /* Each meta's expected type at creation. When unification solves a
+     meta, the solution's actual type must agree with this — driving
+     transitive solving (e.g. solving `?A := B` where ?A's expected was
+     `Ul ?l` and B has type `Ul l` propagates to `?l := l`). */
+  metaTypes: IntMap.t(ol),
   nextMetaId: int,
 };
 
 let emptyElabState: elabState = {
   solutions: IntMap.empty,
+  metaTypes: IntMap.empty,
   nextMetaId: 0,
 };
 
-/* Allocate a fresh meta as a ghost subterm at the given source meta. */
-let mkMeta = (state: elabState, m: meta): (ol, elabState) => {
+/* Allocate a fresh meta as a ghost subterm at the given source meta,
+   recording the expected type for type-level propagation. */
+let mkMeta = (state: elabState, expectedTy: ol, m: meta): (ol, elabState) => {
   let id = state.nextMetaId;
   let t: ol = {value: OLMeta(id), meta: {...m, ghost: true}};
-  (t, {...state, nextMetaId: id + 1});
+  (
+    t,
+    {
+      ...state,
+      metaTypes: IntMap.add(id, expectedTy, state.metaTypes),
+      nextMetaId: id + 1,
+    },
+  );
 };
 
 /* Walk solution chains: return the term a meta currently points to, or
@@ -52,53 +82,6 @@ let rec zonk = (sols: IntMap.t(ol), t: ol): ol => {
   | _ => t
   };
 };
-
-/* Functional unification. Returns Some(new solutions) on success, None
-   on failure. User holes match anything (wildcard, like termConsistent
-   used to do). Two unsolved metas are aliased by pointing the higher
-   ID at the lower. */
-let rec unify = (sols: IntMap.t(ol), a: ol, b: ol): option(IntMap.t(ol)) => {
-  let a = follow(sols, a);
-  let b = follow(sols, b);
-  switch (a.value, b.value) {
-  | (OLMeta(idA), OLMeta(idB)) when idA == idB => Some(sols)
-  | (OLMeta(idA), OLMeta(idB)) =>
-    let (lo, hi) = idA < idB ? (idA, idB) : (idB, idA);
-    let aliased: ol = {value: OLMeta(lo), meta: defaultMeta};
-    Some(IntMap.add(hi, aliased, sols));
-  | (OLMeta(id), _) => Some(IntMap.add(id, b, sols))
-  | (_, OLMeta(id)) => Some(IntMap.add(id, a, sols))
-  | (OLHole(_), _) | (_, OLHole(_)) => Some(sols)
-  | (OLIdentifier(x), OLIdentifier(y)) when x == y => Some(sols)
-  | (OLAp(f1, args1), OLAp(f2, args2))
-      when List.length(args1) == List.length(args2) =>
-    let init = unify(sols, f1, f2);
-    List.fold_left2(
-      (acc, x, y) =>
-        switch (acc) {
-        | None => None
-        | Some(s) => unify(s, x, y)
-        },
-      init,
-      args1,
-      args2,
-    );
-  | _ => None
-  };
-};
-
-type fullType = (list((option(string), ol)), ol);
-
-type binding =
-  /* OL(typing, defSite) — defSite is the source meta of the declaration
-     (or param) that introduced this name; used for go-to-definition. */
-  | OL(option(fullType), option(meta))
-  | ML(mlType)
-  | Builtin(string)        /* polymorphic builtin — name identifies the typing rule */
-  | SchemaBinding(ml)      /* unevaluated schema body, stored for Construct to evaluate */
-  | MetaLet(ml, mlType);   /* unevaluated let body + inferred type, for schema evaluation */
-
-type context = StringMap.t(binding);
 
 type holeInfo = {
   goal: ml,
@@ -242,6 +225,106 @@ and mlToOL = (t: ml): ol => {
   {value, meta: t.meta};
 };
 
+/* === Type-level propagation: computeType + unify === */
+
+/* Compute the OL type of a term, given the current solutions map. Used
+   for type-level propagation: when a meta is solved to a term, the
+   meta's recorded expected type must agree with the term's actual type.
+   Returns None when we can't determine the type (e.g. for non-OL
+   bindings, user holes, or higher-order positions). */
+let computeType =
+        (state: elabState, ctxLookup: string => option(fullType), t: ol)
+        : option(ol) => {
+  let t = follow(state.solutions, t);
+  switch (t.value) {
+  | OLMeta(id) => IntMap.find_opt(id, state.metaTypes)
+  | OLIdentifier(v) =>
+    switch (ctxLookup(v)) {
+    | Some(([], retType)) => Some(retType)
+    | _ => None
+    }
+  | OLAp(f, args) =>
+    switch (f.value) {
+    | OLIdentifier(v) =>
+      switch (ctxLookup(v)) {
+      | Some((params, retType))
+          when List.length(params) == List.length(args) =>
+        let env =
+          List.fold_left2(
+            (acc, (paramName, _), arg) =>
+              switch (paramName) {
+              | Some(n) => StringMap.add(n, arg, acc)
+              | None => acc
+              },
+            StringMap.empty,
+            params,
+            args,
+          );
+        Some(resolve(env, retType));
+      | _ => None
+      }
+    | _ => None
+    }
+  | OLHole(_) => None
+  };
+};
+
+/* Functional unification. Returns Some(updated state) on success, None
+   on failure. Type-level propagation: when a meta is solved to a non-
+   meta term, its recorded expected type is unified with the solving
+   term's computed type — letting structural subterm constraints
+   transitively solve other metas. */
+let rec unify =
+        (state: elabState, ctx: context, a: ol, b: ol): option(elabState) => {
+  let ctxLookup = (v) =>
+    switch (StringMap.find_opt(v, ctx)) {
+    | Some(OL(ft, _)) => ft
+    | _ => None
+    };
+  let a = follow(state.solutions, a);
+  let b = follow(state.solutions, b);
+  let solveMeta = (state, id, term) => {
+    let state' = {...state, solutions: IntMap.add(id, term, state.solutions)};
+    switch (IntMap.find_opt(id, state.metaTypes), computeType(state', ctxLookup, term)) {
+    | (Some(expectedTy), Some(actualTy)) =>
+      unify(state', ctx, expectedTy, actualTy)
+    | _ => Some(state')
+    };
+  };
+  switch (a.value, b.value) {
+  | (OLMeta(idA), OLMeta(idB)) when idA == idB => Some(state)
+  | (OLMeta(idA), OLMeta(idB)) =>
+    let (lo, hi) = idA < idB ? (idA, idB) : (idB, idA);
+    let aliased: ol = {value: OLMeta(lo), meta: defaultMeta};
+    let state' = {...state, solutions: IntMap.add(hi, aliased, state.solutions)};
+    switch (
+      IntMap.find_opt(lo, state.metaTypes),
+      IntMap.find_opt(hi, state.metaTypes),
+    ) {
+    | (Some(t1), Some(t2)) => unify(state', ctx, t1, t2)
+    | _ => Some(state')
+    };
+  | (OLMeta(id), _) => solveMeta(state, id, b)
+  | (_, OLMeta(id)) => solveMeta(state, id, a)
+  | (OLHole(_), _) | (_, OLHole(_)) => Some(state)
+  | (OLIdentifier(x), OLIdentifier(y)) when x == y => Some(state)
+  | (OLAp(f1, args1), OLAp(f2, args2))
+      when List.length(args1) == List.length(args2) =>
+    let init = unify(state, ctx, f1, f2);
+    List.fold_left2(
+      (acc, x, y) =>
+        switch (acc) {
+        | None => None
+        | Some(s) => unify(s, ctx, x, y)
+        },
+      init,
+      args1,
+      args2,
+    );
+  | _ => None
+  };
+};
+
 /* --- Checking modes --- */
 
 type checkingMode =
@@ -277,37 +360,38 @@ let lookupCtx = (ctx: context, x: string): lookupResult =>
 /* --- Error helpers --- */
 
 /* Subsume: type-equality check that may solve metas via unification.
-   Returns the (possibly updated) solutions alongside any errors. */
+   Returns the (possibly updated) elaboration state alongside any errors. */
 let subsume =
-    (sols: IntMap.t(ol),
+    (state: elabState,
+     ctx: context,
      expected: option(ol),
      inferred: option(fullType),
      from, to_)
-    : (list(error), IntMap.t(ol)) => {
+    : (list(error), elabState) => {
   let tooFewArgs =
     switch (inferred, expected) {
     | (Some(([_, ..._], _)), Some(_)) => [mark("Too few arguments", from, to_)]
     | _ => []
     };
   let inferredOut = Option.map(((_, out)) => out, inferred);
-  let (inconsistency, sols') =
+  let (inconsistency, state') =
     switch (expected, inferredOut) {
     | (Some(exp), Some(inf)) =>
-      switch (unify(sols, exp, inf)) {
+      switch (unify(state, ctx, exp, inf)) {
       | Some(s) => ([], s)
       | None =>
         ([mark(
            "Inconsistency (expected "
-           ++ printOL(zonk(sols, exp))
+           ++ printOL(zonk(state.solutions, exp))
            ++ ", got "
-           ++ printOL(zonk(sols, inf))
+           ++ printOL(zonk(state.solutions, inf))
            ++ ")",
            from, to_,
-         )], sols)
+         )], state)
       }
-    | _ => ([], sols)
+    | _ => ([], state)
     };
-  (tooFewArgs @ inconsistency, sols');
+  (tooFewArgs @ inconsistency, state');
 };
 
 let checkArity = (expected, found, from, to_) =>
@@ -697,18 +781,27 @@ and checkOLTerm =
           when t.meta.parens && List.length(params) > 0 =>
         /* Parenthesized constructor reference: elaborate as if the user
            had written `(C ? ? ?)` with one ghost per param. Bare `C`
-           (no parens) keeps the existing wildcard-only behavior — the
-           parens are the user's opt-in to elaboration. */
+           (no parens) keeps the existing wildcard-only behavior. */
         let paramCount = List.length(params);
-        let (ghosts, state2) =
+        /* Walk params left-to-right, allocating each ghost with its
+           position's expected type (substituted through prior ghosts).
+           This is what enables type-level propagation later. */
+        let (ghosts, env, state2) =
           List.fold_left(
-            ((gs, accState), _) => {
-              let (g, ns) = mkMeta(accState, defaultMeta);
-              (gs @ [g], ns);
+            ((gs, env, accState), (paramName, paramTy)) => {
+              let expectedTy = resolve(env, paramTy);
+              let (g, ns) = mkMeta(accState, expectedTy, defaultMeta);
+              let env' =
+                switch (paramName) {
+                | Some(n) => StringMap.add(n, g, env)
+                | None => env
+                };
+              (gs @ [g], env', ns);
             },
-            ([], state),
-            List.init(paramCount, _ => 0),
+            ([], emptyEnv, state),
+            params,
           );
+        let _ = paramCount;
         let ghostMetaIds =
           List.filter_map(
             (g: ol) =>
@@ -721,24 +814,10 @@ and checkOLTerm =
         let tentativeArity = [
           (ghostMetaIds, mark("Too few arguments", t.meta.start, t.meta.end_)),
         ];
-        /* Substitute params with their ghost metas in retType so dependent
-           subterms can drive unification. */
-        let env =
-          List.fold_left2(
-            (acc, (paramName, _ty), g: ol) =>
-              switch (paramName) {
-              | Some(n) => StringMap.add(n, g, acc)
-              | None => acc
-              },
-            StringMap.empty,
-            params,
-            ghosts,
-          );
         let resolvedRet = resolve(env, retType);
         let inferred = Some(([], resolvedRet));
-        let (subErrors, sols') =
-          subsume(state2.solutions, expected, inferred, t.meta.start, t.meta.end_);
-        let state3 = {...state2, solutions: sols'};
+        let (subErrors, state3) =
+          subsume(state2, ctx, expected, inferred, t.meta.start, t.meta.end_);
         /* Anchor the inlay hint just before the closing paren — there are
            no given args to anchor relative to. */
         let anchor = t.meta.end_ - 1;
@@ -762,15 +841,15 @@ and checkOLTerm =
         };
         (info, state3);
       | Found(inferred, defSite) =>
-        let (subErrors, sols') =
-          subsume(state.solutions, expected, inferred, t.meta.start, t.meta.end_);
+        let (subErrors, state') =
+          subsume(state, ctx, expected, inferred, t.meta.start, t.meta.end_);
         let definitions =
           switch (defSite) {
           | Some(dm) when !t.meta.ghost => [(t.meta, dm)]
           | _ => []
           };
         let info = {errors: modeErrors @ subErrors, tentativeErrors: [], holes: [], inlayHints: [], definitions, inferred, mlInferred: None, elaborated: Some(t), bindings: StringMap.empty};
-        (info, {...state, solutions: sols'});
+        (info, state');
       }
     | _ =>
       let info = {errors: modeErrors, tentativeErrors: [], holes: [], inlayHints: [], definitions: [], inferred: None, mlInferred: None, elaborated: Some(t), bindings: StringMap.empty};
@@ -809,67 +888,63 @@ and checkOLTerm =
         /* Elaborate: when underapplied, prepend a fresh metavariable for
            each missing leading arg. Metas flow through dependent-type
            substitution and may be solved by unification when this
-           expression's inferred type meets a more specific expected type. */
+           expression's inferred type meets a more specific expected type.
+           Each meta records its position's expected type (substituted
+           through earlier args) so type-level propagation inside unify
+           can solve metas that wouldn't otherwise see a constraint. */
         let nMissing = max(0, paramCount - argCount);
-        let (leadingGhosts, state2) =
+        let (argInfos, elabArgs, finalEnv, state3, ghostIds) =
           List.fold_left(
-            ((ghosts, accState), _) => {
-              let (g, newState) = mkMeta(accState, defaultMeta);
-              (ghosts @ [g], newState);
-            },
-            ([], state1),
-            List.init(nMissing, _ => 0),
-          );
-        let ghostMetaIds =
-          List.filter_map(
-            (g: ol) =>
-              switch (g.value) {
-              | OLMeta(id) => Some(id)
-              | _ => None
-              },
-            leadingGhosts,
-          );
-        let tentativeArity =
-          nMissing > 0
-            ? [(ghostMetaIds, mark("Too few arguments", f.meta.start, f.meta.end_))]
-            : [];
-        let effectiveArgs = leadingGhosts @ args;
-        let checkLen = min(paramCount, List.length(effectiveArgs));
-        let (argInfos, elabArgs, finalEnv, state3) =
-          List.fold_left(
-            ((accInfos, accElabs, env, accState), i) => {
+            ((accInfos, accElabs, env, accState, ghostIds), i) => {
               let (paramName, paramTy) = List.nth(params, i);
               let expectedTy = resolve(env, paramTy);
-              let arg = List.nth(effectiveArgs, i);
-              let (argInfo, newState) =
-                if (arg.meta.ghost) {
-                  (emptyInfo, accState);  /* elaboration-inserted; not type-checked */
+              let isGhost = i < nMissing;
+              let (arg, argInfo, newState, ghostIds') =
+                if (isGhost) {
+                  let (g, ns) = mkMeta(accState, expectedTy, defaultMeta);
+                  let id =
+                    switch (g.value) {
+                    | OLMeta(id) => id
+                    | _ => (-1)
+                    };
+                  (g, emptyInfo, ns, ghostIds @ [id]);
                 } else {
-                  checkOLTerm(accState, ctx, Expression(Some(expectedTy)), arg);
+                  let userArg = List.nth(args, i - nMissing);
+                  let (info, ns) =
+                    checkOLTerm(accState, ctx, Expression(Some(expectedTy)), userArg);
+                  (userArg, info, ns, ghostIds);
                 };
-              /* Sub-elaboration: prefer the elaborated form (covers nested
-                 underapplications inside this arg). Falls back to the raw
-                 arg for ghost subterms or non-OL paths. */
-              let argElab = switch (argInfo.elaborated) {
+              let argElab =
+                switch (argInfo.elaborated) {
                 | Some(e) => e
                 | None => arg
-              };
-              let env =
+                };
+              let env' =
                 switch (paramName) {
                 | Some(name) => StringMap.add(name, argElab, env)
                 | None => env
                 };
-              (accInfos @ [argInfo], accElabs @ [argElab], env, newState);
+              (
+                accInfos @ [argInfo],
+                accElabs @ [argElab],
+                env',
+                newState,
+                ghostIds',
+              );
             },
-            ([], [], emptyEnv, state2),
-            List.init(checkLen, i => i),
+            ([], [], emptyEnv, state1, []),
+            List.init(min(paramCount, nMissing + argCount), i => i),
           );
+        let tentativeArity =
+          nMissing > 0
+            ? [(ghostIds, mark("Too few arguments", f.meta.start, f.meta.end_))]
+            : [];
+        let effectiveArgs = elabArgs;
         let info = List.fold_left(mergeInfos, funInfo, argInfos);
         let resolvedRet = resolve(finalEnv, retType);
         let inferred = Some(([], resolvedRet));
-        let (subErrors, sols') =
-          subsume(state3.solutions, expected, inferred, t.meta.start, t.meta.end_);
-        let state4 = {...state3, solutions: sols'};
+        let (subErrors, state4) =
+          subsume(state3, ctx, expected, inferred, t.meta.start, t.meta.end_);
         /* Collect the ghost-arg run as a deferred inlay-hint entry; the
            ghost terms (containing metas) get zonked at the decl boundary. */
         let hints = extractArgRunHints(effectiveArgs);
@@ -1609,15 +1684,26 @@ let checkBlock = (ctx: context, block: block): (staticInfo, context) =>
     let (metaInfo, metaCtx, metaDefs) =
       processMetaDefs(emptyInfo, mlCtx, [], defs);
     metaDefsRef := metaDefs;
-    (withBindings(metaInfo, metaCtx), metaCtx);
+    /* mlBuiltins (true, false, fst, snd, foldl, Ok, Error) are valid
+       ML names inside this meta block but shouldn't leak into the
+       outer context — they would shadow OL constructors a user
+       declares with the same name (e.g. `true : bool` in an enum). For
+       each builtin key, restore the original ctx binding (or remove if
+       unbound originally). */
+    let cleanCtx =
+      StringMap.fold(
+        (k, _v, acc) =>
+          switch (StringMap.find_opt(k, ctx)) {
+          | Some(orig) => StringMap.add(k, orig, acc)
+          | None => StringMap.remove(k, acc)
+          },
+        mlBuiltins,
+        metaCtx,
+      );
+    (withBindings(metaInfo, cleanCtx), cleanCtx);
 
-  | Construct(schemaName, decls) =>
+  | Construct(schemaName, schemaMeta, decls) =>
     let (bodyInfo, finalCtx) = checkDeclList(ctx, decls);
-    let schemaMeta =
-      switch (decls) {
-      | [d, ..._] => d.declMeta
-      | [] => defaultMeta
-      };
     let witnessErrors = runConstructSchema(ctx, finalCtx, schemaName, schemaMeta, decls);
     let info = withErrors(bodyInfo, witnessErrors);
     (withBindings(info, finalCtx), finalCtx);
