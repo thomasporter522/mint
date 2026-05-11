@@ -11,7 +11,6 @@ Mint's design is centered around the virtue of _objectivity_. That is, the seman
 
 ## Future Directions
 
-- Automatic inference of missing arguments to term constructors.
 - User-written conversion and normalization procedures.
 - A module-like system for reusable, nested hypothetical reasoning.
 

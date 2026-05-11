@@ -1,6 +1,6 @@
 postulate
 sort : sort
--- universe levels
+-- -- universe levels
 level : sort
 lz : level
 ls (l : level) : level
@@ -21,6 +21,10 @@ Ul-cong (l1 l2 : level) (my-eq : level-eq l1 l2) : (eq ? (Ul (ls l1)) (Ul (ls l2
 -- function types
 to (l1 l2 : level) (A : Ul l1) (B : Ul l2) : Ul (lmax l1 l2)
 ap (l1 l2 : level) (A : Ul l1) (B : Ul l2) (f : to A B) (a : A) : B
+
+pi (l1 l2 : level) (A : Ul l1) (B : to A (Ul l2)) : Ul (lmax l1 l2)
+dap (l1 l2 : level) (A : Ul l1) (B : to A (Ul l2)) (f : pi A B) (a : A) : ap B a
+
 cong-ap (l1 l2 : level) 
   (A : Ul l1) (B : Ul l2) 
   (f : to A B) (g : to A B) 
@@ -44,13 +48,13 @@ combinator-ap-eq (l1 l2 l3 : level)
   (x : A) 
   : eq (ap (ap (ap (combinator-ap ) f) g) x) (ap (ap f x) (ap g x))
 meta
-    schema definition =
-        fun s => match s with
-        | [(f, [], ret),
-            (f_eq, [], eq l ret ret f body)]
-            => (Ok [body, (refl l ret body)])
-        | _ => (Error "invalid definition")
-        end
+  schema definition =
+    fun s => match s with
+    | [(a, [], _),
+       (a_eq, [], eq _ _ _ a body)]
+        => (Ok [body, (refl body)])
+    | _ => (Error "invalid definition")
+    end
 construct by definition
 U1 : Ul (ls (ls lz))
 U1-eq : eq U1 (Ul (ls lz))
@@ -321,9 +325,9 @@ triple-case (lM : level) (M : Ul lM) (a-case b-case c-case : M) (scrutinee : tri
 triple-case-a (lM : level) (M : Ul lM) (a-case b-case c-case : M) : eq (triple-case a-case b-case c-case a) a-case
 triple-case-b (lM : level) (M : Ul lM) (a-case b-case c-case : M) : eq (triple-case a-case b-case c-case b) b-case
 triple-case-c (lM : level) (M : Ul lM) (a-case b-case c-case : M) : eq (triple-case a-case b-case c-case c) c-case
--- meta
--- --  todo: cases schema
--- --  should search through the context for an appropriate eliminator for the input type
+meta
+--  todo: cases schema
+--  should search through the context for an appropriate eliminator for the input type
 -- construct by cases
 -- not : to bool bool 
 -- not-true : eq (ap not true) false

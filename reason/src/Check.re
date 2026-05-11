@@ -97,6 +97,12 @@ type staticInfo = {
      genuinely incomplete and the error is suppressed. */
   tentativeErrors: list((list(int), error)),
   holes: list((int, holeInfo)),
+  /* For each OL-side hole, the expected OL term at registration time —
+     kept on the side so we can zonk it at the decl boundary (after any
+     unification on metas reachable from the expected). The ml-embedded
+     goal in `holes` collapses OLMeta -> Hole(User), losing the meta
+     identity, so we can't zonk it post-facto. Indexed by hole offset. */
+  pendingHoleGoals: list((int, ol)),
   /* Inlay hints: (offset, ghost terms) — anchored just before `offset`.
      Carried as terms (not rendered strings) so they can be zonked at
      the decl boundary against the local solutions map; the API boundary
@@ -122,7 +128,7 @@ let olHole: ol = mkOL(OLHole(User));
 let mlHole: ml = mkML(Hole(Synthesized));
 let fullHole: fullType = ([], olHole);
 
-let emptyInfo = {errors: [], tentativeErrors: [], holes: [], inlayHints: [], definitions: [], inferred: None, mlInferred: None, elaborated: None, bindings: StringMap.empty};
+let emptyInfo = {errors: [], tentativeErrors: [], pendingHoleGoals: [], holes: [], inlayHints: [], definitions: [], inferred: None, mlInferred: None, elaborated: None, bindings: StringMap.empty};
 
 /* MetaLet definitions in definition order, for eval env construction.
    Set by Meta block processing, read by Construct block. */
@@ -135,6 +141,7 @@ let mergeInfos = (i1: staticInfo, i2: staticInfo): staticInfo => {
   errors: i1.errors @ i2.errors,
   tentativeErrors: i1.tentativeErrors @ i2.tentativeErrors,
   holes: i1.holes @ i2.holes,
+  pendingHoleGoals: i1.pendingHoleGoals @ i2.pendingHoleGoals,
   inlayHints: i1.inlayHints @ i2.inlayHints,
   definitions: i1.definitions @ i2.definitions,
   inferred: None,
@@ -640,6 +647,31 @@ let zonkInlayHints =
   {...info, inlayHints: zonked};
 };
 
+/* Rebuild each OL-side hole's ml goal from its pending ol expected,
+   zonked against the final per-decl solutions. Holes whose offset isn't
+   in pendingHoleGoals (e.g. ML-side `Hole` registrations) are left
+   alone. After this pass, pendingHoleGoals is cleared. */
+let resolveHoleGoals =
+    (sols: IntMap.t(ol), info: staticInfo): staticInfo => {
+  let pendingMap =
+    List.fold_left(
+      (acc, (pos, olGoal)) => IntMap.add(pos, olGoal, acc),
+      IntMap.empty,
+      info.pendingHoleGoals,
+    );
+  let updated =
+    List.map(
+      ((pos, hi: holeInfo)) =>
+        switch (IntMap.find_opt(pos, pendingMap)) {
+        | Some(olGoal) =>
+          (pos, {...hi, goal: embedOL(zonk(sols, olGoal))})
+        | None => (pos, hi)
+        },
+      info.holes,
+    );
+  {...info, holes: updated, pendingHoleGoals: []};
+};
+
 /* Decide whether a single meta is solved (its zonked form is non-meta). */
 let metaSolved = (sols: IntMap.t(ol), id: int): bool => {
   let probe: ol = {value: OLMeta(id), meta: defaultMeta};
@@ -739,7 +771,8 @@ let rec checkDeclLine = (ctx: context, d: decl): staticInfo => {
     };
   let merged = mergeInfos(paramInfo, retInfo);
   let zonked = zonkInlayHints(finalState.solutions, merged);
-  let resolved = resolveTentatives(finalState.solutions, zonked);
+  let withZonkedHoles = resolveHoleGoals(finalState.solutions, zonked);
+  let resolved = resolveTentatives(finalState.solutions, withZonkedHoles);
   /* Build the EXTERNAL binding: param types and retType use their
      elaborated forms, fully zonked, with surviving (unsolved) metas
      replaced by synthesized holes — so this decl's local meta IDs
@@ -775,7 +808,7 @@ and checkOLTerm =
       switch (lookupCtx(ctx, v)) {
       | NotFound =>
         let err = mark("Unbound variable " ++ v, t.meta.start, t.meta.end_);
-        let info = {errors: [err, ...modeErrors], tentativeErrors: [], holes: [], inlayHints: [], definitions: [], inferred: None, mlInferred: None, elaborated: Some(t), bindings: StringMap.empty};
+        let info = {errors: [err, ...modeErrors], tentativeErrors: [], pendingHoleGoals: [], holes: [], inlayHints: [], definitions: [], inferred: None, mlInferred: None, elaborated: Some(t), bindings: StringMap.empty};
         (info, state);
       | Found(Some((params, retType)), defSite)
           when t.meta.parens && List.length(params) > 0 =>
@@ -832,6 +865,7 @@ and checkOLTerm =
           errors: modeErrors @ subErrors,
           tentativeErrors: tentativeArity,
           holes: [],
+          pendingHoleGoals: [],
           inlayHints: hints,
           definitions,
           inferred,
@@ -848,11 +882,11 @@ and checkOLTerm =
           | Some(dm) when !t.meta.ghost => [(t.meta, dm)]
           | _ => []
           };
-        let info = {errors: modeErrors @ subErrors, tentativeErrors: [], holes: [], inlayHints: [], definitions, inferred, mlInferred: None, elaborated: Some(t), bindings: StringMap.empty};
+        let info = {errors: modeErrors @ subErrors, tentativeErrors: [], pendingHoleGoals: [], holes: [], inlayHints: [], definitions, inferred, mlInferred: None, elaborated: Some(t), bindings: StringMap.empty};
         (info, state');
       }
     | _ =>
-      let info = {errors: modeErrors, tentativeErrors: [], holes: [], inlayHints: [], definitions: [], inferred: None, mlInferred: None, elaborated: Some(t), bindings: StringMap.empty};
+      let info = {errors: modeErrors, tentativeErrors: [], pendingHoleGoals: [], holes: [], inlayHints: [], definitions: [], inferred: None, mlInferred: None, elaborated: Some(t), bindings: StringMap.empty};
       (info, state);
     };
 
@@ -995,12 +1029,20 @@ and checkOLTerm =
         | Some(e) => embedOL(zonk(state.solutions, e))
         | None => mlHole
         };
-      let info = {errors: [], tentativeErrors: [], holes: [(t.meta.start, {goal, context: ctx})], inlayHints: [], definitions: [],
+      /* Record the raw OL expected (if any) so the decl boundary can
+         zonk-and-re-embed once any metas referenced in it are solved
+         by later unification. */
+      let pending =
+        switch (expected) {
+        | Some(e) => [(t.meta.start, e)]
+        | None => []
+        };
+      let info = {errors: [], tentativeErrors: [], pendingHoleGoals: pending, holes: [(t.meta.start, {goal, context: ctx})], inlayHints: [], definitions: [],
                    inferred: Some(fullHole), mlInferred: None, elaborated: Some(t), bindings: StringMap.empty};
       (info, state);
     | _ =>
       let info = {errors: [mark("Hole in non-expression", t.meta.start, t.meta.end_)],
-                   tentativeErrors: [], holes: [], inlayHints: [], definitions: [], inferred: Some(fullHole), mlInferred: None, elaborated: Some(t), bindings: StringMap.empty};
+                   tentativeErrors: [], pendingHoleGoals: [], holes: [], inlayHints: [], definitions: [], inferred: Some(fullHole), mlInferred: None, elaborated: Some(t), bindings: StringMap.empty};
       (info, state);
     }
   }
@@ -1180,7 +1222,7 @@ and inferExpr = (ctx: context, t: ml): staticInfo =>
   | StringLit(_) => setMlType(emptyInfo, MString)
 
   | Hole(_) =>
-    {errors: [], tentativeErrors: [], holes: [(t.meta.start, {goal: mlHole, context: ctx})], inlayHints: [], definitions: [],
+    {errors: [], tentativeErrors: [], pendingHoleGoals: [], holes: [(t.meta.start, {goal: mlHole, context: ctx})], inlayHints: [], definitions: [],
      inferred: Some(([], olHole)), mlInferred: Some(MTerm), elaborated: None, bindings: StringMap.empty}
 
   | Ap({value: Identifier("fst"), _}, [arg]) =>
@@ -1361,7 +1403,7 @@ and checkExpr = (ctx: context, expected: mlType, t: ml): staticInfo =>
   switch (t.value) {
   | Hole(_) =>
     let goal = mlTypeToTerm(expected);
-    {errors: [], tentativeErrors: [], holes: [(t.meta.start, {goal, context: ctx})], inlayHints: [], definitions: [],
+    {errors: [], tentativeErrors: [], pendingHoleGoals: [], holes: [(t.meta.start, {goal, context: ctx})], inlayHints: [], definitions: [],
      inferred: None, mlInferred: None, elaborated: None, bindings: StringMap.empty};
 
   | Fun(pats, body) =>
@@ -1635,6 +1677,7 @@ let runConstructSchema =
                  don't cross witness boundaries. */
               let (witnessInfo, witnessState) =
                 checkOLTerm(emptyElabState, witnessCtx, Expression(Some(expectedType)), witnessOL);
+              let witnessInfo = resolveHoleGoals(witnessState.solutions, witnessInfo);
               let witnessInfo = resolveTentatives(witnessState.solutions, witnessInfo);
               let paramNames = List.map((p: param) => p.paramName, d.params);
               let newSubstEnv =

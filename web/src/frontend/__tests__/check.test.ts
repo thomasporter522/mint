@@ -186,6 +186,33 @@ describe('function declarations', () => {
     expect(label).toBe('?');
   });
 
+  it('hole goal reflects metas solved AFTER the hole was registered', () => {
+    /* The `?` for `p1` is checked during the args-fold for `pair ? ?`,
+       BEFORE the outer subsume on the whole `(pair ? ?)` against its
+       expected type runs and solves pair's implicit a1/a2. The hole
+       goal must be zonked at the decl boundary so the user sees the
+       fully-solved `proof (and a1 a2)` instead of `proof ?`. */
+    const code = [
+      'postulate',
+      'sort : sort',
+      'prop : sort',
+      'proof (a : prop) : sort',
+      'and (a1 a2 : prop) : prop',
+      'pair (a1 a2 : prop) (p1 : proof a1) (p2 : proof a2) : proof (and a1 a2)',
+      'mythm-stmt (a1 a2 : prop) (p1 : proof a1) (p2 : proof a2)',
+      '    (body : proof (and a1 a2)) : sort',
+      'mythm-pf (a1 a2 : prop) (p1 : proof a1) (p2 : proof a2)',
+      '    : mythm-stmt a1 a2 p1 p2 (pair ? ?)',
+      'end',
+    ].join('\n');
+    const result = check(code);
+    expect(result.holes.length).toBe(2);
+    /* Each hole's goal printed via printTerm should be the fully-applied
+       `proof X`, not `proof ?`. */
+    const goals = result.holes.map(([, info]) => printTerm(info.goal));
+    expect(goals).toEqual(['proof a1', 'proof a2']);
+  });
+
   it('grouped param syntax: (l1 l2 : level) ≡ (l1 : level) (l2 : level)', () => {
     /* Multiple identifiers sharing one type expand into multiple Params
        at AST-build time. The two decls below should be semantically
