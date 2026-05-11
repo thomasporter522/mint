@@ -147,10 +147,14 @@ function refresh(document: vscode.TextDocument): void {
   const items: vscode.Diagnostic[] = []
 
   for (const err of result.errors) {
+    const severity =
+      err.type === 'warning'
+        ? vscode.DiagnosticSeverity.Warning
+        : vscode.DiagnosticSeverity.Error
     const diag = new vscode.Diagnostic(
       rangeFromOffsets(document, err.from, err.to),
       err.message,
-      vscode.DiagnosticSeverity.Error,
+      severity,
     )
     diag.source = err.type
     items.push(diag)

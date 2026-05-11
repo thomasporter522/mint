@@ -269,6 +269,89 @@ describe('function declarations', () => {
     expect(result.errors.some(e => e.type === 'syntax')).toBe(true);
   });
 
+  it('shadowing: redeclaring a postulate name produces a warning, not an error', () => {
+    const code = [
+      'postulate',
+      'Sort : Sort',
+      'foo : Sort',
+      'foo : Sort',
+      'end',
+    ].join('\n');
+    const result = check(code);
+    const warnings = result.errors.filter(e => e.type === 'warning');
+    expect(warnings.length).toBe(1);
+    /* Message is generic — doesn't leak the shadowed name. */
+    expect(warnings[0].message).toBe('Shadows existing binding');
+    /* The warning is on the SECOND `foo`, not the first. */
+    expect(code.slice(warnings[0].from, warnings[0].to)).toBe('foo');
+    expect(warnings[0].from).toBe(code.lastIndexOf('foo'));
+  });
+
+  it('shadowing: ctrl-click on the shadowing name navigates to the shadowed one', () => {
+    /* The definitions record for the shadowing decl's name should point
+       at the original (shadowed) decl's name range. */
+    const code = [
+      'postulate',
+      'Sort : Sort',
+      'foo : Sort',
+      'foo : Sort',
+      'end',
+    ].join('\n');
+    const result = check(code);
+    const firstFoo = code.indexOf('foo');
+    const secondFoo = code.lastIndexOf('foo');
+    /* Look up the definition record whose use range is the second foo. */
+    const rec = result.definitions.find(
+      ([uf, ut]) => uf === secondFoo && ut === secondFoo + 3,
+    );
+    expect(rec).toBeDefined();
+    const [, , defFrom, defTo] = rec!;
+    expect(defFrom).toBe(firstFoo);
+    expect(defTo).toBe(firstFoo + 3);
+  });
+
+  it('shadowing: a param shadowing a decl gets a warning', () => {
+    /* lmax-sym (eq : ...) shadows the postulated `eq`. */
+    const code = [
+      'postulate',
+      'Sort : Sort',
+      'eq : Sort',
+      '(lmax-sym (eq : Sort)) : Sort',
+      'end',
+    ].join('\n');
+    const warnings = check(code).errors.filter(e => e.type === 'warning');
+    expect(warnings.length).toBeGreaterThan(0);
+    expect(warnings.every(w => w.message === 'Shadows existing binding')).toBe(true);
+  });
+
+  it('shadowing: ML let-binding shadowing an OL decl warns', () => {
+    const code = [
+      'postulate',
+      'Sort : Sort',
+      'x : Sort',
+      'meta',
+      '    x = "hi"',
+      'end',
+    ].join('\n');
+    const warnings = check(code).errors.filter(e => e.type === 'warning');
+    expect(warnings.length).toBeGreaterThan(0);
+    expect(warnings.every(w => w.message === 'Shadows existing binding')).toBe(true);
+  });
+
+  it('shadowing: warnings do NOT break block completeness', () => {
+    /* A shadow warning on an otherwise hole-free, error-free decl should
+       still leave the block complete. */
+    const code = [
+      'postulate',
+      'Sort : Sort',
+      '(f (Sort : Sort)) : Sort',
+      'end',
+    ].join('\n');
+    const result = check(code);
+    expect(result.errors.some(e => e.type === 'warning')).toBe(true);
+    expect(result.completeBlocks.length).toBe(1);
+  });
+
   it('completeBlocks: earlier complete blocks survive even if later blocks fail', () => {
     /* The first postulate block is fully OK; the second has a hole. The
        first should still be reported complete; the second should not. */

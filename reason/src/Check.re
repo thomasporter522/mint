@@ -776,6 +776,27 @@ let rec zonkAndForgetMetas = (sols: IntMap.t(ol), t: ol): ol => {
   };
 };
 
+/* Shadow check: if `name` is already bound in `ctx`, emit a warning at
+   `nameMeta`. If the shadowed binding has a known source position (OL
+   bindings carry a defSite), also emit a definition link so ctrl-click
+   on the shadowing name jumps to the shadowed binding. */
+let shadowCheck =
+    (name: string, nameMeta: meta, ctx: context)
+    : (list(error), list((meta, meta))) =>
+  switch (StringMap.find_opt(name, ctx)) {
+  | None => ([], [])
+  | Some(b) =>
+    let warns = [
+      Error.warn("Shadows existing binding", nameMeta.start, nameMeta.end_),
+    ];
+    let defs =
+      switch (b) {
+      | OL(_, Some(dm)) => [(nameMeta, dm)]
+      | _ => []
+      };
+    (warns, defs);
+  };
+
 /* Check a single declaration line: (name (p1:T1) ...) : RetType.
    Per-decl elaboration state is created here, threaded through every
    sub-check, and consumed at the end via zonkInlayHints. Solutions
@@ -798,6 +819,8 @@ let rec checkDeclLine = (ctx: context, d: decl): staticInfo => {
      happens fresh through checkOLTerm. */
   let inDeclSelfBinding = OL(Some((rawParamPairs, d.retType)), Some(d.nameMeta));
   let selfCtx = StringMap.add(d.declName, inDeclSelfBinding, ctx);
+  let (selfShadowWarns, selfShadowDefs) =
+    shadowCheck(d.declName, d.nameMeta, ctx);
   /* typeArgs: check each param's type, threading the elaboration state.
      Capture each paramType's elaborated form for the external binding. */
   let (paramInfo, paramCtx, paramElabs, state1) =
@@ -810,6 +833,15 @@ let rec checkDeclLine = (ctx: context, d: decl): staticInfo => {
           | Some(e) => e
           | None => p.paramType
           };
+        /* Param-shadowing warning + def link: another decl, an earlier
+           param, or even the decl's self-binding sharing this name. */
+        let (paramShadowWarns, paramShadowDefs) =
+          shadowCheck(p.paramName, p.nameMeta, accCtx);
+        let typeInfo = withErrors(typeInfo, paramShadowWarns);
+        let typeInfo = {
+          ...typeInfo,
+          definitions: typeInfo.definitions @ paramShadowDefs,
+        };
         /* Within the decl's own check, later params see the elaborated
            paramType (which may carry per-decl metas — that's fine, they
            live in the same elaboration state). */
@@ -820,6 +852,11 @@ let rec checkDeclLine = (ctx: context, d: decl): staticInfo => {
       (emptyInfo, selfCtx, [], emptyElabState),
       d.params,
     );
+  let paramInfo = withErrors(paramInfo, selfShadowWarns);
+  let paramInfo = {
+    ...paramInfo,
+    definitions: paramInfo.definitions @ selfShadowDefs,
+  };
   /* typeTerm: check retType in Γ[x ā : T][ā] */
   let (retInfo, finalState) =
     checkOLTerm(state1, paramCtx, Expression(Some(olHole)), d.retType);
@@ -864,7 +901,7 @@ let rec checkDeclLine = (ctx: context, d: decl): staticInfo => {
       List.map(((_, ty)) => olCollectRefs(ty, ctx), externalParamPairs),
     )
     @ olCollectRefs(externalRetType, ctx);
-  let hasErrors = resolved.errors != [];
+  let hasErrors = Error.hasRealErrors(resolved.errors);
   let typeComplete =
     !typeHasHoles && !hasErrors && allRefsComplete(typeRefs);
   completenessRef := StringMap.add(d.declName, typeComplete, completenessRef^);
@@ -1626,7 +1663,17 @@ and processMetaDefs =
         [mark("Invalid type annotation", rawExpr.meta.start, rawExpr.meta.end_)]
       | _ => []
       };
-    let info = withErrors(mergeInfos(accInfo, schemaInfo), annotErrors);
+    /* The binding has no explicit name meta — derive a name-sized range
+       from bindingMeta's start so the warning squiggle and ctrl-click
+       hit-area stay tight on the name. */
+    let nameMeta = {
+      ...b.bindingMeta,
+      end_: b.bindingMeta.start + String.length(b.name),
+    };
+    let (shadowWarns, shadowDefs) = shadowCheck(b.name, nameMeta, accCtx);
+    let info =
+      withErrors(mergeInfos(accInfo, schemaInfo), annotErrors @ shadowWarns);
+    let info = {...info, definitions: info.definitions @ shadowDefs};
     let newCtx = StringMap.add(b.name, SchemaBinding(b.rhs), accCtx);
     processMetaDefs(info, newCtx, accDefs, rest);
 
@@ -1638,6 +1685,16 @@ and processMetaDefs =
         let info = inferExpr(accCtx, b.rhs);
         (info, getInferredMlType(info));
       };
+    let nameMeta = {
+      ...b.bindingMeta,
+      end_: b.bindingMeta.start + String.length(b.name),
+    };
+    let (shadowWarns, shadowDefs) = shadowCheck(b.name, nameMeta, accCtx);
+    let bodyInfo = withErrors(bodyInfo, shadowWarns);
+    let bodyInfo = {
+      ...bodyInfo,
+      definitions: bodyInfo.definitions @ shadowDefs,
+    };
     let newCtx = StringMap.add(b.name, MetaLet(b.rhs, rhsTy), accCtx);
     let newDefs = accDefs @ [(b.name, b.rhs)];
     processMetaDefs(mergeInfos(accInfo, bodyInfo), newCtx, newDefs, rest);
@@ -1769,7 +1826,7 @@ let runConstructSchema =
               let zonkedWitnessOL = zonk(witnessState.solutions, witnessOL);
               let witnessRefs = olCollectRefs(zonkedWitnessOL, ctx);
               let witnessOK =
-                witnessInfo.errors == []
+                !Error.hasRealErrors(witnessInfo.errors)
                 && witnessInfo.holes == []
                 && !olHasHoles(zonkedWitnessOL)
                 && allRefsComplete(witnessRefs);

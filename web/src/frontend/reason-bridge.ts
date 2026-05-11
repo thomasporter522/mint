@@ -61,12 +61,14 @@ export function processCode(
   const result = processProgramJs(prog as unknown[])
   const allErrors: Error[] = [...syntaxErrors, ...result.errors]
   /* Engine emits each complete block's full source range. Discard any
-     block whose range overlaps an error of any kind — syntactic errors
-     in particular live on the bridge side and aren't visible to the
-     engine's per-decl completeness logic. */
+     block whose range overlaps a real error — warnings don't count as
+     errors (e.g. shadowing notices don't break completeness). Syntactic
+     errors are filtered here because they live on the bridge side and
+     aren't visible to the engine's per-decl completeness logic. */
+  const realErrors = allErrors.filter((e) => e.type !== 'warning')
   const rawComplete = result.completeBlocks as unknown as [number, number][]
   const completeBlocks = rawComplete.filter(
-    ([from, to]) => !allErrors.some((e) => e.from < to && e.to > from),
+    ([from, to]) => !realErrors.some((e) => e.from < to && e.to > from),
   )
   return {
     errors: allErrors,

@@ -16,7 +16,6 @@ Mint's design is centered around the virtue of _objectivity_. That is, the seman
 
 ## Minor TODOs
 
-- Warnings for shadowing
 - Expose context to schemas
 
 <!-- ## Bugs -->

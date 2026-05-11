@@ -1,6 +1,6 @@
 postulate
 sort : sort
--- -- universe levels
+-- universe levels
 level : sort
 lz : level
 ls (l : level) : level
