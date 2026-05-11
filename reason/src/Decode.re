@@ -261,25 +261,31 @@ let decodeMetaDef = (j: jsObj): metaDef => {
 
 let decodeBlock = (j: jsObj): block => {
   let kind = getKind(j);
-  switch (kind) {
-  | "Postulate" =>
-    Postulate(Array.map(decodeDecl, _arr(j, "decls")) |> Array.to_list)
-  | "Construct" =>
-    let m = _obj(j, "schemaMeta");
-    let schemaMeta: meta = {
+  let readMeta = (key: string): meta => {
+    let m = _obj(j, key);
+    {
       parens: _bool(m, "parens"),
       start: _int(m, "start"),
       end_: _int(m, "end"),
       ghost: false,
     };
+  };
+  switch (kind) {
+  | "Postulate" =>
+    Postulate(
+      readMeta("blockMeta"),
+      Array.map(decodeDecl, _arr(j, "decls")) |> Array.to_list,
+    )
+  | "Construct" =>
     Construct(
       _str(j, "schema"),
-      schemaMeta,
+      readMeta("schemaMeta"),
+      readMeta("blockMeta"),
       Array.map(decodeDecl, _arr(j, "decls")) |> Array.to_list,
-    );
+    )
   | "Meta" =>
     Meta(Array.map(decodeMetaDef, _arr(j, "defs")) |> Array.to_list)
-  | _ => Postulate([])
+  | _ => Postulate(defaultMeta, [])
   };
 };
 

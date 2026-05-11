@@ -48,16 +48,32 @@ export function processCode(
   /* (useFrom, useTo, defFrom, defTo) for each OL identifier reference
      that resolves to an OL binding. */
   definitions: [number, number, number, number][]
+  /* (from, to) — the full source range of every block whose every decl
+     is complete (hole-free type and witness, no semantic OR syntactic
+     errors anywhere in the block, all transitive deps complete). The
+     extension renders a ✓ anchored at `from` (the `postulate` /
+     `construct` keyword). */
+  completeBlocks: [number, number][]
 } {
   const tree = parser.parse(code)
   const syntaxErrors = collectSyntaxErrors(tree)
   const prog = buildProgram(tree, code)
   const result = processProgramJs(prog as unknown[])
+  const allErrors: Error[] = [...syntaxErrors, ...result.errors]
+  /* Engine emits each complete block's full source range. Discard any
+     block whose range overlaps an error of any kind — syntactic errors
+     in particular live on the bridge side and aren't visible to the
+     engine's per-decl completeness logic. */
+  const rawComplete = result.completeBlocks as unknown as [number, number][]
+  const completeBlocks = rawComplete.filter(
+    ([from, to]) => !allErrors.some((e) => e.from < to && e.to > from),
+  )
   return {
-    errors: [...syntaxErrors, ...result.errors],
+    errors: allErrors,
     holes: result.holes,
     inlayHints: result.inlayHints,
     definitions: result.definitions,
+    completeBlocks,
   }
 }
 

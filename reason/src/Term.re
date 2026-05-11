@@ -128,12 +128,16 @@ type metaDef =
 /* === Program structure === */
 
 type block =
-  | Postulate(list(decl))
+  /* Postulate(blockMeta, decls) — blockMeta is the full source range of
+     the block (from the `postulate` keyword to the last decl). Used to
+     anchor the per-block completeness ✓ and to filter against errors. */
+  | Postulate(meta, list(decl))
   | Meta(list(metaDef))
-  /* Construct(schemaName, schemaMeta, decls) — schemaMeta is the source
-     range of the schema-name identifier, used to localize errors like
-     "schema not found" or "ill-typed witnesses" at the reference. */
-  | Construct(string, meta, list(decl))
+  /* Construct(schemaName, schemaMeta, blockMeta, decls) — schemaMeta is
+     the source range of the schema-name identifier (used to localize
+     schema-related errors); blockMeta is the full block range (used for
+     the completeness ✓). */
+  | Construct(string, meta, meta, list(decl))
 
 type program = list(block);
 

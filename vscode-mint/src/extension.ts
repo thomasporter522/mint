@@ -22,9 +22,26 @@ const inlayHintsChanged = new vscode.EventEmitter<void>()
 // the DefinitionProvider on ctrl-click / Go-to-Definition.
 const definitionsByDoc = new Map<string, [number, number, number, number][]>()
 
+// Decoration type used to put a small green ✓ before each complete block's
+// keyword (`postulate` / `construct`). A block is complete when every decl
+// in it has a hole-free type and witness, no errors anywhere in the block's
+// range, and all transitively-referenced decls are themselves complete.
+// Created once at activation; applied via setDecorations after each check.
+let completeDecorationType: vscode.TextEditorDecorationType
+const completeBlocksByDoc = new Map<string, [number, number][]>()
+
 export function activate(context: vscode.ExtensionContext): void {
   diagnostics = vscode.languages.createDiagnosticCollection(MINT_LANGUAGE)
   context.subscriptions.push(diagnostics)
+
+  completeDecorationType = vscode.window.createTextEditorDecorationType({
+    before: {
+      contentText: '✓',
+      color: new vscode.ThemeColor('charts.green'),
+      margin: '0 0.3em 0 0',
+    },
+  })
+  context.subscriptions.push(completeDecorationType)
 
   context.subscriptions.push(
     vscode.workspace.onDidOpenTextDocument(refresh),
@@ -33,7 +50,11 @@ export function activate(context: vscode.ExtensionContext): void {
       diagnostics.delete(doc.uri)
       inlayHintsByDoc.delete(doc.uri.toString())
       definitionsByDoc.delete(doc.uri.toString())
+      completeBlocksByDoc.delete(doc.uri.toString())
     }),
+    /* Re-apply decorations when an editor becomes visible (e.g. user
+       switches tabs) — TextEditorDecorationType state is per-editor. */
+    vscode.window.onDidChangeVisibleTextEditors(applyCompleteDecorations),
   )
 
   context.subscriptions.push(
@@ -117,7 +138,9 @@ function refresh(document: vscode.TextDocument): void {
     ])
     inlayHintsByDoc.set(document.uri.toString(), [])
     definitionsByDoc.set(document.uri.toString(), [])
+    completeBlocksByDoc.set(document.uri.toString(), [])
     inlayHintsChanged.fire()
+    applyCompleteDecorations(vscode.window.visibleTextEditors)
     return
   }
 
@@ -147,7 +170,24 @@ function refresh(document: vscode.TextDocument): void {
   diagnostics.set(document.uri, items)
   inlayHintsByDoc.set(document.uri.toString(), result.inlayHints)
   definitionsByDoc.set(document.uri.toString(), result.definitions)
+  completeBlocksByDoc.set(document.uri.toString(), result.completeBlocks)
   inlayHintsChanged.fire()
+  applyCompleteDecorations(vscode.window.visibleTextEditors)
+}
+
+/* Apply (or refresh) the ✓ decorations on every visible editor that's
+   showing a Mint document we have completeness data for. */
+function applyCompleteDecorations(
+  editors: readonly vscode.TextEditor[],
+): void {
+  for (const editor of editors) {
+    if (editor.document.languageId !== MINT_LANGUAGE) continue
+    const ranges = completeBlocksByDoc.get(editor.document.uri.toString()) ?? []
+    editor.setDecorations(
+      completeDecorationType,
+      ranges.map(([from, to]) => rangeFromOffsets(editor.document, from, to)),
+    )
+  }
 }
 
 function rangeFromOffsets(

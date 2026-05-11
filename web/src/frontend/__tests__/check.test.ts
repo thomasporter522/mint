@@ -16,6 +16,7 @@ type Result = {
   holes: [number, HoleInfo][];
   inlayHints: [number, string, string][];
   definitions: [number, number, number, number][];
+  completeBlocks: [number, number][];
 };
 
 function check(code: string): Result {
@@ -211,6 +212,80 @@ describe('function declarations', () => {
        `proof X`, not `proof ?`. */
     const goals = result.holes.map(([, info]) => printTerm(info.goal));
     expect(goals).toEqual(['proof a1', 'proof a2']);
+  });
+
+  it('completeBlocks: a fully-complete postulate block is reported', () => {
+    /* All decls hole-free, no errors, deps all complete → the block as
+       a whole is complete. Anchor is the `postulate` keyword. */
+    const code = [
+      'postulate',
+      'Sort : Sort',
+      'level : Sort',
+      '(Ul (l : level)) : Sort',
+      'l0 : level',
+      'x : Ul l0',
+      'end',
+    ].join('\n');
+    const result = check(code);
+    expect(result.completeBlocks.length).toBe(1);
+    const [from] = result.completeBlocks[0];
+    /* Block range starts at `postulate`. */
+    expect(code.slice(from, from + 'postulate'.length)).toBe('postulate');
+  });
+
+  it('completeBlocks: a single hole in any decl breaks the whole block', () => {
+    const code = [
+      'postulate',
+      'Sort : Sort',
+      'level : Sort',
+      '(Ul (l : level)) : Sort',
+      'bad : Ul ?',
+      'end',
+    ].join('\n');
+    const result = check(code);
+    expect(result.completeBlocks).toEqual([]);
+  });
+
+  it('completeBlocks: a semantic error breaks the whole block', () => {
+    const code = [
+      'postulate',
+      'Sort : Sort',
+      'bad : missing',
+      'end',
+    ].join('\n');
+    const result = check(code);
+    expect(result.completeBlocks).toEqual([]);
+  });
+
+  it('completeBlocks: a syntax error breaks the whole block (bridge filter)', () => {
+    const code = [
+      'postulate',
+      'Sort : Sort',
+      'bad : )Sort',
+      'end',
+    ].join('\n');
+    const result = check(code);
+    expect(result.completeBlocks).toEqual([]);
+    expect(result.errors.some(e => e.type === 'syntax')).toBe(true);
+  });
+
+  it('completeBlocks: earlier complete blocks survive even if later blocks fail', () => {
+    /* The first postulate block is fully OK; the second has a hole. The
+       first should still be reported complete; the second should not. */
+    const code = [
+      'postulate',
+      'Sort : Sort',
+      'x : Sort',
+      'end',
+      'postulate',
+      'bad : Sort ?',
+      'end',
+    ].join('\n');
+    const result = check(code);
+    expect(result.completeBlocks.length).toBe(1);
+    const [from] = result.completeBlocks[0];
+    /* The complete one is the FIRST `postulate`. */
+    expect(from).toBe(code.indexOf('postulate'));
   });
 
   it('grouped param syntax: (l1 l2 : level) ≡ (l1 : level) (l2 : level)', () => {

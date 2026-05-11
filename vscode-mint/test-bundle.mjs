@@ -35,14 +35,21 @@ class EventEmitter {
   dispose() { this._listeners = [] }
 }
 
+class ThemeColor { constructor(id) { this.id = id } }
+
 const vscodeMock = {
-  Position, Range, Diagnostic, InlayHint, EventEmitter,
+  Position, Range, Diagnostic, InlayHint, EventEmitter, ThemeColor,
   DiagnosticSeverity: { Error: 0, Warning: 1, Information: 2, Hint: 3 },
   workspace: {
     onDidOpenTextDocument: () => ({ dispose() {} }),
     onDidChangeTextDocument: () => ({ dispose() {} }),
     onDidCloseTextDocument: () => ({ dispose() {} }),
     textDocuments: [],
+  },
+  window: {
+    visibleTextEditors: [],
+    onDidChangeVisibleTextEditors: () => ({ dispose() {} }),
+    createTextEditorDecorationType: () => ({ dispose() {} }),
   },
   languages: {
     createDiagnosticCollection: (name) => ({

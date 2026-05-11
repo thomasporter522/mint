@@ -79,6 +79,7 @@ external makeJsResult:
     ~holes: array(array(Obj.t)),
     ~inlayHints: array(array(Obj.t)),
     ~definitions: array(array(int)),
+    ~completeBlocks: array(array(int)),
   ) =>
   jsResult =
   "";
@@ -129,7 +130,18 @@ let resultOfStatics = (statics: staticInfo): jsResult => {
         statics.definitions,
       ),
     );
-  makeJsResult(~errors, ~holes, ~inlayHints, ~definitions);
+  /* Emit each complete block's full source range. The bridge filters
+     out blocks whose range overlaps any error (syntactic or semantic
+     that the engine didn't catch per-decl). The extension anchors a ✓
+     at the start (the block's keyword). */
+  let completeBlocks =
+    Array.of_list(
+      List.map(
+        (m: meta) => [|m.start, m.end_|],
+        statics.completeBlocks,
+      ),
+    );
+  makeJsResult(~errors, ~holes, ~inlayHints, ~definitions, ~completeBlocks);
 };
 
 /* === Pipeline entry points ===

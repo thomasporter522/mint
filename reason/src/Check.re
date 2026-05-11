@@ -103,6 +103,13 @@ type staticInfo = {
      goal in `holes` collapses OLMeta -> Hole(User), losing the meta
      identity, so we can't zonk it post-facto. Indexed by hole offset. */
   pendingHoleGoals: list((int, ol)),
+  /* Blocks (postulate / construct) where every decl is complete: hole-
+     free types and witnesses, no semantic errors anywhere in the block,
+     transitively-referenced decls also complete. Each entry is the
+     block's full source meta; the IDE anchors a ✓ at the start (the
+     `postulate` / `construct` keyword) and the bridge filters out
+     blocks whose range overlaps a syntax error. */
+  completeBlocks: list(meta),
   /* Inlay hints: (offset, ghost terms) — anchored just before `offset`.
      Carried as terms (not rendered strings) so they can be zonked at
      the decl boundary against the local solutions map; the API boundary
@@ -128,11 +135,62 @@ let olHole: ol = mkOL(OLHole(User));
 let mlHole: ml = mkML(Hole(Synthesized));
 let fullHole: fullType = ([], olHole);
 
-let emptyInfo = {errors: [], tentativeErrors: [], pendingHoleGoals: [], holes: [], inlayHints: [], definitions: [], inferred: None, mlInferred: None, elaborated: None, bindings: StringMap.empty};
+let emptyInfo = {errors: [], tentativeErrors: [], pendingHoleGoals: [], holes: [], inlayHints: [], definitions: [], inferred: None, mlInferred: None, elaborated: None, completeBlocks: [], bindings: StringMap.empty};
 
 /* MetaLet definitions in definition order, for eval env construction.
    Set by Meta block processing, read by Construct block. */
 let metaDefsRef: ref(list((string, ml))) = ref([]);
+
+/* Per-program completeness map, indexed by decl name. A decl maps to
+   true iff it has been verified hole-free, all upstream decls it refers
+   to are complete, and (for construct decls) its witness is also hole-
+   free. Reset at the start of `checkProgram`; populated as decls are
+   processed in order. Reads/writes happen alongside the functional
+   threading of state but the cross-block scope is most naturally a
+   module-local ref, matching the existing `metaDefsRef` pattern. */
+let completenessRef: ref(StringMap.t(bool)) = ref(StringMap.empty);
+
+/* True if a term contains any hole-shaped subterm (user hole,
+   synthesized hole, or unsolved meta). */
+let rec olHasHoles = (t: ol): bool =>
+  switch (t.value) {
+  | OLHole(_) | OLMeta(_) => true
+  | OLIdentifier(_) => false
+  | OLAp(f, args) =>
+    olHasHoles(f) || List.exists(olHasHoles, args)
+  };
+
+/* Collect names of OL identifiers in `t` that resolve to OL bindings
+   in `outerCtx`. Local-only references (e.g. to a decl's own params)
+   are filtered out — they aren't dependencies for completeness. */
+let olCollectRefs = (t: ol, outerCtx: context): list(string) => {
+  let rec go = (acc, t: ol) =>
+    switch (t.value) {
+    | OLIdentifier(name) =>
+      switch (StringMap.find_opt(name, outerCtx)) {
+      | Some(OL(_, _)) => [name, ...acc]
+      | _ => acc
+      }
+    | OLAp(f, args) =>
+      let acc = go(acc, f);
+      List.fold_left(go, acc, args);
+    | OLHole(_) | OLMeta(_) => acc
+    };
+  go([], t);
+};
+
+/* Conjunction over a list of dep names: every named decl must already
+   be marked complete in completenessRef. Names not yet known (forward
+   refs, which the term-language shouldn't permit) count as not-complete. */
+let allRefsComplete = (refs: list(string)): bool =>
+  List.for_all(
+    name =>
+      switch (StringMap.find_opt(name, completenessRef^)) {
+      | Some(true) => true
+      | _ => false
+      },
+    refs,
+  );
 
 let mergeBindings = (c1: context, c2: context): context =>
   StringMap.union((_key, _v1, v2) => Some(v2), c1, c2);
@@ -147,6 +205,7 @@ let mergeInfos = (i1: staticInfo, i2: staticInfo): staticInfo => {
   inferred: None,
   mlInferred: None,
   elaborated: None,
+  completeBlocks: i1.completeBlocks @ i2.completeBlocks,
   bindings: mergeBindings(i1.bindings, i2.bindings),
 };
 
@@ -789,6 +848,26 @@ let rec checkDeclLine = (ctx: context, d: decl): staticInfo => {
   let externalBinding =
     OL(Some((externalParamPairs, externalRetType)), Some(d.nameMeta));
   let bindings = StringMap.singleton(d.declName, externalBinding);
+  /* Per-decl completeness (type-level only; witness-level is added by
+     runConstructSchema for construct decls). A decl is type-complete iff
+     no hole survives in its elaborated paramTypes / retType, no semantic
+     errors fired during this decl's check, AND every external reference
+     resolves to an already-complete decl. */
+  let typeHasHoles =
+    olHasHoles(externalRetType)
+    || List.exists(
+         ((_, ty)) => olHasHoles(ty),
+         externalParamPairs,
+       );
+  let typeRefs =
+    List.concat(
+      List.map(((_, ty)) => olCollectRefs(ty, ctx), externalParamPairs),
+    )
+    @ olCollectRefs(externalRetType, ctx);
+  let hasErrors = resolved.errors != [];
+  let typeComplete =
+    !typeHasHoles && !hasErrors && allRefsComplete(typeRefs);
+  completenessRef := StringMap.add(d.declName, typeComplete, completenessRef^);
   {...resolved, bindings};
 }
 
@@ -808,7 +887,7 @@ and checkOLTerm =
       switch (lookupCtx(ctx, v)) {
       | NotFound =>
         let err = mark("Unbound variable " ++ v, t.meta.start, t.meta.end_);
-        let info = {errors: [err, ...modeErrors], tentativeErrors: [], pendingHoleGoals: [], holes: [], inlayHints: [], definitions: [], inferred: None, mlInferred: None, elaborated: Some(t), bindings: StringMap.empty};
+        let info = {errors: [err, ...modeErrors], tentativeErrors: [], pendingHoleGoals: [], holes: [], inlayHints: [], definitions: [], inferred: None, mlInferred: None, elaborated: Some(t), completeBlocks: [], bindings: StringMap.empty};
         (info, state);
       | Found(Some((params, retType)), defSite)
           when t.meta.parens && List.length(params) > 0 =>
@@ -871,6 +950,7 @@ and checkOLTerm =
           inferred,
           mlInferred: None,
           elaborated: Some(elaborated),
+          completeBlocks: [],
           bindings: StringMap.empty,
         };
         (info, state3);
@@ -882,11 +962,11 @@ and checkOLTerm =
           | Some(dm) when !t.meta.ghost => [(t.meta, dm)]
           | _ => []
           };
-        let info = {errors: modeErrors @ subErrors, tentativeErrors: [], pendingHoleGoals: [], holes: [], inlayHints: [], definitions, inferred, mlInferred: None, elaborated: Some(t), bindings: StringMap.empty};
+        let info = {errors: modeErrors @ subErrors, tentativeErrors: [], pendingHoleGoals: [], holes: [], inlayHints: [], definitions, inferred, mlInferred: None, elaborated: Some(t), completeBlocks: [], bindings: StringMap.empty};
         (info, state');
       }
     | _ =>
-      let info = {errors: modeErrors, tentativeErrors: [], pendingHoleGoals: [], holes: [], inlayHints: [], definitions: [], inferred: None, mlInferred: None, elaborated: Some(t), bindings: StringMap.empty};
+      let info = {errors: modeErrors, tentativeErrors: [], pendingHoleGoals: [], holes: [], inlayHints: [], definitions: [], inferred: None, mlInferred: None, elaborated: Some(t), completeBlocks: [], bindings: StringMap.empty};
       (info, state);
     };
 
@@ -910,6 +990,7 @@ and checkOLTerm =
     | Expression(expected) =>
       let (funInfo, state1) = checkOLTerm(state, ctx, Expression(None), f);
       switch (funInfo.inferred) {
+      | None => (funInfo, state1)
       | Some((params, retType)) =>
         let paramCount = List.length(params);
         let argCount = List.length(args);
@@ -999,7 +1080,6 @@ and checkOLTerm =
         };
         let final = withErrors({...info, inferred, elaborated: Some(elaborated)}, hardArityErrors @ subErrors);
         (final, state4);
-      | None => (funInfo, state1)
       };
 
     | _ =>
@@ -1038,11 +1118,11 @@ and checkOLTerm =
         | None => []
         };
       let info = {errors: [], tentativeErrors: [], pendingHoleGoals: pending, holes: [(t.meta.start, {goal, context: ctx})], inlayHints: [], definitions: [],
-                   inferred: Some(fullHole), mlInferred: None, elaborated: Some(t), bindings: StringMap.empty};
+                   inferred: Some(fullHole), mlInferred: None, elaborated: Some(t), completeBlocks: [], bindings: StringMap.empty};
       (info, state);
     | _ =>
       let info = {errors: [mark("Hole in non-expression", t.meta.start, t.meta.end_)],
-                   tentativeErrors: [], pendingHoleGoals: [], holes: [], inlayHints: [], definitions: [], inferred: Some(fullHole), mlInferred: None, elaborated: Some(t), bindings: StringMap.empty};
+                   tentativeErrors: [], pendingHoleGoals: [], holes: [], inlayHints: [], definitions: [], inferred: Some(fullHole), mlInferred: None, elaborated: Some(t), completeBlocks: [], bindings: StringMap.empty};
       (info, state);
     }
   }
@@ -1223,7 +1303,7 @@ and inferExpr = (ctx: context, t: ml): staticInfo =>
 
   | Hole(_) =>
     {errors: [], tentativeErrors: [], pendingHoleGoals: [], holes: [(t.meta.start, {goal: mlHole, context: ctx})], inlayHints: [], definitions: [],
-     inferred: Some(([], olHole)), mlInferred: Some(MTerm), elaborated: None, bindings: StringMap.empty}
+     inferred: Some(([], olHole)), mlInferred: Some(MTerm), elaborated: None, completeBlocks: [], bindings: StringMap.empty}
 
   | Ap({value: Identifier("fst"), _}, [arg]) =>
     let argInfo = inferExpr(ctx, arg);
@@ -1404,7 +1484,7 @@ and checkExpr = (ctx: context, expected: mlType, t: ml): staticInfo =>
   | Hole(_) =>
     let goal = mlTypeToTerm(expected);
     {errors: [], tentativeErrors: [], pendingHoleGoals: [], holes: [(t.meta.start, {goal, context: ctx})], inlayHints: [], definitions: [],
-     inferred: None, mlInferred: None, elaborated: None, bindings: StringMap.empty};
+     inferred: None, mlInferred: None, elaborated: None, completeBlocks: [], bindings: StringMap.empty};
 
   | Fun(pats, body) =>
     switch (pats, expected) {
@@ -1682,6 +1762,24 @@ let runConstructSchema =
               let paramNames = List.map((p: param) => p.paramName, d.params);
               let newSubstEnv =
                 StringMap.add(d.declName, (paramNames, witness), substEnv);
+              /* Witness contribution to completeness: hole-free witness
+                 term, no errors, no registered holes, and every external
+                 ref in the witness term is itself complete. AND with the
+                 type-level completeness already in the ref. */
+              let zonkedWitnessOL = zonk(witnessState.solutions, witnessOL);
+              let witnessRefs = olCollectRefs(zonkedWitnessOL, ctx);
+              let witnessOK =
+                witnessInfo.errors == []
+                && witnessInfo.holes == []
+                && !olHasHoles(zonkedWitnessOL)
+                && allRefsComplete(witnessRefs);
+              let typeComplete =
+                switch (StringMap.find_opt(d.declName, completenessRef^)) {
+                | Some(b) => b
+                | None => false
+                };
+              completenessRef :=
+                StringMap.add(d.declName, typeComplete && witnessOK, completenessRef^);
               (accErrs @ witnessInfo.errors, accHoles @ witnessInfo.holes, newSubstEnv);
             },
             ([], [], emptyWitnessEnv),
@@ -1716,10 +1814,28 @@ let runConstructSchema =
     [mark("Schema " ++ schemaRefName ++ " not found", schemaMeta.start, schemaMeta.end_)]
   };
 
+/* Read each decl's final completeness flag from the ref and emit
+   (nameMeta, declMeta) of those marked complete. The bridge does an
+   additional filter against syntax errors using declMeta. */
+/* True if every decl in `decls` is marked complete in completenessRef
+   (no holes, no semantic errors, deps complete). */
+let allDeclsComplete = (decls: list(decl)): bool =>
+  List.for_all(
+    (d: decl) =>
+      switch (StringMap.find_opt(d.declName, completenessRef^)) {
+      | Some(true) => true
+      | _ => false
+      },
+    decls,
+  );
+
 let checkBlock = (ctx: context, block: block): (staticInfo, context) =>
   switch (block) {
-  | Postulate(decls) =>
+  | Postulate(blockMeta, decls) =>
     let (info, finalCtx) = checkDeclList(ctx, decls);
+    let completeBlocks =
+      allDeclsComplete(decls) ? [blockMeta] : [];
+    let info = {...info, completeBlocks: info.completeBlocks @ completeBlocks};
     (withBindings(info, finalCtx), finalCtx);
 
   | Meta(defs) =>
@@ -1745,14 +1861,29 @@ let checkBlock = (ctx: context, block: block): (staticInfo, context) =>
       );
     (withBindings(metaInfo, cleanCtx), cleanCtx);
 
-  | Construct(schemaName, schemaMeta, decls) =>
+  | Construct(schemaName, schemaMeta, blockMeta, decls) =>
     let (bodyInfo, finalCtx) = checkDeclList(ctx, decls);
     let witnessErrors = runConstructSchema(ctx, finalCtx, schemaName, schemaMeta, decls);
+    /* If the schema didn't run cleanly (not found, wrong arity, eval
+       failure, etc.), every decl in the block fails completeness — the
+       per-witness fold may not have even run. */
+    if (witnessErrors != []) {
+      List.iter(
+        (d: decl) =>
+          completenessRef := StringMap.add(d.declName, false, completenessRef^),
+        decls,
+      );
+    };
     let info = withErrors(bodyInfo, witnessErrors);
+    let completeBlocks =
+      allDeclsComplete(decls) ? [blockMeta] : [];
+    let info = {...info, completeBlocks: info.completeBlocks @ completeBlocks};
     (withBindings(info, finalCtx), finalCtx);
   };
 
 let checkProgram = (ctx: context, prog: program): staticInfo => {
+  /* Reset per-program state. */
+  completenessRef := StringMap.empty;
   let (info, _) =
     List.fold_left(
       ((accInfo, accCtx), block) => {

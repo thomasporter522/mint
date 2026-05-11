@@ -197,11 +197,11 @@ let printMetaDef = (d: metaDef): string =>
 
 let printBlock = (b: block): string =>
   switch (b) {
-  | Postulate(decls) =>
+  | Postulate(_, decls) =>
     "postulate\n" ++ String.concat("\n", List.map(printDecl, decls))
   | Meta(defs) =>
     "meta\n" ++ String.concat("\n", List.map(printMetaDef, defs))
-  | Construct(schemaName, _, decls) =>
+  | Construct(schemaName, _, _, decls) =>
     "construct by " ++ schemaName ++ "\n"
     ++ String.concat("\n", List.map(printDecl, decls))
   };
