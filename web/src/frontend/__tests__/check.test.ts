@@ -647,7 +647,7 @@ describe('function declarations', () => {
       '(eq (l : Sort) (B : Ul l) (x : B)) : Sort',
       '(refl (l : Sort) (B : Ul l) (x : B)) : eq B x',
       'meta',
-      'schema sch = fun s => match s with',
+      'schema sch = fun outer => fun s => match s with',
       '| [(g, [], eq ll bb xx)] => (Ok [(refl ll bb xx)])',
       '| _ => (Error "wrong")',
       'end',
@@ -675,7 +675,7 @@ describe('function declarations', () => {
       '(eq (l : Sort) (B : Ul l) (x : B)) : Sort',
       '(refl (l : Sort) (B : Ul l) (x : B)) : eq B x',
       'meta',
-      'schema sch = fun s => match s with',
+      'schema sch = fun outer => fun s => match s with',
       '| [(g, [], _)] => (Ok [(refl A B0 x0)])',
       '| _ => (Error "x")',
       'end',
@@ -992,7 +992,7 @@ describe('schema blocks', () => {
       'x : Sort',
       'y : x',
       'meta',
-      'schema foo = fun s => match s with | [(name, [], ret)] => (Ok [y]) | _ => (Error "bad") end',
+      'schema foo = fun outer => fun s => match s with | [(name, [], ret)] => (Ok [y]) | _ => (Error "bad") end',
       'construct by foo',
       'z : x',
       'end',
@@ -1006,7 +1006,7 @@ describe('schema blocks', () => {
       'Sort : Sort',
       'x : Sort',
       'meta',
-      'schema foo = fun s => match s with | _ => "wrong" end',
+      'schema foo = fun outer => fun s => match s with | _ => "wrong" end',
       'construct by foo',
       'y : x',
       'end',
@@ -1021,7 +1021,7 @@ describe('schema blocks', () => {
       'Sort : Sort',
       'x : Sort',
       'meta',
-      'schema foo = fun s => match s with | _ => x end',
+      'schema foo = fun outer => fun s => match s with | _ => x end',
       'construct by foo',
       'y : x',
       'end',
@@ -1037,7 +1037,7 @@ describe('schema blocks', () => {
       'x : Sort',
       'y : x',
       'meta',
-      'schema foo = fun s => match s with | [(name, [], ret)] => (Ok [y]) | _ => (Error "bad") end',
+      'schema foo = fun outer => fun s => match s with | [(name, [], ret)] => (Ok [y]) | _ => (Error "bad") end',
       'construct by foo',
       'z : x',
       'end',
@@ -1068,7 +1068,7 @@ describe('schema blocks', () => {
       'x : Sort',
       'y : x',
       'meta',
-      'schema foo : ((List Signature) -> (Result (List Term))) = fun s => match s with | [(name, [], ret)] => (Ok [y]) | _ => (Error "bad") end',
+      'schema foo : ((List Signature) -> ((List Signature) -> (Result (List Term)))) = fun outer => fun s => match s with | [(name, [], ret)] => (Ok [y]) | _ => (Error "bad") end',
       'construct by foo',
       'z : x',
       'end',
@@ -1078,7 +1078,7 @@ describe('schema blocks', () => {
 
   it('accepts correct type annotation written out fully', () => {
     expect(errors(
-      'meta\nschema declaration : ((List (Term, (List (Term, Term)), Term)) -> (Result (List Term))) = ?\nend'
+      'meta\nschema declaration : ((List (Term, (List (Term, Term)), Term)) -> ((List (Term, (List (Term, Term)), Term)) -> (Result (List Term)))) = ?\nend'
     )).toEqual([]);
   });
 
@@ -1090,7 +1090,7 @@ describe('schema blocks', () => {
       'U : Sort',
       '(eq (A : U) (B : U) (a : A) (b : B)) : U',
       'meta',
-      'schema foo = fun s => match s with',
+      'schema foo = fun outer => fun s => match s with',
       '  | [(f, [], eq2 ret ret f body)] => (Ok [body])',
       '  | _ => (Error "bad")',
       '  end',
@@ -1101,7 +1101,7 @@ describe('schema blocks', () => {
   });
 
   it('schema errors do not leak into surrounding blocks', () => {
-    const code = 'postulate\nSort : Sort\nU : Sort\nmeta\nschema declaration = fun x => ?\nend';
+    const code = 'postulate\nSort : Sort\nU : Sort\nmeta\nschema declaration = fun outer => fun x => ?\nend';
     const errs = errors(code);
     // Should have schema body errors but NOT postulate errors
     const unboundU = errs.filter((e: Error) => e.message.includes('Unbound variable U'));
@@ -1121,14 +1121,14 @@ describe('construct blocks', () => {
     /* Schema produces a `?` per witness. The witness-completeness check
        flags this; verify there is no OTHER error (no unbound var, etc.). */
     const msgs = errorMessages(
-      'postulate\nSort : Sort\nx : Sort\nmeta\nschema foo = fun s => (Ok (foldl (fun acc => fun _ => ? :: acc) [] s))\nconstruct by foo\ny : x\nend'
+      'postulate\nSort : Sort\nx : Sort\nmeta\nschema foo = fun outer => fun s => (Ok (foldl (fun acc => fun _ => ? :: acc) [] s))\nconstruct by foo\ny : x\nend'
     );
     expect(msgs).toEqual([expect.stringContaining('incomplete witnesses')]);
   });
 
   it('reports unbound variable in construct declaration', () => {
     const msgs = errorMessages(
-      'postulate\nSort : Sort\nx : Sort\nmeta\nschema foo = fun s => (Ok (foldl (fun acc => fun _ => ? :: acc) [] s))\nconstruct by foo\ny : z\nend'
+      'postulate\nSort : Sort\nx : Sort\nmeta\nschema foo = fun outer => fun s => (Ok (foldl (fun acc => fun _ => ? :: acc) [] s))\nconstruct by foo\ny : z\nend'
     );
     expect(msgs).toContainEqual(expect.stringContaining('Unbound variable'));
   });
@@ -1137,7 +1137,7 @@ describe('construct blocks', () => {
     /* `z : y` — checks that `y` (from postulate) is in scope. Witness is `?`,
        so completeness fires; no Unbound-variable error confirms scope. */
     const msgs = errorMessages(
-      'postulate\nSort : Sort\nx : Sort\ny : x\nmeta\nschema foo = fun s => (Ok (foldl (fun acc => fun _ => ? :: acc) [] s))\nconstruct by foo\nz : y\nend'
+      'postulate\nSort : Sort\nx : Sort\ny : x\nmeta\nschema foo = fun outer => fun s => (Ok (foldl (fun acc => fun _ => ? :: acc) [] s))\nconstruct by foo\nz : y\nend'
     );
     expect(msgs).toEqual([expect.stringContaining('incomplete witnesses')]);
   });
@@ -1150,7 +1150,7 @@ describe('construct blocks', () => {
       'y : x',
       'z : y',
       'meta',
-      'schema foo = fun s => match s with | [(name, [], ret)] => (Ok [z]) | _ => (Error "bad") end',
+      'schema foo = fun outer => fun s => match s with | [(name, [], ret)] => (Ok [z]) | _ => (Error "bad") end',
       'construct by foo',
       'w : y',
       'end',
@@ -1166,7 +1166,7 @@ describe('construct blocks', () => {
       'Sort : Sort',
       'x : Sort',
       'meta',
-      'schema foo = fun s => (Ok (foldl (fun acc => fun _ => ? :: acc) [] s))',
+      'schema foo = fun outer => fun s => (Ok (foldl (fun acc => fun _ => ? :: acc) [] s))',
       'construct by foo',
       'y : x',
       'z : y',
@@ -1191,7 +1191,7 @@ describe('construct blocks', () => {
       '(ap-S (x : D) (y : D) (z : D)) : (eq D D (ap (ap (ap S x) y) z) (ap (ap x z) (ap y z)))',
       'meta',
       'schema definition =',
-      '  fun s => match s with',
+      '  fun outer => fun s => match s with',
       '  | [(f, [], ret),',
       '     (f_eq, [], eq ret ret f body)]',
       '      => (Ok [body, (refl ret body)])',
@@ -1220,7 +1220,7 @@ describe('construct blocks', () => {
       '(ap-cong (f : D) (g : D) (x : D) (e : (eq D D f g))) : (eq D D (ap f x) (ap g x))',
       'meta',
       'schema definition =',
-      '  fun s => match s with',
+      '  fun outer => fun s => match s with',
       '  | [(f, [], ret), (f_eq, [], eq ret ret f body)]',
       '      => (Ok [body, (refl ret body)])',
       '  | _ => (Error "invalid definition")',
@@ -1229,7 +1229,7 @@ describe('construct blocks', () => {
       'I : D',
       'I-eq : (eq D D I (ap (ap S K) K))',
       'meta',
-      'schema arg-definition = fun s => match s with | [(f, params, ret), (f_eq, params, eq ret ret applied body)] => if applied == (foldl (fun acc => fun p => match p with | (x, t) => (acc x) end) f params) then (Ok [body, (refl ret body)]) else (Error "LHS mismatch") end | _ => (Error "invalid arg-definition") end',
+      'schema arg-definition = fun outer => fun s => match s with | [(f, params, ret), (f_eq, params, eq ret ret applied body)] => if applied == (foldl (fun acc => fun p => match p with | (x, t) => (acc x) end) f params) then (Ok [body, (refl ret body)]) else (Error "LHS mismatch") end | _ => (Error "invalid arg-definition") end',
       'construct by arg-definition',
       '(ap-I (x : D)) : (eq D D (ap I x) x)',
       '(ap-I-pf (x : D)) : (eq (eq D D (ap I x) x) (eq D D (ap I x) x) (ap-I x) (',
@@ -1262,7 +1262,7 @@ describe('construct blocks', () => {
       '(ap-cong (f : D) (g : D) (x : D) (e : (eq D D f g))) : (eq D D (ap f x) (ap g x))',
       'meta',
       'schema definition =',
-      '  fun s => match s with',
+      '  fun outer => fun s => match s with',
       '  | [(f, [], ret), (f_eq, [], eq ret ret f body)]',
       '      => (Ok [body, (refl ret body)])',
       '  | _ => (Error "invalid definition")',
@@ -1271,7 +1271,7 @@ describe('construct blocks', () => {
       'I : D',
       'I-eq : (eq D D I (ap (ap S K) K))',
       'meta',
-      'schema arg-definition = fun s => match s with | [(f, params, ret), (f_eq, params, eq ret ret applied body)] => if applied == (foldl (fun acc => fun p => match p with | (x, t) => (acc x) end) f params) then (Ok [body, (refl ret body)]) else (Error "LHS mismatch") end | _ => (Error "invalid") end',
+      'schema arg-definition = fun outer => fun s => match s with | [(f, params, ret), (f_eq, params, eq ret ret applied body)] => if applied == (foldl (fun acc => fun p => match p with | (x, t) => (acc x) end) f params) then (Ok [body, (refl ret body)]) else (Error "LHS mismatch") end | _ => (Error "invalid") end',
       'construct by arg-definition',
       '(ap-I (x : D)) : (eq D D (ap I x) x)',
       '(ap-I-pf (x : D)) : (eq (eq D D (ap I x) x) (eq D D (ap I x) x) (ap-I x) (',
@@ -1305,13 +1305,13 @@ describe('construct blocks', () => {
       '(ap-cong (f : D) (g : D) (x : D) (e : (eq D D f g))) : (eq D D (ap f x) (ap g x))',
       'meta',
       'schema definition =',
-      '  fun s => match s with',
+      '  fun outer => fun s => match s with',
       '  | [(f, [], ret),',
       '     (f_eq, [], eq ret ret f body)]',
       '      => (Ok [body, (refl ret body)])',
       '  | _ => (Error "invalid definition")',
       '  end',
-      'schema arg-definition = fun s => match s with | [(f, params, ret), (f_eq, params, eq ret ret applied body)] => if applied == (foldl (fun acc => fun p => match p with | (x, t) => (acc x) end) f params) then (Ok [body, (refl ret body)]) else (Error "LHS mismatch") end | _ => (Error "invalid arg-definition") end',
+      'schema arg-definition = fun outer => fun s => match s with | [(f, params, ret), (f_eq, params, eq ret ret applied body)] => if applied == (foldl (fun acc => fun p => match p with | (x, t) => (acc x) end) f params) then (Ok [body, (refl ret body)]) else (Error "LHS mismatch") end | _ => (Error "invalid arg-definition") end',
       'construct by definition',
       'I : D',
       'I-eq : (eq D D I (ap (ap S K) K))',
@@ -1347,7 +1347,7 @@ describe('construct blocks', () => {
       '(ap-cong (f : D) (g : D) (x : D) (e : (eq D D f g))) : (eq D D (ap f x) (ap g x))',
       'meta',
       'schema definition =',
-      '  fun s => match s with',
+      '  fun outer => fun s => match s with',
       '  | [(f, [], ret), (f_eq, [], eq ret ret f body)]',
       '      => (Ok [body, (refl ret body)])',
       '  | _ => (Error "invalid definition")',
@@ -1356,7 +1356,7 @@ describe('construct blocks', () => {
       'I : D',
       'I-eq : (eq D D I (ap (ap S K) K))',
       'meta',
-      'schema arg-definition = fun s => match s with | [(f, params, ret), (f_eq, params, eq ret ret applied body)] => if applied == (foldl (fun acc => fun p => match p with | (x, t) => (acc x) end) f params) then (Ok [body, (refl ret body)]) else (Error "LHS mismatch") end | _ => (Error "invalid arg-definition") end',
+      'schema arg-definition = fun outer => fun s => match s with | [(f, params, ret), (f_eq, params, eq ret ret applied body)] => if applied == (foldl (fun acc => fun p => match p with | (x, t) => (acc x) end) f params) then (Ok [body, (refl ret body)]) else (Error "LHS mismatch") end | _ => (Error "invalid arg-definition") end',
       'construct by arg-definition',
       '(ap-I (x : D)) : (eq D D (ap I x) x)',
       '(ap-I-pf (x : D)) : (eq (eq D D (ap I x) x) (eq D D (ap I x) x) (ap-I x) (',
@@ -1395,7 +1395,7 @@ describe('witness-and-discard (future: schema execution)', () => {
     '(ap-S (x : D) (y : D) (z : D)) : (eq D D (ap (ap (ap S x) y) z) (ap (ap x z) (ap y z)))',
     'meta',
     'schema definition =',
-    '  fun s => match s with',
+    '  fun outer => fun s => match s with',
     '  | [(f, [], ret),',
     '     (f_eq, [], eq ret ret f body)]',
     '      => (Ok [body, (refl ret body)])',
@@ -1502,7 +1502,7 @@ describe('witness-and-discard (future: schema execution)', () => {
       'K : D',
       'meta',
       'schema bad-schema =',
-      '  fun s => match s with',
+      '  fun outer => fun s => match s with',
       '  | _ => (Ok [K, K])',
       '  end',
       'construct by bad-schema',
@@ -1523,7 +1523,7 @@ describe('witness-and-discard (future: schema execution)', () => {
       'K : D',
       'meta',
       'schema too-few =',
-      '  fun s => match s with',
+      '  fun outer => fun s => match s with',
       '  | _ => (Ok [K])',
       '  end',
       'construct by too-few',
@@ -1543,7 +1543,7 @@ describe('witness-and-discard (future: schema execution)', () => {
       'K : D',
       'meta',
       'schema always-fail =',
-      '  fun s => match s with',
+      '  fun outer => fun s => match s with',
       '  | _ => (Error "nope")',
       '  end',
       'construct by always-fail',
@@ -1568,7 +1568,7 @@ describe('witness-and-discard (future: schema execution)', () => {
       '(ap (f : D) (a : D)) : D',
       'meta',
       'schema buggy-def =',
-      '  fun s => match s with',
+      '  fun outer => fun s => match s with',
       '  | [(f, [], ret),',
       '     (f_eq, [], eq ret ret f body)]',
       '      => (Ok [body, (refl body body)])',
@@ -1596,7 +1596,7 @@ describe('witness-and-discard (future: schema execution)', () => {
       '(ap (f : D) (a : D)) : D',
       'meta',
       'schema swapped-def =',
-      '  fun s => match s with',
+      '  fun outer => fun s => match s with',
       '  | [(f, [], ret),',
       '     (f_eq, [], eq ret ret f body)]',
       '      => (Ok [(refl ret body), body])',
@@ -1667,7 +1667,7 @@ describe('OL scope checking in schemas', () => {
   it('known OL name in schema expression is accepted', () => {
     const code = [
       'postulate', 'Sort : Sort', 'x : Sort',
-      'meta', 'schema foo = fun s => (Ok [x])',
+      'meta', 'schema foo = fun outer => fun s => (Ok [x])',
       'end',
     ].join('\n');
     expect(errors(code)).toEqual([]);
@@ -1676,7 +1676,7 @@ describe('OL scope checking in schemas', () => {
   it('unknown name in schema expression errors', () => {
     const code = [
       'postulate', 'Sort : Sort', 'x : Sort',
-      'meta', 'schema foo = fun s => (Ok [unknown_thing])',
+      'meta', 'schema foo = fun outer => fun s => (Ok [unknown_thing])',
       'end',
     ].join('\n');
     const msgs = errorMessages(code);
@@ -1685,14 +1685,14 @@ describe('OL scope checking in schemas', () => {
 
   it('Sort is always in scope in schemas', () => {
     expect(errors(
-      'meta\nschema foo = fun s => (Ok [Sort])\nend'
+      'meta\nschema foo = fun outer => fun s => (Ok [Sort])\nend'
     )).toEqual([]);
   });
 
   it('construct declarations not visible in preceding schema', () => {
     const code = [
       'postulate', 'Sort : Sort', 'x : Sort',
-      'meta', 'schema foo = fun s => (Ok [y])',
+      'meta', 'schema foo = fun outer => fun s => (Ok [y])',
       'construct by foo', 'y : x',
       'end',
     ].join('\n');
@@ -1704,7 +1704,7 @@ describe('OL scope checking in schemas', () => {
     const code = [
       'postulate', 'Sort : Sort', 'x : Sort',
       'meta',
-      'schema foo = fun s => match s with',
+      'schema foo = fun outer => fun s => match s with',
       '  | [(name, params, anything)] => (Ok [anything])',
       '  | _ => (Error "bad")',
       '  end',
@@ -1719,7 +1719,7 @@ describe('OL scope checking in schemas', () => {
       '(eq (A : U) (B : U) (a : A) (b : B)) : U',
       '(refl (A : U) (a : A)) : (eq A A a a)',
       'meta',
-      'schema foo = fun s => match s with',
+      'schema foo = fun outer => fun s => match s with',
       '  | [(f, [], eq ret ret f (refl ret body))]',
       '    => (Ok [body])',
       '  | _ => (Error "bad")',
@@ -1731,13 +1731,13 @@ describe('OL scope checking in schemas', () => {
 
   it('standalone schema without OL context is permissive', () => {
     // No postulate context → permissive mode, bare identifiers accepted as Term
-    expect(errors('meta\nschema foo = fun s => (Ok [x])\nend')).toEqual([]);
+    expect(errors('meta\nschema foo = fun outer => fun s => (Ok [x])\nend')).toEqual([]);
   });
 
   it('schema with OL context is strict', () => {
     // With postulate → strict mode, unknown identifiers error
     const msgs = errorMessages(
-      'postulate\nSort : Sort\ny : Sort\nmeta\nschema foo = fun s => (Ok [x])\nend'
+      'postulate\nSort : Sort\ny : Sort\nmeta\nschema foo = fun outer => fun s => (Ok [x])\nend'
     );
     expect(msgs).toContainEqual(expect.stringContaining('Unbound variable x'));
   });
@@ -1745,7 +1745,7 @@ describe('OL scope checking in schemas', () => {
   it('unbound in expression position errors when OL scope is set', () => {
     const code = [
       'postulate', 'Sort : Sort', 'x : Sort',
-      'meta', 'schema foo = fun s => (Ok [unbound])',
+      'meta', 'schema foo = fun outer => fun s => (Ok [unbound])',
       'end',
     ].join('\n');
     const msgs = errorMessages(code);
@@ -1769,7 +1769,7 @@ describe('ML holes', () => {
   });
 
   it('multiple holes each get separate info', () => {
-    const code = 'meta\nschema foo = fun s => match s with | _ => (Ok [?, ?]) end\nend';
+    const code = 'meta\nschema foo = fun outer => fun s => match s with | _ => (Ok [?, ?]) end\nend';
     const h = holes(code);
     expect(h.length).toBe(2);
   });
@@ -1778,7 +1778,7 @@ describe('ML holes', () => {
     const code = [
       'postulate', 'Sort : Sort', 'x : Sort',
       'meta',
-      'schema foo = fun s => match s with | _ => (Error ?) end',
+      'schema foo = fun outer => fun s => match s with | _ => (Error ?) end',
       'construct by foo', 'y : x',
       'end',
     ].join('\n');
@@ -1801,7 +1801,7 @@ describe('ML holes', () => {
 
   it('hole in fun parameter is accepted as wildcard', () => {
     expect(errors(
-      'meta\nschema foo = fun ? => (Ok [])\nend'
+      'meta\nschema foo = fun ? => fun ? => (Ok [])\nend'
     )).toEqual([]);
   });
 
@@ -1809,7 +1809,7 @@ describe('ML holes', () => {
     const code = [
       'postulate', 'Sort : Sort', 'x : Sort',
       'meta',
-      'schema foo = fun s => match s with',
+      'schema foo = fun outer => fun s => match s with',
       '  | _ => (Ok [(? x)])',
       '  end',
       'end',
@@ -1824,7 +1824,7 @@ describe('ML holes', () => {
   });
 
   it('hole as bare expression in Ok list has goal Term', () => {
-    const h = holes('meta\nschema foo = fun s => (Ok [?]) end\nend');
+    const h = holes('meta\nschema foo = fun outer => fun s => (Ok [?]) end\nend');
     expect(h.length).toBe(1);
     expect(printTerm(h[0][1].goal)).toBe('Term');
   });
@@ -1833,7 +1833,7 @@ describe('ML holes', () => {
     const code = [
       'postulate', 'Sort : Sort', 'x : Sort',
       'meta',
-      'schema foo = fun s => (Ok [(?)])',
+      'schema foo = fun outer => fun s => (Ok [(?)])',
       'end',
     ].join('\n');
     const h = holes(code);
@@ -1841,13 +1841,13 @@ describe('ML holes', () => {
   });
 
   it('hole in scrutinee of match has goal and context', () => {
-    const code = 'meta\nschema foo = fun s => match ? with | _ => (Ok []) end\nend';
+    const code = 'meta\nschema foo = fun outer => fun s => match ? with | _ => (Ok []) end\nend';
     const h = holes(code);
     expect(h.length).toBeGreaterThanOrEqual(1);
   });
 
   it('hole in condition of if has goal and context', () => {
-    const code = 'meta\nschema foo = fun s => (if ? then (Ok []) else (Error "bad") end)\nend';
+    const code = 'meta\nschema foo = fun outer => fun s => (if ? then (Ok []) else (Error "bad") end)\nend';
     const h = holes(code);
     expect(h.length).toBeGreaterThanOrEqual(1);
   });
@@ -1856,7 +1856,7 @@ describe('ML holes', () => {
     const code = [
       'postulate', 'Sort : Sort', 'x : Sort', 'y : x',
       'meta',
-      'schema foo = fun s => match s with',
+      'schema foo = fun outer => fun s => match s with',
       '  | [(name, params, ret)] => (Ok [?, (? ret)])',
       '  | _ => (Error ?)',
       '  end',
@@ -1880,7 +1880,7 @@ describe('ML total error localization', () => {
     const code = [
       'postulate', 'Sort : Sort', 'x : Sort',
       'meta',
-      'schema foo = fun s => match s with',
+      'schema foo = fun outer => fun s => match s with',
       '  | [] => "wrong1"',
       '  | _ => "wrong2"',
       '  end',
@@ -1895,7 +1895,7 @@ describe('ML total error localization', () => {
     const code = [
       'postulate', 'Sort : Sort', 'x : Sort',
       'meta',
-      'schema foo = fun s => (if s == s then "wrong1" else "wrong2" end)',
+      'schema foo = fun outer => fun s => (if s == s then "wrong1" else "wrong2" end)',
       'end',
     ].join('\n');
     const errs = errors(code);
@@ -1906,7 +1906,7 @@ describe('ML total error localization', () => {
     const code = [
       'postulate', 'Sort : Sort', 'x : Sort',
       'meta',
-      'schema foo = fun s => match s with',
+      'schema foo = fun outer => fun s => match s with',
       '  | _ => (Ok [?, badvar])',
       '  end',
       'end',
@@ -1924,7 +1924,7 @@ describe('ML total error localization', () => {
     const code = [
       'postulate', 'Sort : Sort', 'x : Sort',
       'meta',
-      'schema foo = fun s => match badvar with',
+      'schema foo = fun outer => fun s => match badvar with',
       '  | _ => "also wrong"',
       '  end',
       'end',
@@ -1938,7 +1938,7 @@ describe('ML total error localization', () => {
     const code = [
       'postulate', 'Sort : Sort', 'x : Sort',
       'meta',
-      'schema foo = fun s => (Ok [bad1, bad2, bad3])',
+      'schema foo = fun outer => fun s => (Ok [bad1, bad2, bad3])',
       'end',
     ].join('\n');
     const errs = errors(code);
@@ -1949,7 +1949,7 @@ describe('ML total error localization', () => {
     const code = [
       'postulate', 'Sort : Sort', 'x : Sort',
       'meta',
-      'schema foo = fun s => (Ok [x, badvar, x])',
+      'schema foo = fun outer => fun s => (Ok [x, badvar, x])',
       'end',
     ].join('\n');
     const errs = errors(code);
@@ -1967,7 +1967,7 @@ describe('context isolation', () => {
   it('schema bindings do NOT leak into construct', () => {
     const code = [
       'postulate', 'Sort : Sort', 'x : Sort',
-      'meta', 'schema foo = fun s => (Ok (foldl (fun acc => fun _ => ? :: acc) [] s))',
+      'meta', 'schema foo = fun outer => fun s => (Ok (foldl (fun acc => fun _ => ? :: acc) [] s))',
       'construct by foo',
       'y : foo',
       'end',
@@ -1981,7 +1981,7 @@ describe('context isolation', () => {
        `?`, so completeness fires; no Unbound-variable error confirms scope. */
     const code = [
       'postulate', 'Sort : Sort', 'x : Sort',
-      'meta', 'schema foo = fun s => (Ok (foldl (fun acc => fun _ => ? :: acc) [] s))',
+      'meta', 'schema foo = fun outer => fun s => (Ok (foldl (fun acc => fun _ => ? :: acc) [] s))',
       'construct by foo',
       'y : x', 'z : y', 'w : z',
       'end',
@@ -1991,7 +1991,7 @@ describe('context isolation', () => {
 
   it('standalone schema with no postulate context works', () => {
     expect(errors(
-      'meta\nschema foo = fun s => (Ok (foldl (fun acc => fun _ => ? :: acc) [] s))\nend'
+      'meta\nschema foo = fun outer => fun s => (Ok (foldl (fun acc => fun _ => ? :: acc) [] s))\nend'
     )).toEqual([]);
   });
 
@@ -2000,7 +2000,7 @@ describe('context isolation', () => {
   });
 
   it('empty construct body does not crash', () => {
-    expect(errors('postulate\nSort : Sort\nx : Sort\nmeta\nschema foo = fun s => (Ok (foldl (fun acc => fun _ => ? :: acc) [] s))\nconstruct by foo\nend')).toEqual([]);
+    expect(errors('postulate\nSort : Sort\nx : Sort\nmeta\nschema foo = fun outer => fun s => (Ok (foldl (fun acc => fun _ => ? :: acc) [] s))\nconstruct by foo\nend')).toEqual([]);
   });
 });
 
@@ -2012,7 +2012,7 @@ describe('fun morph parser', () => {
   it('fun inside schema does not capture block end', () => {
     const code = [
       'postulate', 'Sort : Sort', 'x : Sort', 'y : x',
-      'meta', 'schema foo = fun s => match s with | [(name, [], ret)] => (Ok [y]) | _ => (Error "bad") end',
+      'meta', 'schema foo = fun outer => fun s => match s with | [(name, [], ret)] => (Ok [y]) | _ => (Error "bad") end',
       'construct by foo', 'z : x',
       'end',
     ].join('\n');
@@ -2022,7 +2022,7 @@ describe('fun morph parser', () => {
   it('nested fun inside match works', () => {
     const code = [
       'meta',
-      'schema foo = fun s => match s with',
+      'schema foo = fun outer => fun s => match s with',
       '  | _ => fun x => (Ok []) end',
       'end',
     ].join('\n');
@@ -2033,7 +2033,7 @@ describe('fun morph parser', () => {
   it('match => inside fun body uses unmorphed =>', () => {
     const code = [
       'meta',
-      'schema foo = fun s => match s with | x => (Ok []) | _ => (Error "bad") end',
+      'schema foo = fun outer => fun s => match s with | x => (Ok []) | _ => (Error "bad") end',
       'end',
     ].join('\n');
     expect(errors(code)).toEqual([]);
@@ -2055,7 +2055,7 @@ describe('schema annotation edge cases', () => {
   it('correct annotation with wrong body reports only body error', () => {
     const code = [
       'meta',
-      'schema foo : ((List Signature) -> (Result (List Term))) = fun s => "wrong"',
+      'schema foo : ((List Signature) -> ((List Signature) -> (Result (List Term)))) = fun outer => fun s => "wrong"',
       'end',
     ].join('\n');
     const msgs = errorMessages(code);
@@ -2071,7 +2071,7 @@ describe('schema annotation edge cases', () => {
 
   it('Signature shorthand in annotation is accepted', () => {
     expect(errors(
-      'meta\nschema foo : ((List Signature) -> (Result (List Term))) = fun s => (Ok [])\nend'
+      'meta\nschema foo : ((List Signature) -> ((List Signature) -> (Result (List Term)))) = fun outer => fun s => (Ok [])\nend'
     )).toEqual([]);
   });
 
@@ -2089,7 +2089,7 @@ describe('shared namespace', () => {
   it('OL postulate names are visible inside schema body', () => {
     const code = [
       'postulate', 'Sort : Sort', 'U : Sort', '(eq (A : U) (B : U) (a : A) (b : B)) : U',
-      'meta', 'schema foo = fun s => (Ok [eq U U Sort Sort])',
+      'meta', 'schema foo = fun outer => fun s => (Ok [eq U U Sort Sort])',
       'end',
     ].join('\n');
     expect(errors(code)).toEqual([]);
@@ -2098,7 +2098,7 @@ describe('shared namespace', () => {
   it('OL name not in scope produces error in schema body', () => {
     const code = [
       'postulate', 'Sort : Sort', 'x : Sort',
-      'meta', 'schema foo = fun s => (Ok [nonexistent])',
+      'meta', 'schema foo = fun outer => fun s => (Ok [nonexistent])',
       'end',
     ].join('\n');
     const msgs = errorMessages(code);
@@ -2109,7 +2109,7 @@ describe('shared namespace', () => {
     const code = [
       'postulate', 'Sort : Sort', 'x : Sort',
       'meta',
-      'schema foo = fun s => match s with',
+      'schema foo = fun outer => fun s => match s with',
       '  | [(name, [], ret)] => (Ok [ret])',
       '  | _ => (Error "bad")',
       '  end',
@@ -2136,7 +2136,7 @@ describe('shared namespace', () => {
     const code = [
       'postulate', 'Sort : Sort', 'x : Sort',
       'meta',
-      'schema foo = fun s => match s with',
+      'schema foo = fun outer => fun s => match s with',
       '  | [(name, [], ret)] => (Ok [?])',
       '  | _ => (Error "bad")',
       '  end',
@@ -2159,7 +2159,7 @@ describe('shared namespace', () => {
       'D : U', 'K : D', 'S : D',
       '(ap (f : D) (a : D)) : D',
       'meta',
-      'schema definition = fun s => match s with',
+      'schema definition = fun outer => fun s => match s with',
       '  | [(f, [], ret), (f_eq, [], eq ret ret f body)]',
       '      => (Ok [body, (refl ret body)])',
       '  | _ => (Error "invalid")',
@@ -2333,7 +2333,7 @@ describe('typed-SK abstraction schema', () => {
       '  | _ => ((ap B (to A B) (K B A) e), (K-eq B A e x))',
       '  end',
       '  end',
-      'schema abstraction = fun s => match s with',
+      'schema abstraction = fun outer => fun s => match s with',
       '  | [(f, [], (to A B)), (_, [(x, _)], (eq _ _ (ap _ _ f x) body))] =>',
       '      let result = (abs x body A B) in',
       '      (Ok [(fst result), (snd result)])',
@@ -2502,7 +2502,7 @@ describe('construct-by chain parsing', () => {
       'D : U',
       'a : D',
       'meta',
-      'schema trivial = fun s => match s with | [(_, [], _)] => (Ok [a]) | _ => (Error "bad") end',
+      'schema trivial = fun outer => fun s => match s with | [(_, [], _)] => (Ok [a]) | _ => (Error "bad") end',
       'end',
       '',
       'construct by trivial',
@@ -2540,7 +2540,7 @@ describe('construct schema error ranges', () => {
       '(eq (A : U) (B : U) (a : A) (b : B)) : U',
       'N : U',
       'meta',
-      'schema s = fun xs => match xs with',
+      'schema s = fun outer => fun xs => match xs with',
       '  | [(f, [], (to A B)), (_, [(x, _)], (eq _ _ (ap _ _ f x) body))]',
       '    => (Ok [f, (ap A B f x)])',
       '  | _ => (Error "bad")',
@@ -2629,7 +2629,7 @@ describe('argument type well-formedness', () => {
       'Sort : Sort',
       'N : Sort',
       'meta',
-      'schema s = fun xs => match xs with | _ => (Error "bad") end',
+      'schema s = fun outer => fun xs => match xs with | _ => (Error "bad") end',
       'construct by s',
       '(f (a : undeclared)) : N',
       'end',
@@ -2683,7 +2683,7 @@ describe('self-reference in declarations', () => {
       'Sort : Sort',
       'N : Sort',
       'meta',
-      'schema s = fun xs => match xs with | _ => (Error "bad") end',
+      'schema s = fun outer => fun xs => match xs with | _ => (Error "bad") end',
       'construct by s',
       '(Rec (x : N)) : (Rec x)',
       'end',
@@ -2711,7 +2711,7 @@ describe('witness substitution in construct blocks', () => {
       'zero : N',
       'end',
       'meta',
-      'schema wrap = fun xs => match xs with',
+      'schema wrap = fun outer => fun xs => match xs with',
       '  | [(_, [], _), (_, [], _)] => (Ok [N, zero])',
       '  | _ => (Error "bad")',
       '  end',
@@ -2735,7 +2735,7 @@ describe('witness substitution in construct blocks', () => {
       'zero : N',
       'end',
       'meta',
-      'schema echo = fun xs => match xs with',
+      'schema echo = fun outer => fun xs => match xs with',
       '  | [(name1, [], _), (_, [], _)] => (Ok [zero, name1])',
       '  | _ => (Error "bad")',
       '  end',

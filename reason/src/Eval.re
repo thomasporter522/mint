@@ -296,6 +296,18 @@ and evalApp = (env: evalEnv, fVal: mlValue, args: list(ml)): evalResult =>
     | Ok(Val({value: Tuple([_, second, ..._]), _})) => Ok(Val(second))
     | Ok(_) => Err("snd: argument is not a tuple")
     }
+  /* apply head args — build Ap(head-term, args) with variadic arity */
+  | (Val({value: Identifier("apply"), _}), [headArg, argsArg]) =>
+    switch (evalExpr(env, headArg)) {
+    | Err(_) as e => e
+    | Ok(headVal) =>
+      switch (evalExpr(env, argsArg)) {
+      | Err(_) as e => e
+      | Ok(Val({value: List(items), _})) =>
+        Ok(Val(mk(Ap(termOf(headVal), items))))
+      | Ok(_) => Err("apply: second argument must be a list")
+      }
+    }
   /* foldl f init list — built-in left fold (curried: f acc item) */
   | (Val({value: Identifier("foldl"), _}), [fArg, initArg, listArg]) =>
     switch (evalExpr(env, fArg)) {
@@ -384,26 +396,41 @@ type schemaResult =
   | Witnesses(list(ml))
   | SchemaError(string);
 
-let runSchema = (schemaVal: mlValue, decls: list(decl)): schemaResult => {
-  let sigs = List.map(declToSignature, decls);
-  let sigListTerm = mk(List(sigs));
-  /* Apply the schema closure to the signature list */
-  switch (schemaVal) {
-  | Closure(closureEnv, pat, body) =>
-    let sigList = Val(sigListTerm);
-    switch (matchPat(StringMap.empty, pat, sigList)) {
+/* Apply a closure value to a single argument. Returns the resulting
+   mlValue (which may itself be another closure for a curried function). */
+let applyClosure =
+    (clos: mlValue, arg: ml): result(mlValue, string) =>
+  switch (clos) {
+  | Closure(envRef, pat, body) =>
+    switch (matchPat(StringMap.empty, pat, Val(arg))) {
+    | None => Error("Schema pattern match failed")
     | Some(bindings) =>
-      let bodyEnv = StringMap.union((_, _, v) => Some(v), closureEnv^, bindings);
-      switch (evalExpr(bodyEnv, body)) {
-      | Ok(Val({value: Ap({value: Identifier("Ok"), _}, [{value: List(witnesses), _}]), _})) =>
-        Witnesses(witnesses)
-      | Ok(Val({value: Ap({value: Identifier("Error"), _}, [{value: StringLit(msg), _}]), _})) =>
-        SchemaError(msg)
-      | Ok(_) => SchemaError("Schema returned invalid result")
-      | Err(msg) => SchemaError("Schema evaluation error: " ++ msg)
-      }
-    | None => SchemaError("Schema pattern match failed on signatures")
+      let env = StringMap.union((_, _, v) => Some(v), envRef^, bindings);
+      switch (evalExpr(env, body)) {
+      | Err(msg) => Error(msg)
+      | Ok(v) => Ok(v)
+      };
     }
-  | Val(_) => SchemaError("Schema is not a function")
+  | Val(_) => Error("Schema is not a function")
+  };
+
+let runSchema =
+    (schemaVal: mlValue, outerSigs: list(ml), decls: list(decl))
+    : schemaResult => {
+  let blockSigs = List.map(declToSignature, decls);
+  let outerSigList = mk(List(outerSigs));
+  let blockSigList = mk(List(blockSigs));
+  /* Curried application: schemaVal outer block. */
+  switch (applyClosure(schemaVal, outerSigList)) {
+  | Error(msg) => SchemaError(msg)
+  | Ok(inner) =>
+    switch (applyClosure(inner, blockSigList)) {
+    | Error(msg) => SchemaError("Schema evaluation error: " ++ msg)
+    | Ok(Val({value: Ap({value: Identifier("Ok"), _}, [{value: List(witnesses), _}]), _})) =>
+      Witnesses(witnesses)
+    | Ok(Val({value: Ap({value: Identifier("Error"), _}, [{value: StringLit(msg), _}]), _})) =>
+      SchemaError(msg)
+    | Ok(_) => SchemaError("Schema returned invalid result")
+    };
   };
 };

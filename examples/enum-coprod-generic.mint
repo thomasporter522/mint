@@ -98,7 +98,7 @@ build-proofs : (Term -> ((List Term) -> ((List Term) -> (List Term)))) = fun mva
   | _ => []
   end
 
-schema enum = fun s => match s with
+schema enum = fun outer => fun s => match s with
   | [(type-name, [], U),
      (case-name, [(mvar, U), (scrut, type-name)], mvar)]
     => (Ok [Void, (absurd mvar scrut)])

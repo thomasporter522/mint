@@ -10,7 +10,7 @@ level-eq (l1 l2 : level) : sort
 lmax-refl (l : level) : level-eq l l
 lmax-sym (l1 l2 : level) (eq : level-eq l1 l2) : level-eq l2 l1
 lmax-idem (l : level) : level-eq (lmax l l) l
--- level-coerce (l1 : level) (l2 : level) (eq : level-eq l1 l2) (e : Ul l1) : Ul l2
+level-coerce (l1 : level) (l2 : level) (eq : level-eq l1 l2) (e : Ul l1) : Ul l2
 -- equations
 eq (l : level) (A B : Ul l) (a : A) (b : B) : Ul l
 refl (l : level) (A : Ul l) (a : A) : eq a a
@@ -49,7 +49,7 @@ combinator-ap-eq (l1 l2 l3 : level)
   : eq (ap (ap (ap (combinator-ap ) f) g) x) (ap (ap f x) (ap g x))
 meta
   schema definition =
-    fun s => match s with
+    fun outer => fun s => match s with
     | [(a, [], _),
        (a_eq, [], eq _ _ _ a body)]
         => (Ok [body, (refl body)])
@@ -147,7 +147,7 @@ meta
        (combinator-constant-eq l2 l1 B A e x))
   end
   end
-    schema abstraction = fun s => match s with
+    schema abstraction = fun outer => fun s => match s with
   | [(f, [], (to l1 l2 A B)), (_, [(x, _)], (eq _ _ _ (ap _ _ _ _ f x) body))] =>
       let result = (abs x body l1 l2 A B) in
       (Ok [(fst result), (snd result)])
@@ -155,11 +155,11 @@ meta
   end
 postulate
 void : Ul lz
-void-case (Ml : level) (M : Ul Ml) (v : void) : M
+void-case (Ml : level) (M : Ul Ml) : to void M
 unit : Ul lz
-star : unit
-unit-rec (Ml : level) (M : Ul Ml) (star-case : M) (u : unit) : M
-unit-comp (Ml : level) (M : Ul Ml) (star-case : M) : eq (unit-rec star-case star) star-case
+trivial : unit
+unit-case (Ml : level) (M : Ul Ml) (star-case : M) : to unit M
+unit-comp (Ml : level) (M : Ul Ml) (star-case : M) : eq (ap (unit-case star-case) trivial) star-case
 sum (lA lB : level) (A : Ul lA) (B : Ul lB) : Ul (lmax lA lB)
 inl (lA lB : level) (A : Ul lA) (B : Ul lB) (a : A) : sum A B
 inr (lA lB : level) (A : Ul lA) (B : Ul lB) (b : B) : sum A B
@@ -168,6 +168,7 @@ sum-case-inl (lA lB lM : level) (A : Ul lA) (B : Ul lB) (M : Ul lM) (f : to A M)
 sum-case-inr (lA lB lM : level) (A : Ul lA) (B : Ul lB) (M : Ul lM) (f : to A M) (g : to B M) (b : B) : eq (ap (sum-case f g) (inr b)) (ap g b)
 N : Ul lz
 zero : N
+suc : to N N
 plus : to N (to N N)
 construct by abstraction
 double : to N N
@@ -187,8 +188,8 @@ meta
         let cur-level = (lmax lz prev-level) in
         let wrapped = (reverse (foldl (fun a => fun inj =>
         (inr lz prev-level unit prev-type inj) :: a) [] prev-injs)) in
-        ((inl lz prev-level unit prev-type star) :: wrapped, (cur-type, cur-level))
-    ) ([star], (unit, lz)) rest)
+        ((inl lz prev-level unit prev-type trivial) :: wrapped, (cur-type, cur-level))
+    ) ([trivial], (unit, lz)) rest)
     build-elim : (Term -> (Term -> ((List Term) -> ((List Term) -> Term)))) = fun lM => fun mvar => fun case-vars => fun rest =>
     let rev-cvs = (reverse case-vars) in
     match rev-cvs with
@@ -209,7 +210,7 @@ meta
         let new-arr = (sum-case lz prev-level lM unit prev-type mvar f prev-arr) in
         (new-arr, (cur-type, cur-level))
         ) (last-f, (unit, lz)) remaining-cvs))
-    | _ => star
+    | _ => trivial
     end
     build-proofs : (Term -> (Term -> ((List Term) -> ((List Term) -> (List Term))))) = fun lM => fun mvar => fun case-vars => fun rest =>
     let rev-cvs = (reverse case-vars) in
@@ -218,7 +219,7 @@ meta
         let last-f = (ap lM (lmax lz lM) mvar (to lz lM unit mvar)
                         (combinator-constant lM lz mvar unit)
                         last-cv) in
-        let last-proof = (combinator-constant-eq lM lz mvar unit last-cv star) in
+        let last-proof = (combinator-constant-eq lM lz mvar unit last-cv trivial) in
         let result = (foldl (fun acc => fun cv =>
         let prev-triples-and-elim = (fst acc) in
         let prev-triples = (fst prev-triples-and-elim) in
@@ -233,12 +234,12 @@ meta
                     cv) in
         let cur-elim = (sum-case lz prev-level lM unit prev-type mvar f prev-elim) in
         let inl-proof = (trans lM mvar mvar mvar
-            (ap cur-level lM cur-type mvar cur-elim (inl lz prev-level unit prev-type star))
-            (ap lz lM unit mvar f star)
+            (ap cur-level lM cur-type mvar cur-elim (inl lz prev-level unit prev-type trivial))
+            (ap lz lM unit mvar f trivial)
             cv
-            (sum-case-inl lz prev-level lM unit prev-type mvar f prev-elim star)
-            (combinator-constant-eq lM lz mvar unit cv star)) in
-        let inl-triple = (inl-proof, ((inl lz prev-level unit prev-type star), cv)) in
+            (sum-case-inl lz prev-level lM unit prev-type mvar f prev-elim trivial)
+            (combinator-constant-eq lM lz mvar unit cv trivial)) in
+        let inl-triple = (inl-proof, ((inl lz prev-level unit prev-type trivial), cv)) in
         let wrapped = (reverse-triples (foldl (fun a => fun triple =>
             let old-proof = (fst triple) in
             let old-inj = (fst (snd triple)) in
@@ -252,21 +253,21 @@ meta
             (new-proof, ((inr lz prev-level unit prev-type old-inj), old-tc)) :: a
         ) [] prev-triples)) in
         ((inl-triple :: wrapped, cur-elim), (cur-type, cur-level))
-        ) (([(last-proof, (star, last-cv))], last-f), (unit, lz)) remaining-cvs) in
+        ) (([(last-proof, (trivial, last-cv))], last-f), (unit, lz)) remaining-cvs) in
         (reverse (foldl (fun acc => fun triple =>
         (fst triple) :: acc) [] (fst (fst result))))
     | _ => []
     end
 
-    schema enum = fun s => match s with
+    schema enum = fun outer => fun s => match s with
     | [(type-name, [], (Ul lT)),
-        (case-name, [(_, level), (mvar, (Ul lM)), (scrut, type-name)], mvar)]
-        => (Ok [void, (void-case lM mvar scrut)])
+        (case-name, [(_, level), (mvar, (Ul lM))], (to _ _ type-name mvar))]
+        => (Ok [void, (void-case lM mvar)])
     | [(type-name, [], (Ul lT)),
         (ctor, [], type-name),
-        (case-name, [(_, level), (mvar, (Ul lM)), (tc, mvar), (scrut, type-name)], mvar),
+        (case-name, [(_, level), (mvar, (Ul lM)), (tc, mvar)], (to _ _ type-name mvar)),
         (eq-name, [(_, level), (mvar2, (Ul lM2)), (tc2, mvar2)], _)]
-        => (Ok [unit, star, (unit-rec lM mvar tc scrut), (unit-comp lM2 mvar2 tc2)])
+        => (Ok [unit, trivial, (unit-case lM mvar tc), (unit-comp lM2 mvar2 tc2)])
     | (type-name, [], (Ul lT)) :: all-rest =>
         let found-params = (foldl (fun acc => fun entry =>
         if (fst acc) == true then acc
@@ -275,17 +276,11 @@ meta
             | (_, params, _) => (true, params)
             end
         end
-        ) (false, [(star, star)]) all-rest) in
+        ) (false, [(trivial, trivial)]) all-rest) in
         match (snd found-params) with
-        | (_, level) :: (mvar, (Ul lM)) :: tc-and-scrut =>
-        let vars-info = (foldl (fun acc => fun p =>
-            if (fst (fst acc)) == true
-            then ((false, (snd (fst acc))), (fst p))
-            else ((false, (snd acc) :: (snd (fst acc))), (fst p))
-            end
-        ) ((true, []), star) tc-and-scrut) in
-        let rev-case-vars = (snd (fst vars-info)) in
-        let scrut = (snd vars-info) in
+        | (_, level) :: (mvar, (Ul lM)) :: tcs =>
+        let rev-case-vars = (foldl (fun acc => fun p =>
+            (fst p) :: acc) [] tcs) in
         let case-vars = (reverse rev-case-vars) in
         match case-vars with
         | _ :: rest-case-vars =>
@@ -295,41 +290,110 @@ meta
             let coprod-type = (fst coprod-pair) in
             let coprod-level = (snd coprod-pair) in
             let elim-arr = (build-elim lM mvar case-vars rest-case-vars) in
-            let case-witness = (ap coprod-level lM coprod-type mvar elim-arr scrut) in
             let proofs = (build-proofs lM mvar case-vars rest-case-vars) in
-            (Ok (concat [[coprod-type], injs, [case-witness], proofs]))
+            (Ok (concat [[coprod-type], injs, [elim-arr], proofs]))
         | _ => (Error "false ctors") end
         | _ => (Error "bad params") end
     | _ => (Error "unrecognized") end
 construct by enum
 falsity : Ul lz
-falsity-case (lM : level) (M : Ul lM) (scrutinee : falsity) : M
+falsity-case (lM : level) (M : Ul lM) : to falsity M
 construct by enum
 myunit : Ul lz
-trivial : myunit
-myunit-case (lM : level) (M : Ul lM) (trivial-case : M) (scrutinee : myunit) : M
-myunit-case-trivial (lM : level) (M : Ul lM) (trivial-case : M) : eq (myunit-case trivial-case trivial) trivial-case
+mytrivial : myunit
+myunit-case (lM : level) (M : Ul lM) (mytrivial-case : M) : to myunit M
+myunit-case-trivial (lM : level) (M : Ul lM) (mytrivial-case : M) : eq (ap (myunit-case mytrivial-case) mytrivial) mytrivial-case
 construct by enum
 bool : Ul (lmax lz lz)
 true : bool
 false : bool
-bool-case (lM : level) (M : Ul lM) (true-case false-case : M) (scrutinee : bool) : M
-bool-case-true (lM : level) (M : Ul lM) (true-case false-case : M) : eq (bool-case true-case false-case true) true-case
-bool-case-false (lM : level) (M : Ul lM) (true-case false-case : M) : eq (bool-case true-case false-case false) false-case
+bool-case (lM : level) (M : Ul lM) (true-case false-case : M) : to bool M
+bool-case-true (lM : level) (M : Ul lM) (true-case false-case : M) : eq (ap (bool-case true-case false-case) true) true-case
+bool-case-false (lM : level) (M : Ul lM) (true-case false-case : M) : eq (ap (bool-case true-case false-case) false) false-case
 construct by enum
 triple : Ul (lmax lz (lmax lz lz))
 a : triple
 b : triple
 c : triple
-triple-case (lM : level) (M : Ul lM) (a-case b-case c-case : M) (scrutinee : triple) : M
-triple-case-a (lM : level) (M : Ul lM) (a-case b-case c-case : M) : eq (triple-case a-case b-case c-case a) a-case
-triple-case-b (lM : level) (M : Ul lM) (a-case b-case c-case : M) : eq (triple-case a-case b-case c-case b) b-case
-triple-case-c (lM : level) (M : Ul lM) (a-case b-case c-case : M) : eq (triple-case a-case b-case c-case c) c-case
+triple-case (lM : level) (M : Ul lM) (a-case b-case c-case : M) : to triple M
+triple-case-a (lM : level) (M : Ul lM) (a-case b-case c-case : M) : eq (ap (triple-case a-case b-case c-case) a) a-case
+triple-case-b (lM : level) (M : Ul lM) (a-case b-case c-case : M) : eq (ap (triple-case a-case b-case c-case) b) b-case
+triple-case-c (lM : level) (M : Ul lM) (a-case b-case c-case : M) : eq (ap (triple-case a-case b-case c-case) c) c-case
 meta
---  todo: cases schema
---  should search through the context for an appropriate eliminator for the input type
--- construct by cases
--- not : to bool bool 
--- not-true : eq (ap not true) false
--- not-false : eq (ap not false) true
+    schema cases = fun outer => fun block => match block with
+    | (name, [], (to _ lM T M)) :: eq-decls =>
+        -- find the case-eliminator E for T in outer (works for any arity)
+        let e-info = (foldl (fun acc => fun entry =>
+            if (fst acc) == true then acc
+            else match entry with
+                | (E, (_, level) :: (m, (Ul _)) :: _, (to _ _ T-cand m)) =>
+                    if T-cand == T then (true, E) else acc end
+                | _ => acc
+                end
+            end
+        ) (false, trivial) outer) in
+        if (fst e-info) == false then (Error "cases: no eliminator for T")
+        else
+            let E = (snd e-info) in
+            -- pull case values from each equation in block order; we trust
+            -- the user lists equations in slot order
+            let cv-vals = (reverse (foldl (fun acc => fun decl =>
+                match decl with
+                | (_, [], (eq _ _ _ (ap _ _ _ _ name-cand _) v)) =>
+                    if name-cand == name then v :: acc else acc end
+                | _ => acc
+                end
+            ) [] eq-decls)) in
+            let args = (lM :: (M :: cv-vals)) in
+            let fn-witness = (apply E args) in
+            let comp-witnesses = (reverse (foldl (fun acc => fun decl =>
+                match decl with
+                | (_, [], (eq _ _ _ (ap _ _ _ _ name-cand ctor) _)) =>
+                    if name-cand == name then
+                        let comp-info = (foldl (fun a => fun entry =>
+                            if (fst a) == true then a
+                            else match entry with
+                                | (cn, params, (eq _ _ _ (ap _ _ _ _ inner-fn c-cand) _)) =>
+                                    -- the right comp rule applies E to its own
+                                    -- params (lM, M, then each case-var), so the
+                                    -- inner-fn must equal (apply E param-names)
+                                    let param-names = (reverse (foldl (fun a2 => fun p =>
+                                        (fst p) :: a2) [] params)) in
+                                    let expected-fn = (apply E param-names) in
+                                    if inner-fn == expected-fn && c-cand == ctor
+                                    then (true, cn) else a end
+                                | _ => a
+                                end
+                            end
+                        ) (false, trivial) outer) in
+                        if (fst comp-info) == true
+                        then (apply (snd comp-info) args) :: acc
+                        else acc
+                        end
+                    else acc
+                    end
+                | _ => acc
+                end
+            ) [] eq-decls)) in
+            (Ok (fn-witness :: comp-witnesses))
+        end
+    | _ => (Error "cases: expected (f : to T M) followed by equations") end
+construct by cases
+when-pigs-fly : to void (eq zero (ap suc zero)) 
+construct by cases
+not : to bool bool 
+not-true : eq (ap not true) false
+not-false : eq (ap not false) true
+construct by cases
+is-true : to bool (Ul lz) 
+is-true-true : eq (ap is-true true) unit
+is-true-false : eq (ap is-true false) void
+construct by cases
+rotate : to triple triple 
+rotate-a : eq (ap rotate a) b
+rotate-b : eq (ap rotate b) c
+rotate-c : eq (ap rotate c) a
+construct by abstraction
+not : to (Ul lz) (Ul (lmax lz lz))
+not-eq (p : Ul lz) : eq (ap not p) (to p void)
 end

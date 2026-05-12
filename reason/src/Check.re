@@ -667,8 +667,12 @@ let hasOLBindings = (ctx: context): bool =>
    Matches Eval.declToSignature: Tuple([name, List(params), retType]) */
 let signatureType = MTuple([MTerm, MList(MTuple([MTerm, MTerm])), MTerm]);
 
-/* Schema type: List Signature -> Result (List Term) */
-let schemaType = MArrow(MList(signatureType), MResult(MList(MTerm)));
+/* Schema type: a curried function taking the outer scope's signatures
+   first, then the construct block's signatures, returning a Result-list
+   of witnesses. The outer scope lets schemas introspect available
+   constructors (e.g. find a type's eliminator by inspecting types). */
+let schemaType =
+  MArrow(MList(signatureType), MArrow(MList(signatureType), MResult(MList(MTerm))));
 
 /* ML builtins context — every ML builtin must be declared here.
    No OL-level built-ins: the OL context begins empty, so Sort must be
@@ -683,6 +687,7 @@ let mlBuiltins: context =
       ("fst", Builtin("fst")),
       ("snd", Builtin("snd")),
       ("foldl", Builtin("foldl")),
+      ("apply", Builtin("apply")),
       /* Monomorphic builtins */
       ("true", ML(MBool)),
       ("false", ML(MBool)),
@@ -1360,6 +1365,13 @@ and inferExpr = (ctx: context, t: ml): staticInfo =>
       };
     setMlType(argInfo, retTy);
 
+  | Ap({value: Identifier("apply"), _}, [headArg, argsArg]) =>
+    /* apply : Term -> List Term -> Term. Builds Ap(head, args) at runtime,
+       letting schemas construct variadic-arity applications. */
+    let headInfo = checkExpr(ctx, MTerm, headArg);
+    let argsInfo = checkExpr(ctx, MList(MTerm), argsArg);
+    setMlType(mergeInfos(headInfo, argsInfo), MTerm);
+
   | Ap({value: Identifier("foldl"), _}, [fArg, initArg, listArg]) =>
     /* Custom typing for foldl: infer init and list types, check f for consistency */
     let initInfo = inferExpr(ctx, initArg);
@@ -1706,6 +1718,39 @@ and processMetaDefs =
    runConstructSchema so witnesses are checked against the elaborated
    form — same invariant as if the user had written the implicits
    explicitly. */
+/* Project every OL binding in `ctx` into a schema-input signature
+   (same shape as Eval.declToSignature produces for construct decls):
+   `(name, [(p, ty)...], retType)` as an ml tuple. ML / Builtin /
+   schema / metaLet bindings are skipped — they're not OL constructors. */
+let bindingsToSignatures = (ctx: context): list(ml) =>
+  StringMap.fold(
+    (name, b, acc) =>
+      switch (b) {
+      | OL(Some((params, retType)), _) =>
+        let nameTerm = mkML(Identifier(name));
+        let paramTuples =
+          List.map(
+            ((pname, ty)) => {
+              let pnameTerm =
+                switch (pname) {
+                | Some(n) => mkML(Identifier(n))
+                | None => mkML(Hole(Synthesized))
+                };
+              mkML(Tuple([pnameTerm, embedOL(ty)]));
+            },
+            params,
+          );
+        let sig_ =
+          mkML(
+            Tuple([nameTerm, mkML(List(paramTuples)), embedOL(retType)]),
+          );
+        [sig_, ...acc];
+      | _ => acc
+      },
+    ctx,
+    [],
+  );
+
 let elabDeclTypes =
     (declCtx: context, d: decl): (list((option(string), ol)), ol) =>
   switch (StringMap.find_opt(d.declName, declCtx)) {
@@ -1781,7 +1826,8 @@ let runConstructSchema =
       );
     switch (Eval.evalExpr(evalEnv, schemaBody)) {
     | Eval.Ok(schemaVal) =>
-      switch (Eval.runSchema(schemaVal, elaboratedDecls)) {
+      let outerSigs = bindingsToSignatures(ctx);
+      switch (Eval.runSchema(schemaVal, outerSigs, elaboratedDecls)) {
       | Eval.Witnesses(witnesses) =>
         if (List.length(witnesses) != List.length(elaboratedDecls)) {
           [mark(
@@ -1899,7 +1945,7 @@ let checkBlock = (ctx: context, block: block): (staticInfo, context) =>
     let mlCtx = StringMap.union((_, _, v) => Some(v), ctx, mlBuiltins);
     let (metaInfo, metaCtx, metaDefs) =
       processMetaDefs(emptyInfo, mlCtx, [], defs);
-    metaDefsRef := metaDefs;
+    metaDefsRef := metaDefsRef^ @ metaDefs;
     /* mlBuiltins (true, false, fst, snd, foldl, Ok, Error) are valid
        ML names inside this meta block but shouldn't leak into the
        outer context — they would shadow OL constructors a user
@@ -1941,6 +1987,7 @@ let checkBlock = (ctx: context, block: block): (staticInfo, context) =>
 let checkProgram = (ctx: context, prog: program): staticInfo => {
   /* Reset per-program state. */
   completenessRef := StringMap.empty;
+  metaDefsRef := [];
   let (info, _) =
     List.fold_left(
       ((accInfo, accCtx), block) => {
