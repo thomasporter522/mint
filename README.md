@@ -16,6 +16,8 @@ Mint's design is centered around the virtue of _objectivity_. That is, the seman
 
 ## Minor TODOs
 
-- Expose context to schemas
+- If implicit arguments are not solved, they shouldn't be expanded inline. 
 
-<!-- ## Bugs -->
+## Bugs
+
+- Unification conflicts should be localized to the hole, not the contracticting unification site.

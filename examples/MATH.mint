@@ -25,12 +25,16 @@ ap (l1 l2 : level) (A : Ul l1) (B : Ul l2) (f : to A B) (a : A) : B
 pi (l1 l2 : level) (A : Ul l1) (B : to A (Ul l2)) : Ul (lmax l1 l2)
 dap (l1 l2 : level) (A : Ul l1) (B : to A (Ul l2)) (f : pi A B) (a : A) : ap B a
 
-cong-ap (l1 l2 : level) 
-  (A : Ul l1) (B : Ul l2) 
-  (f : to A B) (g : to A B) 
-  (a : A) (b : A) 
-  (ef : eq f g) (ea : eq a b) 
+cong-ap (l1 l2 : level)
+  (A : Ul l1) (B : Ul l2)
+  (f : to A B) (g : to A B)
+  (a : A) (b : A)
+  (ef : eq f g) (ea : eq a b)
   : eq (ap f a) (ap g b)
+cong-to (l1 l2 : level)
+  (A1 A2 : Ul l1) (B1 B2 : Ul l2)
+  (eA : eq A1 A2) (eB : eq B1 B2)
+  : eq (to A1 B1) (to A2 B2)
 combinator-constant (l1 l2 : level) 
   (A : Ul l1) (B : Ul l2) 
   : to A (to B A)
@@ -47,6 +51,15 @@ combinator-ap-eq (l1 l2 l3 : level)
   (g : to A B) 
   (x : A) 
   : eq (ap (ap (ap (combinator-ap ) f) g) x) (ap (ap f x) (ap g x))
+combinator-to (l1 l2 l3 : level) 
+  (A : Ul l1)
+  : to (to A (Ul l2)) (to (to A (Ul l3)) (to A (Ul (lmax l2 l3))))
+combinator-to-eq (l1 l2 l3 : level) 
+  (A : Ul l1)
+  (t1 : to A (Ul l2))
+  (t2 : to A (Ul l3)) 
+  (x : A) 
+  : eq (ap (ap (ap (combinator-to ) t1) t2) x) (to (ap t1 x) (ap t2 x))
 meta
   schema definition =
     fun outer => fun s => match s with
@@ -64,48 +77,10 @@ U-eq : eq U (cast (sym U1-eq) (Ul lz))
 meta
     abs = fun x => fun e => fun l1 => fun l2 => fun A => fun B =>
   if e == x
-  then (
-      -- I = S K K, witness for [x]x at type A (level l1)
-      (ap (lmax l1 (lmax l1 l1)) (lmax l1 l1)
-        (to l1 (lmax l1 l1) A (to l1 l1 A A))
-        (to l1 l1 A A)
-        (ap (lmax l1 (lmax (lmax l1 l1) l1)) (lmax (lmax l1 (lmax l1 l1)) (lmax l1 l1))
-          (to l1 (lmax (lmax l1 l1) l1) A (to (lmax l1 l1) l1 (to l1 l1 A A) A))
-          (to (lmax l1 (lmax l1 l1)) (lmax l1 l1) (to l1 (lmax l1 l1) A (to l1 l1 A A)) (to l1 l1 A A))
-          (combinator-ap l1 (lmax l1 l1) l1 A (to l1 l1 A A) A)
-          (combinator-constant l1 (lmax l1 l1) A (to l1 l1 A A)))
-        (combinator-constant l1 l1 A A))
-    ,
-      (trans l1 A A A
-        (ap l1 l1 A A
-          (ap (lmax l1 (lmax l1 l1)) (lmax l1 l1)
-            (to l1 (lmax l1 l1) A (to l1 l1 A A))
-            (to l1 l1 A A)
-            (ap (lmax l1 (lmax (lmax l1 l1) l1)) (lmax (lmax l1 (lmax l1 l1)) (lmax l1 l1))
-              (to l1 (lmax (lmax l1 l1) l1) A (to (lmax l1 l1) l1 (to l1 l1 A A) A))
-              (to (lmax l1 (lmax l1 l1)) (lmax l1 l1) (to l1 (lmax l1 l1) A (to l1 l1 A A)) (to l1 l1 A A))
-              (combinator-ap l1 (lmax l1 l1) l1 A (to l1 l1 A A) A)
-              (combinator-constant l1 (lmax l1 l1) A (to l1 l1 A A)))
-            (combinator-constant l1 l1 A A))
-          x)
-        (ap (lmax l1 l1) l1 (to l1 l1 A A) A
-          (ap l1 (lmax (lmax l1 l1) l1) A (to (lmax l1 l1) l1 (to l1 l1 A A) A)
-            (combinator-constant l1 (lmax l1 l1) A (to l1 l1 A A))
-            x)
-          (ap l1 (lmax l1 l1) A (to l1 l1 A A)
-            (combinator-constant l1 l1 A A)
-            x))
-        x
-        (combinator-ap-eq l1 (lmax l1 l1) l1 A (to l1 l1 A A) A
-          (combinator-constant l1 (lmax l1 l1) A (to l1 l1 A A))
-          (combinator-constant l1 l1 A A)
-          x)
-        (combinator-constant-eq l1 (lmax l1 l1) A (to l1 l1 A A)
-          x
-          (ap l1 (lmax l1 l1) A (to l1 l1 A A)
-            (combinator-constant l1 l1 A A)
-            x)))
-    )
+  then 
+    let witness = (ap (ap (combinator-ap) (combinator-constant)) (combinator-constant l1 l1 A A)) in
+    let proof = (trans (combinator-ap-eq) (combinator-constant-eq)) in
+    (witness, proof)
   else match e with
   | (ap lp1 lp2 Aprime Bprime f a) =>
       let f-res = (abs x f l1 (lmax lp1 l2) A (to lp1 l2 Aprime B)) in
@@ -114,37 +89,23 @@ meta
       let fp = (snd f-res) in
       let aw = (fst a-res) in
       let ap2 = (snd a-res) in
-      let witness =
-        (ap (lmax l1 lp1) (lmax l1 l2)
-          (to l1 lp1 A Aprime)
-          (to l1 l2 A B)
-          (ap (lmax l1 (lmax lp1 l2)) (lmax (lmax l1 lp1) (lmax l1 l2))
-            (to l1 (lmax lp1 l2) A (to lp1 l2 Aprime B))
-            (to (lmax l1 lp1) (lmax l1 l2) (to l1 lp1 A Aprime) (to l1 l2 A B))
-            (combinator-ap l1 lp1 l2 A Aprime B)
-            fw)
-          aw) in
-      let proof =
-        (trans l2 B B B
-          (ap l1 l2 A B witness x)
-          (ap lp1 l2 Aprime B
-            (ap l1 (lmax lp1 l2) A (to lp1 l2 Aprime B) fw x)
-            (ap l1 lp1 A Aprime aw x))
-          (ap lp1 l2 Aprime B f a)
-          (combinator-ap-eq l1 lp1 l2 A Aprime B fw aw x)
-          (cong-ap lp1 l2 Aprime B
-            (ap l1 (lmax lp1 l2) A (to lp1 l2 Aprime B) fw x)
-            f
-            (ap l1 lp1 A Aprime aw x)
-            a
-            fp
-            ap2)) in
+      let witness = (ap (ap (combinator-ap) fw) aw) in
+      let proof = (trans (combinator-ap-eq) (cong-ap fp ap2)) in
+      (witness, proof)
+  | (to lp1 lp2 e1 e2) =>
+      -- [x](to e1 e2) at type Ul (lmax lp1 lp2): combinator-to A (λx.e1) (λx.e2),
+      -- proof via combinator-to-eq + cong-to over the two recursive proofs.
+      let e1-res = (abs x e1 l1 (ls lp1) A (Ul lp1)) in
+      let e2-res = (abs x e2 l1 (ls lp2) A (Ul lp2)) in
+      let t1 = (fst e1-res) in
+      let t1-proof = (snd e1-res) in
+      let t2 = (fst e2-res) in
+      let t2-proof = (snd e2-res) in
+      let witness = (ap (ap (combinator-to) t1) t2) in
+      let proof = (trans (combinator-to-eq) (cong-to t1-proof t2-proof)) in
       (witness, proof)
   | _ =>
-      ((ap l2 (lmax l1 l2) B (to l1 l2 A B)
-          (combinator-constant l2 l1 B A)
-          e),
-       (combinator-constant-eq l2 l1 B A e x))
+      ((ap (combinator-constant) e), (combinator-constant-eq))
   end
   end
     schema abstraction = fun outer => fun s => match s with
@@ -394,6 +355,6 @@ rotate-a : eq (ap rotate a) b
 rotate-b : eq (ap rotate b) c
 rotate-c : eq (ap rotate c) a
 construct by abstraction
-not : to (Ul lz) (Ul (lmax lz lz))
-not-eq (p : Ul lz) : eq (ap not p) (to p void)
+lnot : to (Ul lz) (Ul (lmax lz lz))
+lnot-eq (p : Ul lz) : eq (ap lnot p) (to p void)
 end

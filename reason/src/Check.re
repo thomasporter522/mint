@@ -1862,14 +1862,25 @@ let runConstructSchema =
                 checkOLTerm(emptyElabState, witnessCtx, Expression(Some(expectedType)), witnessOL);
               let witnessInfo = resolveHoleGoals(witnessState.solutions, witnessInfo);
               let witnessInfo = resolveTentatives(witnessState.solutions, witnessInfo);
+              /* The "elaborated witness" — what the user-written ML term
+                 actually denotes after elaboration: implicits inserted,
+                 metas solved. This is what later decls should see when
+                 they refer to this name, so omissions in the as-written
+                 form (e.g. an under-applied `ap`) don't propagate as
+                 arity mismatches into subsequent witness checks. */
+              let elabWitnessOL =
+                switch (witnessInfo.elaborated) {
+                | Some(e) => zonk(witnessState.solutions, e)
+                | None => zonk(witnessState.solutions, witnessOL)
+                };
               let paramNames = List.map((p: param) => p.paramName, d.params);
               let newSubstEnv =
-                StringMap.add(d.declName, (paramNames, witness), substEnv);
+                StringMap.add(d.declName, (paramNames, embedOL(elabWitnessOL)), substEnv);
               /* Witness contribution to completeness: hole-free witness
                  term, no errors, no registered holes, and every external
                  ref in the witness term is itself complete. AND with the
                  type-level completeness already in the ref. */
-              let zonkedWitnessOL = zonk(witnessState.solutions, witnessOL);
+              let zonkedWitnessOL = elabWitnessOL;
               let witnessRefs = olCollectRefs(zonkedWitnessOL, ctx);
               let witnessOK =
                 !Error.hasRealErrors(witnessInfo.errors)
