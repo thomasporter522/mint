@@ -35,31 +35,48 @@ refl (l : level) (A : Ul l) (a : A) : eq a a
 -- doesn't type check because of heterogeneity
 -- eq-elim (l1 l2 pl : level) (A : Ul l1) (B : Ul l2) (a : A) (b : B) 
 --     (e : eq a b)
---     (pB : to A (Ul pl))
---     (p : pi A pB)
---     (pa : dap p a)
---     : dap p b
-eq-prop (l pl : level) (A : Ul l) (a b : A)
+--     (p : to A (Ul pl))
+--     (pa : ap p a)
+--     : ap p b
+subst (l pl : level) (A : Ul l) (a b : A)
     (e : eq a b)
-    (pB : to A (Ul pl))
-    (p : dto A pB)
-    (pa : dap p a)
-    : dap p b
+    (p : to A (Ul pl))
+    (pa : ap p a)
+    : ap p b
+
+cast (l : level) (A B : Ul l) (e : eq A B) (a : A) : B
+
 
 abs-const (l1 l2 : level) 
-  (A : Ul l1) (B : Ul l2) 
-  : to A (to B A)
+  (X : Ul l1) (A : Ul l2) 
+  : to A (to X A)
 abs-const-eq (l1 l2 : level) 
-  (A : Ul l1) (B : Ul l2) 
-  (x : A) (y : B) 
-  : eq (ap (ap (abs-const) x) y) x
+  (X : Ul l1) (A : Ul l2) 
+  (x : X) (a : A) 
+  : eq (ap (ap (abs-const) a) x) a
 abs-ident (l: level) 
-  (A : Ul l)
-  : to A A
+  (X : Ul l)
+  : to X X
 abs-ident-eq (l : level) 
-  (A : Ul l)
-  (x : A)
+  (X : Ul l)
+  (x : X)
   : eq (ap (abs-ident) x) x
+abs-ap (l1 l2 l3 : level) 
+  (X : Ul l1) (A : Ul l2) (B : Ul l3) 
+  : to (to X (to A B)) (to (to X A) (to X B))
+abs-ap-eq (l1 l2 l3 : level) 
+  (X : Ul l1) (A : Ul l2) (B : Ul l3) 
+  (f : to X (to A B)) 
+  (a : to X A) 
+  (x : X) 
+  : eq (ap (ap (ap (abs-ap) f) a) x) (ap (ap f x) (ap a x))
+abs-eq (l1 l2 l3 : level) 
+  (X : Ul l1)
+  : to (to X (Ul l2)) (to (to X (Ul l3)) (to X (Ul (lmax l2 l3))))
+abs-eq-eq (l1 l2 l3 : level) 
+  (X : Ul l1) (A : to X (Ul l2)) (B : to X (Ul l3)) 
+  (x : X) 
+  : eq (ap (ap (ap (abs-eq) A) B) x) (eq (ap A x) (ap B x))
 
 
 dabs-ident (l: level) 
@@ -79,10 +96,9 @@ meta
     end
 -- insert any constructions (not postulates) you wish
 construct by definition
-cast (l : level) (A B : Ul l) (e : eq A B) (a : A) : B
-cast-pf (l : level) (A B : Ul l) (e : eq A B) (a : A) : eq B (cast e a) 
-    (eq-prop dabs-ident a)
-
--- sym (l1 l2 : level) (A : Ul l1) (B : Ul l2) (a : A) (b : B) (e : eq a b) : eq b a
--- sym-eq (l1 l2 : level) (A : Ul l1) (B : Ul l2) (a : A) (b : B) (e : eq a b) : eq (eq l2 l1 B A b a) (sym e)
---     ?
+sym (l1 l2 : level) (A : Ul l1) (B : Ul l2) (a : A) (b : B) (e : eq a b) : eq b a
+sym-eq (l1 l2 : level) (A : Ul l1) (B : Ul l2) (a : A) (b : B) (e : eq a b) : eq (eq l2 l1 B A b a) (sym e)
+    (ap (ap (abs-eq ) (abs-ident A)) (abs-const a))
+    
+    -- (cast ?  
+    -- (subst e (ap (ap (abs-eq ) (abs-ident)) (abs-const a)) (refl a)))
