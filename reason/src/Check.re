@@ -37,12 +37,22 @@ type elabState = {
      `Ul ?l` and B has type `Ul l` propagates to `?l := l`). */
   metaTypes: IntMap.t(ol),
   nextMetaId: int,
+  /* Where the elaborator inserted ghost args, anchored at the term
+     former. Each entry is (head's source meta, list of inserted ghost
+     meta IDs). At the decl boundary we check which IDs remain unsolved
+     and emit one yellow squiggle per head whose ghost run isn't fully
+     determined. Recording AT INSERTION POINT (not after-the-fact via
+     AST walk) means we don't have to distinguish source positions from
+     substituted-in foreign positions — the state is per-decl, so every
+     entry here is from this decl's own elaboration. */
+  ghostInsertions: list((meta, list(int))),
 };
 
 let emptyElabState: elabState = {
   solutions: IntMap.empty,
   metaTypes: IntMap.empty,
   nextMetaId: 0,
+  ghostInsertions: [],
 };
 
 /* Allocate a fresh meta as a ghost subterm at the given source meta,
@@ -802,26 +812,38 @@ let resolveHoleGoals =
    spines. Warnings are non-idempotent across re-elaboration (round 1
    inserts ghosts; round 2 sees the user-`?` they printed back to,
    which don't carry ghost=true) but errors stay idempotent. */
-let rec collectGhostWarnings = (t: ol): list(error) => {
-  let isUnsolvedGhost = (a: ol): bool =>
-    switch (a.value) {
-    | OLHole(_) | OLMeta(_) => a.meta.ghost
+/* Emit one warning per term-former whose elaborator-inserted ghost
+   args didn't all get solved. Reads `state.ghostInsertions`, which is
+   appended to at each insertion site (OLAp underapplication and bare
+   identifier-with-params), pairing the head's source meta with the IDs
+   of the inserted ghost metas. At the decl boundary we check which IDs
+   remain unsolved (their `zonk` still surfaces as OLMeta) and emit a
+   warning anchored at the head.
+
+   Why drive this off recorded insertions rather than walking the
+   elaborated AST: elaboration is per-decl (`emptyElabState` per
+   `checkDeclLine`), so every entry in `ghostInsertions` is from THIS
+   decl's elaboration. Walking the post-elaboration AST would mix in
+   substituted-in fragments from other decls' bindings (with foreign
+   source positions) and require ad-hoc filtering to suppress them. */
+let collectGhostWarnings = (state: elabState): list(error) => {
+  let isUnsolved = (id: int) => {
+    let probe: ol = {value: OLMeta(id), meta: defaultMeta};
+    switch (zonk(state.solutions, probe).value) {
+    | OLMeta(_) => true
     | _ => false
     };
-  switch (t.value) {
-  | OLAp(f, args) =>
-    let here =
-      List.exists(isUnsolvedGhost, args)
-        ? [Error.warn(
-            "Implicit arguments not fully solved",
-            f.meta.start, f.meta.end_,
-          )]
-        : [];
-    let head = collectGhostWarnings(f);
-    let inner = List.concat_map(collectGhostWarnings, args);
-    here @ head @ inner;
-  | _ => []
   };
+  List.filter_map(
+    ((headMeta, ids): (meta, list(int))) =>
+      List.exists(isUnsolved, ids)
+        ? Some(Error.warn(
+            "Implicit arguments not fully solved",
+            headMeta.start, headMeta.end_,
+          ))
+        : None,
+    state.ghostInsertions,
+  );
 };
 
 /* Zonk a term and replace any surviving (unsolved) metas with user
@@ -958,16 +980,14 @@ let rec checkDeclLine = (ctx: context, d: decl): staticInfo => {
   let bindings = StringMap.singleton(d.declName, externalBinding);
   /* Warn on incomplete inferred-arg runs. Each term former whose
      elaborator-inserted ghosts didn't all get solved gets a yellow
-     squiggle at the head. The walker checks ghost-flagged holes that
-     survived zonking. Warnings — not errors — so idempotence on
-     errors still holds: re-elaborating a printed `?` allocates a
-     user meta with ghost=false, which the walker doesn't flag. */
-  let ghostWarns =
-    collectGhostWarnings(externalRetType)
-    @ List.concat_map(
-        ((_, ty)) => collectGhostWarnings(ty),
-        externalParamPairs,
-      );
+     squiggle at the head. Pulled from this decl's elabState — every
+     insertion site is recorded there at allocation, so the warning
+     localization is exact (and doesn't require walking the AST or
+     filtering foreign source positions). Warnings — not errors — so
+     idempotence on errors still holds: re-elaborating a printed `?`
+     allocates a user-hole meta (with ghost=false; the insertion isn't
+     recorded in ghostInsertions), which the walker doesn't flag. */
+  let ghostWarns = collectGhostWarnings(finalState);
   let resolved = withErrors(resolved, ghostWarns);
   /* Per-decl completeness (type-level only; witness-level is added by
      runConstructSchema for construct decls). A decl is type-complete iff
@@ -1049,6 +1069,22 @@ and checkOLTerm =
             ([], emptyEnv, state),
             params,
           );
+        /* Record this insertion site so we can warn at the decl boundary
+           if any of these ghosts remain unsolved. Anchored at the head
+           identifier `t`. */
+        let ghostIds =
+          List.filter_map(
+            (g: ol) =>
+              switch (g.value) {
+              | OLMeta(id) => Some(id)
+              | _ => None
+              },
+            ghosts,
+          );
+        let state2 = {
+          ...state2,
+          ghostInsertions: state2.ghostInsertions @ [(t.meta, ghostIds)],
+        };
         let resolvedRet = resolve(env, retType);
         let inferred = Some(([], resolvedRet));
         let (subErrors, state3) =
@@ -1191,6 +1227,21 @@ and checkOLTerm =
             List.init(totalSlots, i => i),
           );
         let effectiveArgs = elabArgs;
+        /* Record inserted ghosts (if any) so the decl boundary can warn
+           if any remain unsolved. Anchored at the head identifier f.
+           The ghosts are the first `nMissing` entries of elabArgs. */
+        let ghostIds =
+          List.filteri((i, _) => i < nMissing, elabArgs)
+          |> List.filter_map((g: ol) =>
+               switch (g.value) {
+               | OLMeta(id) => Some(id)
+               | _ => None
+               },
+             );
+        let state3 =
+          nMissing > 0
+            ? {...state3, ghostInsertions: state3.ghostInsertions @ [(f.meta, ghostIds)]}
+            : state3;
         let info = List.fold_left(mergeInfos, funInfo, argInfos);
         let resolvedRet = resolve(finalEnv, retType);
         let inferred = Some(([], resolvedRet));

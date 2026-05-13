@@ -19,32 +19,19 @@ dap (l1 l2 : level) (A : Ul l1) (B : to A (Ul l2)) (f : pi A B) (a : A) : ap B a
 -- equations
 eq (l1 l2 : level) (A : Ul l1) (B : Ul l2) (a : A) (b : B) : Ul (lmax l1 l2)
 refl (l : level) (A : Ul l) (a : A) : eq a a
-meta
-  schema definition =
-    fun outer => fun s => match s with
-    | [(a, [], _),
-       (a_eq, [], eq _ _ _ _ a body)]
-        => (Ok [body, (refl)])
-    | _ => (Error "invalid definition")
-    end
-postulate
-cast (l : level) (A B : Ul l) (e : eq A B) (a : A) : B
--- eq-ind-M-B (l Ml : level) (A : Ul l) (a : A) : to A (Ul l)
--- eq-ind-M-B-eq (l Ml : level) (A : Ul l) (a b : A) : eq (ap (eq-ind-M-B Ml A a) b) (to (eq a b) (Ul Ml)) 
--- eq-ind (l Ml : level) (A : Ul l) (a : A)
---   (M : pi A (eq-ind-M-B Ml A a))
---   -- (base : ap (dap M a) ?)
---   : dap M ?
-sym (l : level) (A B : Ul l) (a : A) (b : B) (e : eq a b) : eq b a
-trans (l : level) (A B C : Ul l) (a : A) (b : B) (c : C) (e1 : eq a b) (e2 : eq b c) : eq a c
+cast (l : level) (A B : Ul l) : to (eq A B) (to A B)
+-- todo: use a unified eq eliminator
+sym (l : level) (A B : Ul l) (a : A) (b : B) : to (eq a b) (eq b a)
+trans (l : level) (A B C : Ul l) (a : A) (b : B) (c : C) : to (eq a b) (to (eq b c) (eq a c))
 Ul-cong (l1 l2 : level) (my-eq : level-eq l1 l2) : (eq ? (Ul (ls l1)) (Ul (ls l2)) (Ul l1) (Ul l2))
 
 cong-ap (l1 l2 : level)
   (A : Ul l1) (B : Ul l2)
   (f : to A B) (g : to A B)
-  (a : A) (b : A)
-  (ef : eq f g) (ea : eq a b)
-  : eq (ap f a) (ap g b)
+  (a : A) (b : A) 
+  : to (eq f g) 
+    (to (eq a b) 
+      (eq (ap f a) (ap g b)))
 cong-to (l1 l2 : level)
   (A1 A2 : Ul l1) (B1 B2 : Ul l2)
   (eA : eq A1 A2) (eB : eq B1 B2)
@@ -74,18 +61,26 @@ combinator-to-eq (l1 l2 l3 : level)
   (t2 : to A (Ul l3)) 
   (x : A) 
   : eq (ap (ap (ap (combinator-to ) t1) t2) x) (to (ap t1 x) (ap t2 x))
+meta
+  schema definition =
+    fun outer => fun s => match s with
+    | [(a, [], _),
+       (a_eq, [], eq _ _ _ _ a body)]
+        => (Ok [body, (refl)])
+    | _ => (Error "invalid definition")
+    end
 construct by definition
 U1 : Ul (ls (ls lz))
 U1-eq : eq U1 (Ul (ls lz))
 construct by definition
 U : U1
-U-eq : eq U (cast (sym U1-eq) (Ul lz))
+U-eq : eq U (ap (ap cast (ap sym U1-eq)) (Ul lz))
 meta
     abs = fun x => fun e => fun l1 => fun l2 => fun A => fun B =>
   if e == x
   then 
     let witness = (ap (ap (combinator-ap) (combinator-constant)) (combinator-constant l1 l1 A A)) in
-    let proof = (trans (combinator-ap-eq) (combinator-constant-eq)) in
+    let proof = (ap (ap trans (combinator-ap-eq)) (combinator-constant-eq)) in
     (witness, proof)
   else match e with
   | (ap lp1 lp2 Aprime Bprime f a) =>
@@ -96,7 +91,7 @@ meta
       let aw = (fst a-res) in
       let ap2 = (snd a-res) in
       let witness = (ap (ap (combinator-ap) fw) aw) in
-      let proof = (trans (combinator-ap-eq) (cong-ap fp ap2)) in
+      let proof = (ap (ap trans (combinator-ap-eq)) (ap (ap cong-ap fp) ap2)) in
       (witness, proof)
   | (to lp1 lp2 e1 e2) =>
       -- [x](to e1 e2) at type Ul (lmax lp1 lp2): combinator-to A (λx.e1) (λx.e2),
@@ -108,7 +103,7 @@ meta
       let t2 = (fst e2-res) in
       let t2-proof = (snd e2-res) in
       let witness = (ap (ap (combinator-to) t1) t2) in
-      let proof = (trans (combinator-to-eq) (cong-to t1-proof t2-proof)) in
+      let proof = (ap (ap trans (combinator-to-eq)) (cong-to t1-proof t2-proof)) in
       (witness, proof)
   | _ =>
       ((ap (combinator-constant) e), (combinator-constant-eq))
@@ -225,22 +220,22 @@ meta
                     (combinator-constant lM lz mvar unit)
                     cv) in
         let cur-elim = (sum-case lz prev-level lM unit prev-type mvar f prev-elim) in
-        let inl-proof = (trans lM mvar mvar mvar
+        let inl-proof = (ap (ap (trans lM mvar mvar mvar
             (ap cur-level lM cur-type mvar cur-elim (inl lz prev-level unit prev-type trivial))
             (ap lz lM unit mvar f trivial)
-            cv
-            (sum-case-inl lz prev-level lM unit prev-type mvar f prev-elim trivial)
+            cv)
+            (sum-case-inl lz prev-level lM unit prev-type mvar f prev-elim trivial))
             (combinator-constant-eq lM lz mvar unit cv trivial)) in
         let inl-triple = (inl-proof, ((inl lz prev-level unit prev-type trivial), cv)) in
         let wrapped = (reverse-triples (foldl (fun a => fun triple =>
             let old-proof = (fst triple) in
             let old-inj = (fst (snd triple)) in
             let old-tc = (snd (snd triple)) in
-            let new-proof = (trans lM mvar mvar mvar
+            let new-proof = (ap (ap (trans lM mvar mvar mvar
             (ap cur-level lM cur-type mvar cur-elim (inr lz prev-level unit prev-type old-inj))
             (ap prev-level lM prev-type mvar prev-elim old-inj)
-            old-tc
-            (sum-case-inr lz prev-level lM unit prev-type mvar f prev-elim old-inj)
+            old-tc)
+            (sum-case-inr lz prev-level lM unit prev-type mvar f prev-elim old-inj))
             old-proof) in
             (new-proof, ((inr lz prev-level unit prev-type old-inj), old-tc)) :: a
         ) [] prev-triples)) in
@@ -390,9 +385,12 @@ lnot (l : level) : to (Ul l) (Ul (lmax l lz))
 lnot-eq (l : level) (p : Ul l) : eq (ap lnot p) (to p void)
 construct by abstraction
 true-neq-false-abs : to (eq true false) void
-true-neq-false-abs-eq (p : eq true false) : eq void void (ap true-neq-false-abs p) 
-  (cast unit void (trans (sym is-true-true) (trans (cong-ap refl p) is-true-false)) trivial)
+true-neq-false-abs-eq (p : eq true false) : eq void void (ap true-neq-false-abs p)
+  (ap (ap cast (ap (ap trans (ap sym is-true-true)) (ap (ap trans (ap (ap cong-ap refl) p)) is-true-false))) trivial)
 construct by definition
 true-neq-false : ap (lnot) (eq true false)
-true-neq-false-eq : eq true-neq-false (cast (sym lnot-eq) true-neq-false-abs)
+true-neq-false-eq : eq true-neq-false (ap (ap cast (ap sym lnot-eq)) true-neq-false-abs)
+-- construct by quotient
+-- Z : Ul lz 
+-- class : to ()
 end

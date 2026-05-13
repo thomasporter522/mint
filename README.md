@@ -14,6 +14,7 @@ Mint's design is centered around the virtue of _objectivity_. That is, the seman
 - (?) Move to typed abstract binding trees rather than typed abstract syntax trees.
 - Elaboration should be persisted in the buffer (maybe folded and gray), not just ghostly.
 - Inserted code can be hierarchically marked for progressive unfolding.  
+- User-written construct-block completion procedures.
 - User-written conversion and normalization procedures.
 - A module-like system for reusable, nested hypothetical reasoning.
 
