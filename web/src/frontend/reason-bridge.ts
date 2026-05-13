@@ -14,6 +14,7 @@ import {
   printMLJs,
   checkSchemaMLJs,
   evalMLJs,
+  elaborateProgramJs,
 } from '../../../reason/_build/default/src/output/src/Api.js'
 
 import type { Term, Error, holeInfo } from './types'
@@ -89,6 +90,29 @@ export function printTerm(term: Term): string {
 function looksLikeProgram(code: string): boolean {
   const trimmed = code.trim()
   return /^(postulate|meta|construct|end)\b/.test(trimmed)
+}
+
+/* elaborate(source): parse, run elaboration, return the printed
+   elaborated program plus the errors. Used to assert idempotence:
+   `elaborate(elaborate(s)).elaborated === elaborate(s).elaborated`
+   and same for errors. Syntax errors are folded in alongside the
+   engine's type errors so a syntactically invalid input still gets a
+   stable (parser-recovered) elaborated string + the union of errors. */
+export function elaborate(code: string): {
+  elaborated: string
+  errors: Error[]
+} {
+  const tree = parser.parse(code)
+  const syntaxErrors = collectSyntaxErrors(tree)
+  const prog = buildProgram(tree, code)
+  const result = elaborateProgramJs(prog as unknown[]) as {
+    elaborated: string
+    errors: Error[]
+  }
+  return {
+    elaborated: result.elaborated,
+    errors: [...syntaxErrors, ...result.errors],
+  }
 }
 
 export function parseAndPrint(code: string): string {

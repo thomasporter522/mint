@@ -77,8 +77,6 @@ abs-eq-eq (l1 l2 l3 : level)
   (X : Ul l1) (A : to X (Ul l2)) (B : to X (Ul l3)) 
   (x : X) 
   : eq (ap (ap (ap (abs-eq) A) B) x) (eq (ap A x) (ap B x))
-
-
 dabs-ident (l: level) 
   (A : Ul l)
   : dto A (ap (abs-const) A)
@@ -98,7 +96,7 @@ meta
 construct by definition
 sym (l1 l2 : level) (A : Ul l1) (B : Ul l2) (a : A) (b : B) (e : eq a b) : eq b a
 sym-eq (l1 l2 : level) (A : Ul l1) (B : Ul l2) (a : A) (b : B) (e : eq a b) : eq (eq l2 l1 B A b a) (sym e) 
-  ?
+  cast
     -- (cast 
     -- ? 
     -- (subst a b e (ap (ap (abs-eq l1 l1 l2 A) (abs-ident A)) (ap (abs-const A A) a)) (refl a)))

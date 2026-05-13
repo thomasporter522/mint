@@ -29,13 +29,12 @@ meta
     end
 postulate
 cast (l : level) (A B : Ul l) (e : eq A B) (a : A) : B
-eq-ind-M-B (l Ml : level) (A : Ul l) (a : A) : to A (Ul l)
-eq-ind-M-B-eq (l Ml : level) (A : Ul l) (a b : A) : eq (ap (eq-ind-M-B Ml A a) b) (to (eq a b) (Ul Ml)) 
-eq-ind (l Ml : level) (A : Ul l) (a : A)
-  (M : pi A (eq-ind-M-B Ml A a))
-  -- (base : ap (dap M a) ?)
-  : dap M ?
-
+-- eq-ind-M-B (l Ml : level) (A : Ul l) (a : A) : to A (Ul l)
+-- eq-ind-M-B-eq (l Ml : level) (A : Ul l) (a b : A) : eq (ap (eq-ind-M-B Ml A a) b) (to (eq a b) (Ul Ml)) 
+-- eq-ind (l Ml : level) (A : Ul l) (a : A)
+--   (M : pi A (eq-ind-M-B Ml A a))
+--   -- (base : ap (dap M a) ?)
+--   : dap M ?
 sym (l : level) (A B : Ul l) (a : A) (b : B) (e : eq a b) : eq b a
 trans (l : level) (A B C : Ul l) (a : A) (b : B) (c : C) (e1 : eq a b) (e2 : eq b c) : eq a c
 Ul-cong (l1 l2 : level) (my-eq : level-eq l1 l2) : (eq ? (Ul (ls l1)) (Ul (ls l2)) (Ul l1) (Ul l2))
@@ -65,7 +64,7 @@ combinator-ap-eq (l1 l2 l3 : level)
   (f : to A (to B C)) 
   (g : to A B) 
   (x : A) 
-  : eq (ap (ap (ap (combinator-ap ) f) g) x) (ap (ap f x) (ap g x))
+  : eq (ap (ap (ap combinator-ap f) g) x) (ap (ap f x) (ap g x))
 combinator-to (l1 l2 l3 : level) 
   (A : Ul l1)
   : to (to A (Ul l2)) (to (to A (Ul l3)) (to A (Ul (lmax l2 l3))))
@@ -388,12 +387,12 @@ rotate-b : eq (ap rotate b) c
 rotate-c : eq (ap rotate c) a
 construct by abstraction
 lnot (l : level) : to (Ul l) (Ul (lmax l lz))
-lnot-eq (l : level) (p : Ul l) : eq (ap (lnot) p) (to p void)
+lnot-eq (l : level) (p : Ul l) : eq (ap lnot p) (to p void)
 construct by abstraction
 true-neq-false-abs : to (eq true false) void
 true-neq-false-abs-eq (p : eq true false) : eq void void (ap true-neq-false-abs p) 
-  (cast unit void (trans (sym is-true-true) (trans (cong-ap (refl) p) is-true-false)) trivial)
+  (cast unit void (trans (sym is-true-true) (trans (cong-ap refl p) is-true-false)) trivial)
 construct by definition
 true-neq-false : ap (lnot) (eq true false)
-true-neq-false-eq : eq true-neq-false (cast (sym (lnot-eq)) true-neq-false-abs)
+true-neq-false-eq : eq true-neq-false (cast (sym lnot-eq) true-neq-false-abs)
 end

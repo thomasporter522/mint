@@ -103,12 +103,6 @@ type holeInfo = {
 
 type staticInfo = {
   errors: list(error),
-  /* Errors that are conditionally promoted into `errors` at the decl
-     boundary, depending on whether their associated metavariables got
-     solved. Used for "Too few arguments": if elaboration filled every
-     missing slot via unification, the underapplication is no longer
-     genuinely incomplete and the error is suppressed. */
-  tentativeErrors: list((list(int), error)),
   holes: list((int, holeInfo)),
   /* For each OL-side hole, the expected OL term at registration time —
      kept on the side so we can zonk it at the decl boundary (after any
@@ -141,6 +135,12 @@ type staticInfo = {
      checkDeclLine reads this to build the externally-visible binding so
      constructors expose the elaborated type, not the raw one. */
   elaborated: option(ol),
+  /* Per-decl elaborated reconstructions, in declaration order. Each
+     checkDeclLine appends a single entry. Merged by concatenation so
+     `elaborateProgram` can re-emit a fully elaborated source. Decls
+     with duplicate names appear here in order — unlike `bindings`,
+     which collapses duplicates. */
+  elaboratedDecls: list(decl),
   bindings: context,
 };
 
@@ -148,7 +148,7 @@ let olHole: ol = mkOL(OLHole(User));
 let mlHole: ml = mkML(Hole(Synthesized));
 let fullHole: fullType = ([], olHole);
 
-let emptyInfo = {errors: [], tentativeErrors: [], pendingHoleGoals: [], holes: [], inlayHints: [], definitions: [], inferred: None, mlInferred: None, elaborated: None, completeBlocks: [], bindings: StringMap.empty};
+let emptyInfo = {errors: [], pendingHoleGoals: [], holes: [], inlayHints: [], definitions: [], inferred: None, mlInferred: None, elaborated: None, elaboratedDecls: [], completeBlocks: [], bindings: StringMap.empty};
 
 /* MetaLet definitions in definition order, for eval env construction.
    Set by Meta block processing, read by Construct block. */
@@ -210,7 +210,7 @@ let mergeBindings = (c1: context, c2: context): context =>
 
 let mergeInfos = (i1: staticInfo, i2: staticInfo): staticInfo => {
   errors: i1.errors @ i2.errors,
-  tentativeErrors: i1.tentativeErrors @ i2.tentativeErrors,
+
   holes: i1.holes @ i2.holes,
   pendingHoleGoals: i1.pendingHoleGoals @ i2.pendingHoleGoals,
   inlayHints: i1.inlayHints @ i2.inlayHints,
@@ -218,6 +218,7 @@ let mergeInfos = (i1: staticInfo, i2: staticInfo): staticInfo => {
   inferred: None,
   mlInferred: None,
   elaborated: None,
+  elaboratedDecls: i1.elaboratedDecls @ i2.elaboratedDecls,
   completeBlocks: i1.completeBlocks @ i2.completeBlocks,
   bindings: mergeBindings(i1.bindings, i2.bindings),
 };
@@ -381,11 +382,20 @@ let rec unify =
     if (occurs(state.solutions, id, term)) {
       (state, Some((a, b)));
     } else {
-      let state' = {...state, solutions: IntMap.add(id, term, state.solutions)};
-      switch (IntMap.find_opt(id, state.metaTypes), computeType(state', ctxLookup, term)) {
+      /* If the meta has a recorded expected type but we can't compute
+         the candidate's type (e.g. the candidate references an unbound
+         identifier, or is itself a hole), don't commit the solution.
+         The meta stays open, which round-trips as `?` in the
+         elaborated source — keeping elaboration idempotent in the
+         face of malformed substitutions. */
+      switch (IntMap.find_opt(id, state.metaTypes), computeType(state, ctxLookup, term)) {
       | (Some(expectedTy), Some(actualTy)) =>
-        unify(state', ctx, expectedTy, actualTy)
-      | _ => (state', None)
+        let state' = {...state, solutions: IntMap.add(id, term, state.solutions)};
+        unify(state', ctx, expectedTy, actualTy);
+      | (Some(_), None) => (state, None)
+      | (None, _) =>
+        let state' = {...state, solutions: IntMap.add(id, term, state.solutions)};
+        (state', None);
       };
     };
   switch (a.value, b.value) {
@@ -467,7 +477,13 @@ let lookupCtx = (ctx: context, x: string): lookupResult =>
 /* --- Error helpers --- */
 
 /* Subsume: type-equality check that may solve metas via unification.
-   Returns the (possibly updated) elaboration state alongside any errors. */
+   Returns the (possibly updated) elaboration state alongside any errors.
+   Note: under-application is never an error at subsume — any caller
+   that brings an inferred-with-params here has already chosen to use
+   the partial form as-is, and the elaborator unconditionally inserts
+   ghost metas at value positions, so a leftover param-typed inferred
+   only reaches here from contexts (like OLAp head) where the partial
+   shape is wanted. */
 let subsume =
     (state: elabState,
      ctx: context,
@@ -475,36 +491,29 @@ let subsume =
      inferred: option(fullType),
      from, to_)
     : (list(error), elabState) => {
-  let tooFewArgs =
-    switch (inferred, expected) {
-    | (Some(([_, ..._], _)), Some(_)) => [mark("Too few arguments", from, to_)]
-    | _ => []
-    };
   let inferredOut = Option.map(((_, out)) => out, inferred);
-  let (inconsistency, state') =
-    switch (expected, inferredOut) {
-    | (Some(exp), Some(inf)) =>
-      let (s, conflict) = unify(state, ctx, exp, inf);
-      /* Even on failure, keep the post-unify state so any metas
-         committed before the mismatch stay solved (eager semantics).
-         The displayed pair comes from unify itself — exactly the two
-         subterms it gave up on — so the message is honest: the things
-         we print really are inconsistent. */
-      switch (conflict) {
-      | None => ([], s)
-      | Some((cExp, cInf)) =>
-        ([mark(
-           "Inconsistency (expected "
-           ++ printOL(cExp)
-           ++ ", got "
-           ++ printOL(cInf)
-           ++ ")",
-           from, to_,
-         )], s)
-      };
-    | _ => ([], state)
+  switch (expected, inferredOut) {
+  | (Some(exp), Some(inf)) =>
+    let (s, conflict) = unify(state, ctx, exp, inf);
+    /* Even on failure, keep the post-unify state so any metas
+       committed before the mismatch stay solved (eager semantics).
+       The displayed pair comes from unify itself — exactly the two
+       subterms it gave up on — so the message is honest: the things
+       we print really are inconsistent. */
+    switch (conflict) {
+    | None => ([], s)
+    | Some((cExp, cInf)) =>
+      ([mark(
+         "Inconsistency (expected "
+         ++ printOL(cExp)
+         ++ ", got "
+         ++ printOL(cInf)
+         ++ ")",
+         from, to_,
+       )], s)
     };
-  (tooFewArgs @ inconsistency, state');
+  | _ => ([], state)
+  };
 };
 
 let checkArity = (expected, found, from, to_) =>
@@ -587,11 +596,13 @@ let renderHintLabel = (_ghosts: list(ol)): string => ellipsis;
 
 /* Walk an arg list and emit one entry per maximal run of ghost args.
    The leading run is anchored just after the head `f`'s end position so
-   that, when there's a source space between f and the first user arg,
-   the rendered ellipsis sits in that space; otherwise the renderer pads
-   it out itself. Any subsequent run (currently unused — ghosts are only
-   inserted at leading positions) is anchored at the start of the next
-   non-ghost arg. */
+   the rendered ellipsis sits immediately after the term former,
+   independent of any whitespace between f and the first user arg.
+   Subsequent runs are anchored at the start of the following non-ghost
+   arg (so they sit just before that arg). A trailing ghost run with no
+   following non-ghost (e.g. `(C)` parsed as OLAp(C, []) → all leading
+   ghosts after elaboration) is flushed at end-of-args with the same
+   leading-run anchor. */
 let extractArgRunHints =
     (f: ol, args: list(ol)): list((int, list(ol))) => {
   let rec go =
@@ -599,7 +610,12 @@ let extractArgRunHints =
            args: list(ol))
           : list((int, list(ol))) =>
     switch (args) {
-    | [] => List.rev(acc)
+    | [] =>
+      if (run == []) {
+        List.rev(acc);
+      } else {
+        List.rev([(f.meta.end_, List.rev(run)), ...acc]);
+      }
     | [a, ...rest] =>
       if (a.meta.ghost) {
         go(acc, [a, ...run], seenNonGhost, rest);
@@ -777,38 +793,48 @@ let resolveHoleGoals =
   {...info, holes: updated, pendingHoleGoals: []};
 };
 
-/* Decide whether a single meta is solved (its zonked form is non-meta). */
-let metaSolved = (sols: IntMap.t(ol), id: int): bool => {
-  let probe: ol = {value: OLMeta(id), meta: defaultMeta};
-  switch (zonk(sols, probe).value) {
-  | OLMeta(_) => false
-  | _ => true
+/* Walk an already-zonked elaborated term and emit one warning per
+   OLAp head whose elaborator-inserted ghost args didn't all get
+   solved. A ghost arg is identified by its meta.ghost flag (set by
+   mkMeta when the elaborator allocated the meta); user-written `?`s
+   carry ghost=false, so they don't trigger this — leaving the source
+   `?` semantics intact while still flagging incomplete inferred
+   spines. Warnings are non-idempotent across re-elaboration (round 1
+   inserts ghosts; round 2 sees the user-`?` they printed back to,
+   which don't carry ghost=true) but errors stay idempotent. */
+let rec collectGhostWarnings = (t: ol): list(error) => {
+  let isUnsolvedGhost = (a: ol): bool =>
+    switch (a.value) {
+    | OLHole(_) | OLMeta(_) => a.meta.ghost
+    | _ => false
+    };
+  switch (t.value) {
+  | OLAp(f, args) =>
+    let here =
+      List.exists(isUnsolvedGhost, args)
+        ? [Error.warn(
+            "Implicit arguments not fully solved",
+            f.meta.start, f.meta.end_,
+          )]
+        : [];
+    let head = collectGhostWarnings(f);
+    let inner = List.concat_map(collectGhostWarnings, args);
+    here @ head @ inner;
+  | _ => []
   };
 };
 
-/* Promote tentative errors to real errors when ANY of their associated
-   metas remained unsolved. If every meta got solved by unification, the
-   underapplication is fully inferred and the error is dropped. */
-let resolveTentatives =
-    (sols: IntMap.t(ol), info: staticInfo): staticInfo => {
-  let promoted =
-    List.filter_map(
-      ((ids, err)) =>
-        List.for_all(metaSolved(sols), ids) ? None : Some(err),
-      info.tentativeErrors,
-    );
-  {...info, errors: info.errors @ promoted, tentativeErrors: []};
-};
-
-/* Zonk a term and replace any surviving (unsolved) metas with synthesized
+/* Zonk a term and replace any surviving (unsolved) metas with user
    holes. Used to clean up a per-decl elaborated term before it's stored
-   in an externally-visible binding: meta IDs are decl-local and would be
-   meaningless across decl boundaries, but a synthesized hole acts as a
-   wildcard under unification. */
+   in an externally-visible binding: meta IDs are decl-local and would
+   be meaningless across decl boundaries. OLHole(User) round-trips
+   through printing as "?", which the parser turns back into OLHole(User)
+   — the elaborator then re-allocates a meta, achieving idempotence at
+   the source-text level. */
 let rec zonkAndForgetMetas = (sols: IntMap.t(ol), t: ol): ol => {
   let t = zonk(sols, t);
   switch (t.value) {
-  | OLMeta(_) => {...t, value: OLHole(Synthesized)}
+  | OLMeta(_) => {...t, value: OLHole(User)}
   | OLAp(f, args) =>
     {
       ...t,
@@ -913,8 +939,7 @@ let rec checkDeclLine = (ctx: context, d: decl): staticInfo => {
     };
   let merged = mergeInfos(paramInfo, retInfo);
   let zonked = zonkInlayHints(finalState.solutions, merged);
-  let withZonkedHoles = resolveHoleGoals(finalState.solutions, zonked);
-  let resolved = resolveTentatives(finalState.solutions, withZonkedHoles);
+  let resolved = resolveHoleGoals(finalState.solutions, zonked);
   /* Build the EXTERNAL binding: param types and retType use their
      elaborated forms, fully zonked, with surviving (unsolved) metas
      replaced by synthesized holes — so this decl's local meta IDs
@@ -931,6 +956,19 @@ let rec checkDeclLine = (ctx: context, d: decl): staticInfo => {
   let externalBinding =
     OL(Some((externalParamPairs, externalRetType)), Some(d.nameMeta));
   let bindings = StringMap.singleton(d.declName, externalBinding);
+  /* Warn on incomplete inferred-arg runs. Each term former whose
+     elaborator-inserted ghosts didn't all get solved gets a yellow
+     squiggle at the head. The walker checks ghost-flagged holes that
+     survived zonking. Warnings — not errors — so idempotence on
+     errors still holds: re-elaborating a printed `?` allocates a
+     user meta with ghost=false, which the walker doesn't flag. */
+  let ghostWarns =
+    collectGhostWarnings(externalRetType)
+    @ List.concat_map(
+        ((_, ty)) => collectGhostWarnings(ty),
+        externalParamPairs,
+      );
+  let resolved = withErrors(resolved, ghostWarns);
   /* Per-decl completeness (type-level only; witness-level is added by
      runConstructSchema for construct decls). A decl is type-complete iff
      no hole survives in its elaborated paramTypes / retType, no semantic
@@ -951,7 +989,18 @@ let rec checkDeclLine = (ctx: context, d: decl): staticInfo => {
   let typeComplete =
     !typeHasHoles && !hasErrors && allRefsComplete(typeRefs);
   completenessRef := StringMap.add(d.declName, typeComplete, completenessRef^);
-  {...resolved, bindings};
+  /* Per-decl elaborated reconstruction: same as the external binding,
+     but as a `decl` value so `elaborateProgram` can rebuild the source
+     program in declaration order (preserving duplicate names, which a
+     binding map collapses). */
+  let elabParams =
+    List.map2(
+      (p: param, et) => {...p, paramType: zonkClean(et)},
+      d.params,
+      paramElabs,
+    );
+  let elabDecl = {...d, params: elabParams, retType: externalRetType};
+  {...resolved, bindings, elaboratedDecls: [elabDecl]};
 }
 
 /* Check an OL term (used for declaration types in postulate/construct).
@@ -970,17 +1019,21 @@ and checkOLTerm =
       switch (lookupCtx(ctx, v)) {
       | NotFound =>
         let err = mark("Unbound variable " ++ v, t.meta.start, t.meta.end_);
-        let info = {errors: [err, ...modeErrors], tentativeErrors: [], pendingHoleGoals: [], holes: [], inlayHints: [], definitions: [], inferred: None, mlInferred: None, elaborated: Some(t), completeBlocks: [], bindings: StringMap.empty};
+        let info = {errors: [err, ...modeErrors], pendingHoleGoals: [], holes: [], inlayHints: [], definitions: [], inferred: None, mlInferred: None, elaborated: Some(t), elaboratedDecls: [], completeBlocks: [], bindings: StringMap.empty};
         (info, state);
       | Found(Some((params, retType)), defSite)
-          when t.meta.parens && List.length(params) > 0 =>
-        /* Parenthesized constructor reference: elaborate as if the user
-           had written `(C ? ? ?)` with one ghost per param. Bare `C`
-           (no parens) keeps the existing wildcard-only behavior. */
-        let paramCount = List.length(params);
-        /* Walk params left-to-right, allocating each ghost with its
-           position's expected type (substituted through prior ghosts).
-           This is what enables type-level propagation later. */
+          when Option.is_some(expected) && List.length(params) > 0 =>
+        /* Identifier-with-params used as a value: elaborate as if the
+           user had written `(C ? ? … ?)` with one ghost per param.
+           Fires for bare `C` AND `(C)` — the latter is parsed as
+           OLAp(C, []) by the builder, which goes through the OLAp
+           Expression case. The expected=Some condition makes the
+           OLAp head's own Expression(None) lookup not elaborate
+           (so the OLAp case can still see the head's full param
+           list). Walk params left-to-right, allocating each ghost
+           with its position's expected type substituted through
+           prior ghosts — that's what enables type-level propagation
+           later. */
         let (ghosts, env, state2) =
           List.fold_left(
             ((gs, env, accState), (paramName, paramTy)) => {
@@ -996,46 +1049,31 @@ and checkOLTerm =
             ([], emptyEnv, state),
             params,
           );
-        let _ = paramCount;
-        let ghostMetaIds =
-          List.filter_map(
-            (g: ol) =>
-              switch (g.value) {
-              | OLMeta(id) => Some(id)
-              | _ => None
-              },
-            ghosts,
-          );
-        let tentativeArity = [
-          (ghostMetaIds, mark("Too few arguments", t.meta.start, t.meta.end_)),
-        ];
         let resolvedRet = resolve(env, retType);
         let inferred = Some(([], resolvedRet));
         let (subErrors, state3) =
           subsume(state2, ctx, expected, inferred, t.meta.start, t.meta.end_);
-        /* Anchor the inlay hint just before the closing paren — there are
-           no given args to anchor relative to. */
-        let anchor = t.meta.end_ - 1;
+        /* Anchor the inlay hint just after the identifier — its source
+           range ends right after the last char of the name (whitespace
+           inside surrounding parens does NOT extend it, because the
+           builder lifts paren-wrapped identifiers to OLAp(_, [])). */
+        let anchor = t.meta.end_;
         let hints = [(anchor, ghosts)];
         let definitions =
           switch (defSite) {
           | Some(dm) when !t.meta.ghost => [(t.meta, dm)]
           | _ => []
           };
-        /* The synthesized OLAp wraps the original identifier as its head.
-           We strip `parens` from the head so that re-elaborating this
-           form (e.g. when the elaborated witness is fed back through
-           the elaborator via substEnv) doesn't re-trigger parens-driven
-           ghost insertion on the head — the head's `parens` flag is
-           what tells line 934 "this identifier wants implicits filled
-           in," and once we've filled them in we don't want to do it
-           again. The outer Ap keeps `t.meta.parens` so printers still
-           wrap the whole spine in parentheses. */
-        let strippedHead = {...t, meta: {...t.meta, parens: false}};
-        let elaborated: ol = {...t, value: OLAp(strippedHead, ghosts)};
+        /* Wrap with parens=true so a nested elaborated `(d ? ?)`
+           prints with its own parens and doesn't flatten into the
+           surrounding spine on re-parse — load-bearing for
+           idempotence when this elaboration sits as an arg. */
+        let elaborated: ol = {
+          value: OLAp(t, ghosts),
+          meta: {...t.meta, parens: true},
+        };
         let info = {
           errors: modeErrors @ subErrors,
-          tentativeErrors: tentativeArity,
           holes: [],
           pendingHoleGoals: [],
           inlayHints: hints,
@@ -1043,6 +1081,7 @@ and checkOLTerm =
           inferred,
           mlInferred: None,
           elaborated: Some(elaborated),
+          elaboratedDecls: [],
           completeBlocks: [],
           bindings: StringMap.empty,
         };
@@ -1055,11 +1094,11 @@ and checkOLTerm =
           | Some(dm) when !t.meta.ghost => [(t.meta, dm)]
           | _ => []
           };
-        let info = {errors: modeErrors @ subErrors, tentativeErrors: [], pendingHoleGoals: [], holes: [], inlayHints: [], definitions, inferred, mlInferred: None, elaborated: Some(t), completeBlocks: [], bindings: StringMap.empty};
+        let info = {errors: modeErrors @ subErrors, pendingHoleGoals: [], holes: [], inlayHints: [], definitions, inferred, mlInferred: None, elaborated: Some(t), elaboratedDecls: [], completeBlocks: [], bindings: StringMap.empty};
         (info, state');
       }
     | _ =>
-      let info = {errors: modeErrors, tentativeErrors: [], pendingHoleGoals: [], holes: [], inlayHints: [], definitions: [], inferred: None, mlInferred: None, elaborated: Some(t), completeBlocks: [], bindings: StringMap.empty};
+      let info = {errors: modeErrors, pendingHoleGoals: [], holes: [], inlayHints: [], definitions: [], inferred: None, mlInferred: None, elaborated: Some(t), elaboratedDecls: [], completeBlocks: [], bindings: StringMap.empty};
       (info, state);
     };
 
@@ -1087,40 +1126,44 @@ and checkOLTerm =
       | Some((params, retType)) =>
         let paramCount = List.length(params);
         let argCount = List.length(args);
-        /* "Too many" stays a hard error; "Too few" is tentative — held
-           until the decl boundary so we can suppress it if every missing
-           slot ends up fully solved by unification. */
+        /* "Too many" stays a hard error. Under-application is NOT an
+           error: the missing leading positions become fresh meta
+           variables (the same concept as a user `?`), which may be
+           solved by surrounding constraints. Whatever remains unsolved
+           is printed as `?` in the elaborated source — exactly what
+           re-elaborating would produce, hence idempotence. */
         let hardArityErrors =
           paramCount < argCount
             ? [mark("Too many arguments", f.meta.start, f.meta.end_)] : [];
-        /* Elaborate: when underapplied, prepend a fresh metavariable for
-           each missing leading arg. Metas flow through dependent-type
-           substitution and may be solved by unification when this
-           expression's inferred type meets a more specific expected type.
-           Each meta records its position's expected type (substituted
-           through earlier args) so type-level propagation inside unify
-           can solve metas that wouldn't otherwise see a constraint. */
         let nMissing = max(0, paramCount - argCount);
-        let (argInfos, elabArgs, finalEnv, state3, ghostIds) =
+        let totalSlots = nMissing + argCount;
+        let (argInfos, elabArgs, finalEnv, state3) =
           List.fold_left(
-            ((accInfos, accElabs, env, accState, ghostIds), i) => {
-              let (paramName, paramTy) = List.nth(params, i);
-              let expectedTy = resolve(env, paramTy);
+            ((accInfos, accElabs, env, accState), i) => {
+              /* Slots beyond paramCount correspond to over-applied
+                 user args — there's no param type to check against, so
+                 we type-check them at a wildcard and don't extend the
+                 substitution env. They still pass through into
+                 elabArgs so the elaborated form preserves what the
+                 user wrote (idempotence). */
+              let isOverflow = i >= paramCount;
+              let expectedTy =
+                if (isOverflow) {
+                  olHole;
+                } else {
+                  let (_, paramTy) = List.nth(params, i);
+                  resolve(env, paramTy);
+                };
               let isGhost = i < nMissing;
-              let (arg, argInfo, newState, ghostIds') =
+              let (arg, argInfo, newState) =
                 if (isGhost) {
                   let (g, ns) = mkMeta(accState, expectedTy, defaultMeta);
-                  let id =
-                    switch (g.value) {
-                    | OLMeta(id) => id
-                    | _ => (-1)
-                    };
-                  (g, emptyInfo, ns, ghostIds @ [id]);
+                  (g, emptyInfo, ns);
                 } else {
                   let userArg = List.nth(args, i - nMissing);
                   let (info, ns) =
                     checkOLTerm(accState, ctx, Expression(Some(expectedTy)), userArg);
-                  (userArg, info, ns, ghostIds);
+                  (userArg, info, ns);
                 };
               let argElab =
                 switch (argInfo.elaborated) {
@@ -1128,25 +1171,25 @@ and checkOLTerm =
                 | None => arg
                 };
               let env' =
-                switch (paramName) {
-                | Some(name) => StringMap.add(name, argElab, env)
-                | None => env
+                if (isOverflow) {
+                  env;
+                } else {
+                  let (paramName, _) = List.nth(params, i);
+                  switch (paramName) {
+                  | Some(name) => StringMap.add(name, argElab, env)
+                  | None => env
+                  };
                 };
               (
                 accInfos @ [argInfo],
                 accElabs @ [argElab],
                 env',
                 newState,
-                ghostIds',
               );
             },
-            ([], [], emptyEnv, state1, []),
-            List.init(min(paramCount, nMissing + argCount), i => i),
+            ([], [], emptyEnv, state1),
+            List.init(totalSlots, i => i),
           );
-        let tentativeArity =
-          nMissing > 0
-            ? [(ghostIds, mark("Too few arguments", f.meta.start, f.meta.end_))]
-            : [];
         let effectiveArgs = elabArgs;
         let info = List.fold_left(mergeInfos, funInfo, argInfos);
         let resolvedRet = resolve(finalEnv, retType);
@@ -1156,11 +1199,6 @@ and checkOLTerm =
         /* Collect the ghost-arg run as a deferred inlay-hint entry; the
            ghost terms (containing metas) get zonked at the decl boundary. */
         let hints = extractArgRunHints(f, effectiveArgs);
-        /* Build the elaborated reconstruction of this OLAp: the head's
-           own elaboration (typically just itself) plus the sub-elaborated
-           args (with leading ghosts for any missing positions). Stored
-           via .elaborated; consumed by checkDeclLine to expose elaborated
-           types externally on bindings. */
         let elabHead = switch (funInfo.elaborated) {
           | Some(e) => e
           | None => f
@@ -1169,7 +1207,6 @@ and checkOLTerm =
         let info = {
           ...info,
           inlayHints: info.inlayHints @ hints,
-          tentativeErrors: info.tentativeErrors @ tentativeArity,
         };
         let final = withErrors({...info, inferred, elaborated: Some(elaborated)}, hardArityErrors @ subErrors);
         (final, state4);
@@ -1192,30 +1229,64 @@ and checkOLTerm =
       ({...withErrors(info, modeErrors), elaborated: Some(t)}, finalState);
     }
 
-  | OLHole(_) | OLMeta(_) =>
-    /* OLMeta(_) is unreachable from user source (parser doesn't produce
-       metas) but the case is kept for exhaustiveness; treat as a hole. */
+  | OLHole(_) =>
+    /* A user `?` and an elaborator-inserted meta are the SAME concept:
+       a unification variable. We allocate a fresh meta here and use it
+       as the elaborated form. Subsequent type-level propagation (via
+       this position's expected type, recorded on the meta) can solve it.
+       The original source position is still registered as a user hole
+       so the IDE's holes panel shows it. */
     switch (mode) {
     | Expression(expected) =>
+      let expectedTy =
+        switch (expected) {
+        | Some(e) => e
+        | None => olHole
+        };
+      let id = state.nextMetaId;
+      let metaTerm: ol = {value: OLMeta(id), meta: t.meta};
+      let state1 = {
+        ...state,
+        metaTypes: IntMap.add(id, expectedTy, state.metaTypes),
+        nextMetaId: id + 1,
+      };
       let goal =
         switch (expected) {
-        | Some(e) => embedOL(zonk(state.solutions, e))
+        | Some(e) => embedOL(zonk(state1.solutions, e))
         | None => mlHole
         };
-      /* Record the raw OL expected (if any) so the decl boundary can
-         zonk-and-re-embed once any metas referenced in it are solved
-         by later unification. */
       let pending =
         switch (expected) {
         | Some(e) => [(t.meta.start, e)]
         | None => []
         };
-      let info = {errors: [], tentativeErrors: [], pendingHoleGoals: pending, holes: [(t.meta.start, {goal, context: ctx})], inlayHints: [], definitions: [],
-                   inferred: Some(fullHole), mlInferred: None, elaborated: Some(t), completeBlocks: [], bindings: StringMap.empty};
+      let info = {errors: [], pendingHoleGoals: pending, holes: [(t.meta.start, {goal, context: ctx})], inlayHints: [], definitions: [],
+                   inferred: Some(([], expectedTy)), mlInferred: None, elaborated: Some(metaTerm), elaboratedDecls: [], completeBlocks: [], bindings: StringMap.empty};
+      (info, state1);
+    | _ =>
+      let info = {errors: [mark("Hole in non-expression", t.meta.start, t.meta.end_)],
+                   pendingHoleGoals: [], holes: [], inlayHints: [], definitions: [], inferred: Some(fullHole), mlInferred: None, elaborated: Some(t), elaboratedDecls: [], completeBlocks: [], bindings: StringMap.empty};
+      (info, state);
+    }
+
+  | OLMeta(id) =>
+    /* A meta in the input AST: already a unification variable in this
+       elaboration state. Look up its recorded type for inferred. This
+       case is hit only when an already-elaborated term is re-fed through
+       checkOLTerm (idempotence path). */
+    switch (mode) {
+    | Expression(_) =>
+      let inferredTy =
+        switch (IntMap.find_opt(id, state.metaTypes)) {
+        | Some(ty) => ty
+        | None => olHole
+        };
+      let info = {errors: [], pendingHoleGoals: [], holes: [], inlayHints: [], definitions: [],
+                   inferred: Some(([], inferredTy)), mlInferred: None, elaborated: Some(t), elaboratedDecls: [], completeBlocks: [], bindings: StringMap.empty};
       (info, state);
     | _ =>
       let info = {errors: [mark("Hole in non-expression", t.meta.start, t.meta.end_)],
-                   tentativeErrors: [], pendingHoleGoals: [], holes: [], inlayHints: [], definitions: [], inferred: Some(fullHole), mlInferred: None, elaborated: Some(t), completeBlocks: [], bindings: StringMap.empty};
+                   pendingHoleGoals: [], holes: [], inlayHints: [], definitions: [], inferred: Some(fullHole), mlInferred: None, elaborated: Some(t), elaboratedDecls: [], completeBlocks: [], bindings: StringMap.empty};
       (info, state);
     }
   }
@@ -1395,8 +1466,8 @@ and inferExpr = (ctx: context, t: ml): staticInfo =>
   | StringLit(_) => setMlType(emptyInfo, MString)
 
   | Hole(_) =>
-    {errors: [], tentativeErrors: [], pendingHoleGoals: [], holes: [(t.meta.start, {goal: mlHole, context: ctx})], inlayHints: [], definitions: [],
-     inferred: Some(([], olHole)), mlInferred: Some(MTerm), elaborated: None, completeBlocks: [], bindings: StringMap.empty}
+    {errors: [], pendingHoleGoals: [], holes: [(t.meta.start, {goal: mlHole, context: ctx})], inlayHints: [], definitions: [],
+     inferred: Some(([], olHole)), mlInferred: Some(MTerm), elaborated: None, elaboratedDecls: [], completeBlocks: [], bindings: StringMap.empty}
 
   | Ap({value: Identifier("fst"), _}, [arg]) =>
     let argInfo = inferExpr(ctx, arg);
@@ -1583,8 +1654,8 @@ and checkExpr = (ctx: context, expected: mlType, t: ml): staticInfo =>
   switch (t.value) {
   | Hole(_) =>
     let goal = mlTypeToTerm(expected);
-    {errors: [], tentativeErrors: [], pendingHoleGoals: [], holes: [(t.meta.start, {goal, context: ctx})], inlayHints: [], definitions: [],
-     inferred: None, mlInferred: None, elaborated: None, completeBlocks: [], bindings: StringMap.empty};
+    {errors: [], pendingHoleGoals: [], holes: [(t.meta.start, {goal, context: ctx})], inlayHints: [], definitions: [],
+     inferred: None, mlInferred: None, elaborated: None, elaboratedDecls: [], completeBlocks: [], bindings: StringMap.empty};
 
   | Fun(pats, body) =>
     switch (pats, expected) {
@@ -1912,7 +1983,6 @@ let runConstructSchema =
               let (witnessInfo, witnessState) =
                 checkOLTerm(emptyElabState, witnessCtx, Expression(Some(expectedType)), witnessOL);
               let witnessInfo = resolveHoleGoals(witnessState.solutions, witnessInfo);
-              let witnessInfo = resolveTentatives(witnessState.solutions, witnessInfo);
               /* The "elaborated witness" — what the user-written ML term
                  actually denotes after elaboration: implicits inserted,
                  metas solved. This is what later decls should see when
@@ -2060,4 +2130,49 @@ let checkProgram = (ctx: context, prog: program): staticInfo => {
       prog,
     );
   info;
+};
+
+/* elaborate : Program → (Program, errors)
+   Top-level entry that runs the checker and re-emits the program with
+   each decl's elaborated paramTypes/retType substituted in. Idempotent
+   in the term-and-errors sense:
+     let (p2, e2) = elaborate(p1);
+     let (p3, e3) = elaborate(p2);
+     => p3 == p2 && e3 == e2
+   Achieved structurally: every `?` allocates a unification variable
+   that may get solved by surrounding constraints; unsolved variables
+   round-trip as `?`, solved ones round-trip as their solved value.
+   Per-decl elaborated forms are read positionally from
+   `info.elaboratedDecls` so duplicate decl names keep their distinct
+   elaborations (a name-keyed lookup would collapse them). */
+let elaborateProgram =
+    (ctx: context, prog: program): (program, list(error)) => {
+  let info = checkProgram(ctx, prog);
+  let pool = ref(info.elaboratedDecls);
+  let take = () =>
+    switch (pool^) {
+    | [d, ...rest] =>
+      pool := rest;
+      Some(d);
+    | [] => None
+    };
+  let elabDecls =
+    List.map(d =>
+      switch (take()) {
+      | Some(ed) => ed
+      | None => d
+      },
+    );
+  let elabBlocks =
+    List.map(
+      block =>
+        switch (block) {
+        | Postulate(m, decls) => Postulate(m, elabDecls(decls))
+        | Meta(_) => block
+        | Construct(name, sm, bm, decls) =>
+          Construct(name, sm, bm, elabDecls(decls))
+        },
+      prog,
+    );
+  (elabBlocks, info.errors);
 };

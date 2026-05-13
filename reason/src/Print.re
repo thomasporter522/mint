@@ -162,23 +162,22 @@ let rec debugML = (t: ml): string => {
 };
 
 /* --- Declaration and block printers ---
-   We strip the outer `parens` flag on retType/paramType before printing
-   so that round-tripping a paren-heavy file produces the cleaner form.
-   Parens that mark genuine grouping (e.g., on Ap args inside a larger Ap)
-   are unaffected. */
-
-let stripOuterParensOL = (t: ol): ol =>
-  {...t, meta: {...t.meta, parens: false}};
+   We preserve the outer `parens` flag on retType/paramType so a round-
+   trip through the parser produces the same AST. Stripping would have
+   the printer output `Ul` for a stored `(Ul)` (parens=true), and the
+   re-parse would see a paren-less form — breaking elaboration
+   idempotence whenever the parens flag carries semantic weight (e.g.
+   the parenthesized-singleton constructor-elaboration trigger). */
 
 let printParam = (p: param): string =>
-  "(" ++ p.paramName ++ " : " ++ printOL(stripOuterParensOL(p.paramType)) ++ ")";
+  "(" ++ p.paramName ++ " : " ++ printOL(p.paramType) ++ ")";
 
 let printDecl = (d: decl): string =>
   switch (d.params) {
-  | [] => d.declName ++ " : " ++ printOL(stripOuterParensOL(d.retType))
+  | [] => d.declName ++ " : " ++ printOL(d.retType)
   | params =>
     d.declName ++ " " ++ String.concat(" ", List.map(printParam, params))
-    ++ " : " ++ printOL(stripOuterParensOL(d.retType))
+    ++ " : " ++ printOL(d.retType)
   };
 
 let printBinding = (b: binding): string =>

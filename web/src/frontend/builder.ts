@@ -74,9 +74,20 @@ export function buildOL(node: SyntaxNode, src: string): OL {
           return mkOL({ kind: 'OLHole', hk: 'Synthesized' }, m)
         }
         const result = buildOL(inner, src)
-        // Extend start/end across the parens so anchors (e.g. inlay hints
-        // before this term) and diagnostics for the whole expression cover
-        // the parens too.
+        // A parenthesized BARE identifier is lifted to a zero-arg OLAp.
+        // This preserves the identifier's natural source range on the
+        // head (so inlay-hint anchors sit next to the identifier even
+        // when there's whitespace inside the parens), while letting the
+        // outer OLAp's range cover the parens for diagnostics. The
+        // OLAp's parens flag drives printer round-trip.
+        if (result.value.kind === 'OLIdentifier') {
+          return {
+            value: { kind: 'OLAp', f: result, args: [] },
+            meta: { ...m, parens: true },
+          }
+        }
+        // Other forms (already-an-OLAp, OLHole, …) get parens recorded
+        // and start/end extended to cover the parens.
         return { ...result, meta: { ...result.meta, parens: true, start: m.start, end: m.end } }
       }
       return buildOL(c, src)

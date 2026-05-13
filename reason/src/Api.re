@@ -160,6 +160,30 @@ let printProgramJs = (jsArr: array(jsObj)): string => {
   Print.printProgram(prog);
 };
 
+/* elaborate: take a parsed program, run elaboration, and return the
+   printed elaborated source plus the errors. Used by the idempotence
+   tests: elaborate(elaborate(p)) should match elaborate(p) on both
+   the printed term and the errors. */
+type jsElabResult;
+
+[@mel.obj]
+external makeJsElabResult:
+  (~elaborated: string, ~errors: array(jsError)) => jsElabResult = "";
+
+let elaborateProgramJs = (jsArr: array(jsObj)): jsElabResult => {
+  let prog = decodeProgram(jsArr);
+  let (elabProg, errs) = Check.elaborateProgram(StringMap.empty, prog);
+  let errors =
+    Array.of_list(
+      List.map(
+        (e: Error.error) =>
+          makeJsError(~type_=e.type_, ~message=e.message, ~from=e.from, ~to_=e.to_),
+        errs,
+      ),
+    );
+  makeJsElabResult(~elaborated=Print.printProgram(elabProg), ~errors);
+};
+
 let printMLJs = (jsML: jsObj): string => {
   let ml = decodeML(jsML);
   Print.printML(ml);
