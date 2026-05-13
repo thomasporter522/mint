@@ -24,6 +24,6 @@ eq-ind-M-B (l Ml : level) (A : Ul l) (a : A) : to A (Ul l)
 eq-ind-M-B-eq (l Ml : level) (A : Ul l) (a b : A) : eq (ap (eq-ind-M-B Ml A a) b) (to (eq a b) (Ul Ml)) 
 eq-ind (l Ml : level) (A : Ul l) (a : A)
   (M : pi A (eq-ind-M-B Ml A a))
-  (base : ap (cast (eq-ind-M-B-eq) (dap M a)) ?)
+  (base : ap (cast (sym (eq-ind-M-B-eq)) (dap M a)) ?)
   (base : dap M a)
   : dap M ?

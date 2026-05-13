@@ -19,6 +19,15 @@ dap (l1 l2 : level) (A : Ul l1) (B : to A (Ul l2)) (f : pi A B) (a : A) : ap B a
 -- equations
 eq (l1 l2 : level) (A : Ul l1) (B : Ul l2) (a : A) (b : B) : Ul (lmax l1 l2)
 refl (l : level) (A : Ul l) (a : A) : eq a a
+meta
+  schema definition =
+    fun outer => fun s => match s with
+    | [(a, [], _),
+       (a_eq, [], eq _ _ _ _ a body)]
+        => (Ok [body, (refl)])
+    | _ => (Error "invalid definition")
+    end
+postulate
 cast (l : level) (A B : Ul l) (e : eq A B) (a : A) : B
 eq-ind-M-B (l Ml : level) (A : Ul l) (a : A) : to A (Ul l)
 eq-ind-M-B-eq (l Ml : level) (A : Ul l) (a b : A) : eq (ap (eq-ind-M-B Ml A a) b) (to (eq a b) (Ul Ml)) 
@@ -66,14 +75,6 @@ combinator-to-eq (l1 l2 l3 : level)
   (t2 : to A (Ul l3)) 
   (x : A) 
   : eq (ap (ap (ap (combinator-to ) t1) t2) x) (to (ap t1 x) (ap t2 x))
-meta
-  schema definition =
-    fun outer => fun s => match s with
-    | [(a, [], _),
-       (a_eq, [], eq _ _ _ _ a body)]
-        => (Ok [body, (refl body)])
-    | _ => (Error "invalid definition")
-    end
 construct by definition
 U1 : Ul (ls (ls lz))
 U1-eq : eq U1 (Ul (ls lz))
