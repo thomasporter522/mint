@@ -83,6 +83,19 @@ let rec zonk = (sols: IntMap.t(ol), t: ol): ol => {
   };
 };
 
+/* Occurs check: does `t` mention meta `id`, walking through the current
+   solution chain? Used to prevent cyclic solutions like `?id := f(?id)`,
+   which would otherwise make `follow`/`zonk` loop forever. */
+let rec occurs = (sols: IntMap.t(ol), id: int, t: ol): bool => {
+  let t = follow(sols, t);
+  switch (t.value) {
+  | OLMeta(id') => id == id'
+  | OLAp(f, args) =>
+    occurs(sols, id, f) || List.exists(occurs(sols, id), args)
+  | _ => false
+  };
+};
+
 type holeInfo = {
   goal: ml,
   context,
@@ -349,14 +362,21 @@ let rec unify =
     };
   let a = follow(state.solutions, a);
   let b = follow(state.solutions, b);
-  let solveMeta = (state, id, term) => {
-    let state' = {...state, solutions: IntMap.add(id, term, state.solutions)};
-    switch (IntMap.find_opt(id, state.metaTypes), computeType(state', ctxLookup, term)) {
-    | (Some(expectedTy), Some(actualTy)) =>
-      unify(state', ctx, expectedTy, actualTy)
-    | _ => Some(state')
+  let solveMeta = (state, id, term) =>
+    /* Refuse to introduce a cyclic solution. Without this, a constraint
+       like `?id ≡ f(?id)` records `id ↦ f(?id)` and any later `follow`
+       through `id` spins forever. The right response is to report
+       unification failure, not to record a malformed solution. */
+    if (occurs(state.solutions, id, term)) {
+      None;
+    } else {
+      let state' = {...state, solutions: IntMap.add(id, term, state.solutions)};
+      switch (IntMap.find_opt(id, state.metaTypes), computeType(state', ctxLookup, term)) {
+      | (Some(expectedTy), Some(actualTy)) =>
+        unify(state', ctx, expectedTy, actualTy)
+      | _ => Some(state')
+      };
     };
-  };
   switch (a.value, b.value) {
   | (OLMeta(idA), OLMeta(idB)) when idA == idB => Some(state)
   | (OLMeta(idA), OLMeta(idB)) =>
@@ -981,7 +1001,17 @@ and checkOLTerm =
           | Some(dm) when !t.meta.ghost => [(t.meta, dm)]
           | _ => []
           };
-        let elaborated: ol = {...t, value: OLAp(t, ghosts)};
+        /* The synthesized OLAp wraps the original identifier as its head.
+           We strip `parens` from the head so that re-elaborating this
+           form (e.g. when the elaborated witness is fed back through
+           the elaborator via substEnv) doesn't re-trigger parens-driven
+           ghost insertion on the head — the head's `parens` flag is
+           what tells line 934 "this identifier wants implicits filled
+           in," and once we've filled them in we don't want to do it
+           again. The outer Ap keeps `t.meta.parens` so printers still
+           wrap the whole spine in parentheses. */
+        let strippedHead = {...t, meta: {...t.meta, parens: false}};
+        let elaborated: ol = {...t, value: OLAp(strippedHead, ghosts)};
         let info = {
           errors: modeErrors @ subErrors,
           tentativeErrors: tentativeArity,

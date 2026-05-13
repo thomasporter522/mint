@@ -10,20 +10,26 @@ level-eq (l1 l2 : level) : sort
 lmax-refl (l : level) : level-eq l l
 lmax-sym (l1 l2 : level) (eq : level-eq l1 l2) : level-eq l2 l1
 lmax-idem (l : level) : level-eq (lmax l l) l
-level-coerce (l1 : level) (l2 : level) (eq : level-eq l1 l2) (e : Ul l1) : Ul l2
--- equations
-eq (l : level) (A B : Ul l) (a : A) (b : B) : Ul l
-refl (l : level) (A : Ul l) (a : A) : eq a a
-sym (l : level) (A B : Ul l) (a : A) (b : B) (e : eq a b) : eq b a
-trans (l : level) (A B C : Ul l) (a : A) (b : B) (c : C) (e1 : eq a b) (e2 : eq b c) : eq a c
-cast (l : level) (A B : Ul l) (e : eq A B) (a : A) : B
-Ul-cong (l1 l2 : level) (my-eq : level-eq l1 l2) : (eq ? (Ul (ls l1)) (Ul (ls l2)) (Ul l1) (Ul l2))
+-- level-coerce (l1 : level) (l2 : level) (eq : level-eq l1 l2) (e : Ul l1) : Ul l2
 -- function types
 to (l1 l2 : level) (A : Ul l1) (B : Ul l2) : Ul (lmax l1 l2)
 ap (l1 l2 : level) (A : Ul l1) (B : Ul l2) (f : to A B) (a : A) : B
-
 pi (l1 l2 : level) (A : Ul l1) (B : to A (Ul l2)) : Ul (lmax l1 l2)
 dap (l1 l2 : level) (A : Ul l1) (B : to A (Ul l2)) (f : pi A B) (a : A) : ap B a
+-- equations
+eq (l1 l2 : level) (A : Ul l1) (B : Ul l2) (a : A) (b : B) : Ul (lmax l1 l2)
+refl (l : level) (A : Ul l) (a : A) : eq a a
+cast (l : level) (A B : Ul l) (e : eq A B) (a : A) : B
+eq-ind-M-B (l Ml : level) (A : Ul l) (a : A) : to A (Ul l)
+eq-ind-M-B-eq (l Ml : level) (A : Ul l) (a b : A) : eq (ap (eq-ind-M-B Ml A a) b) (to (eq a b) (Ul Ml)) 
+eq-ind (l Ml : level) (A : Ul l) (a : A)
+  (M : pi A (eq-ind-M-B Ml A a))
+  -- (base : ap (dap M a) ?)
+  : dap M ?
+
+sym (l : level) (A B : Ul l) (a : A) (b : B) (e : eq a b) : eq b a
+trans (l : level) (A B C : Ul l) (a : A) (b : B) (c : C) (e1 : eq a b) (e2 : eq b c) : eq a c
+Ul-cong (l1 l2 : level) (my-eq : level-eq l1 l2) : (eq ? (Ul (ls l1)) (Ul (ls l2)) (Ul l1) (Ul l2))
 
 cong-ap (l1 l2 : level)
   (A : Ul l1) (B : Ul l2)
@@ -64,7 +70,7 @@ meta
   schema definition =
     fun outer => fun s => match s with
     | [(a, [], _),
-       (a_eq, [], eq _ _ _ a body)]
+       (a_eq, [], eq _ _ _ _ a body)]
         => (Ok [body, (refl body)])
     | _ => (Error "invalid definition")
     end
@@ -109,10 +115,35 @@ meta
   end
   end
     schema abstraction = fun outer => fun s => match s with
-  | [(f, [], (to l1 l2 A B)), (_, [(x, _)], (eq _ _ _ (ap _ _ _ _ f x) body))] =>
-      let result = (abs x body l1 l2 A B) in
-      (Ok [(fst result), (snd result)])
-  | _ => (Error "abstraction: expected (f : to l1 l2 A B) and (f-beta (x : A) : eq l2 B B (ap l1 l2 A B f x) body)")
+  | [(f, f-params, (to l1 l2 A B)),
+     (_, eq-params, (eq _ _ _ _ (ap _ _ _ _ f-applied x-id) body))] =>
+      -- f's param names, in declaration order. Two folds: the first
+      -- collects (fst p) values (giving reverse order), the second
+      -- reverses again.
+      let f-param-names-rev = (foldl (fun acc => fun p => (fst p) :: acc) [] f-params) in
+      let f-param-names = (foldl (fun acc => fun n => n :: acc) [] f-param-names-rev) in
+      -- Reconstruct what the equation's inner-ap function slot should
+      -- hold: f applied to its own parameters. For unparameterised f
+      -- this is just the identifier f; for f with N params it is
+      -- Ap(f, [p_1, …, p_N]).
+      let expected-f-applied =
+        match f-params with
+        | [] => f
+        | _ => (apply f f-param-names)
+        end in
+      -- And the equation's parameter list should be exactly f's
+      -- parameters followed by the abstraction variable (x-id : A).
+      let f-params-rev : (List (Term, Term)) =
+        (foldl (fun acc => fun p => p :: acc) [] f-params) in
+      let expected-eq-params : (List (Term, Term)) =
+        (foldl (fun acc => fun p => p :: acc) [(x-id, A)] f-params-rev) in
+      if (f-applied == expected-f-applied) && (eq-params == expected-eq-params)
+      then
+        let result = (abs x-id body l1 l2 A B) in
+        (Ok [(fst result), (snd result)])
+      else (Error "abstraction: equation's params must be f's params followed by (x : A), and its LHS must be (ap (f p_1 … p_N) x)")
+      end
+  | _ => (Error "abstraction: expected (f : to l1 l2 A B) and (f-beta (p_1 …) (x : A) : eq (ap (f p_1 …) x) body)")
   end
 postulate
 void : Ul lz
@@ -300,7 +331,7 @@ meta
             -- the user lists equations in slot order
             let cv-vals = (reverse (foldl (fun acc => fun decl =>
                 match decl with
-                | (_, [], (eq _ _ _ (ap _ _ _ _ name-cand _) v)) =>
+                | (_, [], (eq _ _ _ _ (ap _ _ _ _ name-cand _) v)) =>
                     if name-cand == name then v :: acc else acc end
                 | _ => acc
                 end
@@ -309,12 +340,12 @@ meta
             let fn-witness = (apply E args) in
             let comp-witnesses = (reverse (foldl (fun acc => fun decl =>
                 match decl with
-                | (_, [], (eq _ _ _ (ap _ _ _ _ name-cand ctor) _)) =>
+                | (_, [], (eq _ _ _ _ (ap _ _ _ _ name-cand ctor) _)) =>
                     if name-cand == name then
                         let comp-info = (foldl (fun a => fun entry =>
                             if (fst a) == true then a
                             else match entry with
-                                | (cn, params, (eq _ _ _ (ap _ _ _ _ inner-fn c-cand) _)) =>
+                                | (cn, params, (eq _ _ _ _ (ap _ _ _ _ inner-fn c-cand) _)) =>
                                     -- the right comp rule applies E to its own
                                     -- params (lM, M, then each case-var), so the
                                     -- inner-fn must equal (apply E param-names)
@@ -355,6 +386,13 @@ rotate-a : eq (ap rotate a) b
 rotate-b : eq (ap rotate b) c
 rotate-c : eq (ap rotate c) a
 construct by abstraction
-lnot : to (Ul lz) (Ul (lmax lz lz))
-lnot-eq (p : Ul lz) : eq (ap lnot p) (to p void)
+lnot (l : level) : to (Ul l) (Ul (lmax l lz))
+lnot-eq (l : level) (p : Ul l) : eq (ap (lnot) p) (to p void)
+construct by abstraction
+true-neq-false-abs : to (eq true false) void
+true-neq-false-abs-eq (p : eq true false) : eq void void (ap true-neq-false-abs p) 
+  (cast unit void (trans (sym is-true-true) (trans (cong-ap (refl) p) is-true-false)) trivial)
+construct by definition
+true-neq-false : ap (lnot) (eq true false)
+true-neq-false-eq : eq true-neq-false (cast (sym (lnot-eq)) true-neq-false-abs)
 end
