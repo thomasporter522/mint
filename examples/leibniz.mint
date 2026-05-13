@@ -14,8 +14,8 @@ lmax-idem (l : level) : level-eq (lmax l l) l
 -- function types
 to (l1 l2 : level) (A : Ul l1) (B : Ul l2) : Ul (lmax l1 l2)
 ap (l1 l2 : level) (A : Ul l1) (B : Ul l2) (f : to A B) (a : A) : B
-pi (l1 l2 : level) (A : Ul l1) (B : to A (Ul l2)) : Ul (lmax l1 l2)
-dap (l1 l2 : level) (A : Ul l1) (B : to A (Ul l2)) (f : pi A B) (a : A) : ap B a
+dto (l1 l2 : level) (A : Ul l1) (B : to A (Ul l2)) : Ul (lmax l1 l2)
+dap (l1 l2 : level) (A : Ul l1) (B : to A (Ul l2)) (f : dto A B) (a : A) : ap B a
 -- equations
 eq (l1 l2 : level) (A : Ul l1) (B : Ul l2) (a : A) (b : B) : Ul (lmax l1 l2)
 
@@ -35,16 +35,57 @@ refl (l : level) (A : Ul l) (a : A) : eq a a
 -- doesn't type check because of heterogeneity
 -- eq-elim (l1 l2 pl : level) (A : Ul l1) (B : Ul l2) (a : A) (b : B) 
 --     (e : eq a b)
---     (pB : to A (Ul pl))
---     (p : pi A pB)
---     (pa : dap p a)
---     : dap p b
-eq-prop (l pl : level) (A : Ul l) (a b : A)
+--     (p : to A (Ul pl))
+--     (pa : ap p a)
+--     : ap p b
+subst (l pl : level) (A : Ul l) (a b : A)
     (e : eq a b)
-    (pB : to A (Ul pl))
-    (p : pi A pB)
-    (pa : dap p a)
-    : dap p b
+    (p : to A (Ul pl))
+    (pa : ap p a)
+    : ap p b
+
+cast (l : level) (A B : Ul l) (e : eq A B) (a : A) : B
+
+
+abs-const (l1 l2 : level) 
+  (X : Ul l1) (A : Ul l2) 
+  : to A (to X A)
+abs-const-eq (l1 l2 : level) 
+  (X : Ul l1) (A : Ul l2) 
+  (x : X) (a : A) 
+  : eq (ap (ap (abs-const) a) x) a
+abs-ident (l: level) 
+  (X : Ul l)
+  : to X X
+abs-ident-eq (l : level) 
+  (X : Ul l)
+  (x : X)
+  : eq (ap (abs-ident) x) x
+abs-ap (l1 l2 l3 : level) 
+  (X : Ul l1) (A : Ul l2) (B : Ul l3) 
+  : to (to X (to A B)) (to (to X A) (to X B))
+abs-ap-eq (l1 l2 l3 : level) 
+  (X : Ul l1) (A : Ul l2) (B : Ul l3) 
+  (f : to X (to A B)) 
+  (a : to X A) 
+  (x : X) 
+  : eq (ap (ap (ap (abs-ap) f) a) x) (ap (ap f x) (ap a x))
+abs-eq (l1 l2 l3 : level) 
+  (X : Ul l1)
+  : to (to X (Ul l2)) (to (to X (Ul l3)) (to X (Ul (lmax l2 l3))))
+abs-eq-eq (l1 l2 l3 : level) 
+  (X : Ul l1) (A : to X (Ul l2)) (B : to X (Ul l3)) 
+  (x : X) 
+  : eq (ap (ap (ap (abs-eq) A) B) x) (eq (ap A x) (ap B x))
+
+
+dabs-ident (l: level) 
+  (A : Ul l)
+  : dto A (ap (abs-const) A)
+dabs-ident-eq (l : level) 
+  (A : Ul l)
+  (x : A)
+  : eq (dap (dabs-ident) x) x
 meta
   schema definition =
     fun outer => fun s => match s with
@@ -56,5 +97,9 @@ meta
 -- insert any constructions (not postulates) you wish
 construct by definition
 sym (l1 l2 : level) (A : Ul l1) (B : Ul l2) (a : A) (b : B) (e : eq a b) : eq b a
-sym-eq (l1 l2 : level) (A : Ul l1) (B : Ul l2) (a : A) (b : B) (e : eq a b) : eq (eq l2 l1 B A b a) (sym e)
-    (sym e)
+sym-eq (l1 l2 : level) (A : Ul l1) (B : Ul l2) (a : A) (b : B) (e : eq a b) : eq (eq l2 l1 B A b a) (sym e) 
+  ?
+    -- (cast 
+    -- ? 
+    -- (subst a b e (ap (ap (abs-eq l1 l1 l2 A) (abs-ident A)) (ap (abs-const A A) a)) (refl a)))
+    

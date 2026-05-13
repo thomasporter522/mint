@@ -102,28 +102,31 @@ describe('function declarations', () => {
   });
 
   it('emits inlay hints for underapplied constructors', () => {
-    /* `(f x)` — f takes 2, given 1, so one ghost ? before x. */
+    /* `(f x)` — f takes 2, given 1, so one ghost before x. The label
+       is always `…`; the tooltip carries the value (here `?` since
+       the meta stayed unsolved). */
     const code = 'postulate\nSort : Sort\nx : Sort\n(f (a : Sort) (b : Sort)) : Sort\ng : (f x)\nend';
     const hints = inlayHints(code);
     expect(hints.length).toBe(1);
-    const [offset, content] = hints[0];
-    expect(content).toBe('?');
-    /* Offset should anchor at the `x` in the body of g. */
-    expect(code.slice(offset, offset + 1)).toBe('x');
+    const [offset, label, tooltip] = hints[0];
+    expect(label).toBe('…');
+    expect(tooltip).toBe('?');
+    /* Offset anchors just after `f`, at the source space before `x`. */
+    expect(code[offset]).toBe(' ');
   });
 
-  it('two missing args produce a two-? hint', () => {
+  it('two missing args produce a two-element tooltip', () => {
     const code =
       'postulate\nSort : Sort\nx : Sort\n(f (a : Sort) (b : Sort) (c : Sort)) : Sort\ng : (f x)\nend';
     const hints = inlayHints(code);
     expect(hints.length).toBe(1);
-    expect(hints[0][1]).toBe('? ?');
+    expect(hints[0][1]).toBe('…');
+    expect(hints[0][2]).toBe('? ?');
   });
 
-  it('hint anchors at the outer paren of a parenthesized arg', () => {
-    /* Goal 1 from the refactor brief: `eq (ap...)` should render as
-       `eq ? ? ? (ap...)`, not `eq (? ? ? ap...)`. The hint offset must
-       land at the `(`, not at the inner `ap`. */
+  it('hint anchors after the term former; tooltip carries the values', () => {
+    /* For `eq (ap...)`, the hint sits just after `eq` (in the source
+       space before the `(`), and the tooltip expands to `? ? ?`. */
     const code =
       'postulate\nSort : Sort\nA : Sort\nB : Sort\nC : Sort\nD : Sort\n' +
       '(eq (a : A) (b : B) (c : C) (d : D)) : Sort\n' +
@@ -132,10 +135,11 @@ describe('function declarations', () => {
       'g : (eq (ap q))\nend';
     const hints = inlayHints(code);
     expect(hints.length).toBe(1);
-    const [offset, content] = hints[0];
-    expect(content).toBe('? ? ?');
-    /* The character at `offset` should be the open paren of `(ap q)`. */
-    expect(code[offset]).toBe('(');
+    const [offset, label, tooltip] = hints[0];
+    expect(label).toBe('…');
+    expect(tooltip).toBe('? ? ?');
+    /* The hint sits in the space right after `eq`. */
+    expect(code[offset]).toBe(' ');
   });
 
   it('checks the given argument against the LAST parameter type', () => {
@@ -172,7 +176,7 @@ describe('function declarations', () => {
   it('parenthesized singleton (C) elaborates with one ghost per param', () => {
     /* Bare parens around a constructor with params trigger elaboration —
        same machinery as `(C arg)`, anchored just before the closing
-       paren. Each param gets a meta; unsolved ones render as `?`. */
+       paren. Label is always `…`; the tooltip carries each ghost. */
     const code = [
       'postulate',
       'Sort : Sort',
@@ -182,9 +186,10 @@ describe('function declarations', () => {
     ].join('\n');
     const hints = inlayHints(code);
     expect(hints.length).toBe(1);
-    const [offset, label] = hints[0];
+    const [offset, label, tooltip] = hints[0];
     expect(code[offset]).toBe(')');
-    expect(label).toBe('?');
+    expect(label).toBe('…');
+    expect(tooltip).toBe('?');
   });
 
   it('hole goal reflects metas solved AFTER the hole was registered', () => {
@@ -512,7 +517,7 @@ describe('function declarations', () => {
     expect(msgs.filter(m => m.includes('Too few arguments'))).toEqual([]);
   });
 
-  it('parenthesizes compound solved values when run is partially solved', () => {
+  it('tooltip carries compound solved values with parens around compounds', () => {
     /* 3 params: `l, m, x`. `x : Ul l` ties the third arg's type to the
        first. With one arg given, we have ghosts `?l ?m`. Unification
        solves ?l := (Ul-of A) (a compound). ?m has no constraint and
@@ -531,10 +536,11 @@ describe('function declarations', () => {
     ].join('\n');
     const hints = inlayHints(code);
     expect(hints.length).toBe(1);
-    expect(hints[0][1]).toBe('(Ul-of A) ?');
+    expect(hints[0][1]).toBe('…');
+    expect(hints[0][2]).toBe('(Ul-of A) ?');
   });
 
-  it('unsolved metas render as ?', () => {
+  it('unsolved metas show as ? in the tooltip, label stays …', () => {
     /* No dependency between the two params — the missing leading arg has
        no constraint and stays unsolved. */
     const code = [
@@ -547,7 +553,8 @@ describe('function declarations', () => {
     ].join('\n');
     const hints = inlayHints(code);
     expect(hints.length).toBe(1);
-    expect(hints[0][1]).toBe('?');
+    expect(hints[0][1]).toBe('…');
+    expect(hints[0][2]).toBe('?');
   });
 
   it('keeps "Too few arguments" when any meta remains unsolved', () => {
@@ -706,8 +713,12 @@ describe('function declarations', () => {
     ].join('\n');
     const hints = inlayHints(code);
     expect(hints.length).toBe(2);
-    const contents = hints.map(h => h[1]).sort();
-    expect(contents).toEqual(['?', '…']);
+    /* Labels are always `…`; the meta-scoping evidence is in the
+       tooltips: one expands to a solved value, the other to `?`. */
+    const labels = hints.map(h => h[1]);
+    expect(labels).toEqual(['…', '…']);
+    const tooltips = hints.map(h => h[2]).sort();
+    expect(tooltips).toEqual(['?', 'A']);
   });
 });
 

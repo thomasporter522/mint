@@ -63,11 +63,18 @@ export function activate(context: vscode.ExtensionContext): void {
       provideInlayHints(document, range) {
         const hints = inlayHintsByDoc.get(document.uri.toString()) ?? []
         const result: vscode.InlayHint[] = []
+        const text = document.getText()
         for (const [offset, label, tooltip] of hints) {
           const pos = document.positionAt(offset)
           if (!range.contains(pos)) continue
           const hint = new vscode.InlayHint(pos, label)
-          hint.paddingRight = true
+          /* If the source already has whitespace at this offset (e.g.
+           * the space between `to` and its first explicit arg), let it
+           * serve as the separator after the hint — don't add a second
+           * one. Otherwise pad on the right so the ellipsis doesn't
+           * butt up against the following character. */
+          const ch = text.charAt(offset)
+          hint.paddingRight = !(ch === ' ' || ch === '\t' || ch === '\n')
           /* Always set the tooltip so hovering an `…` reveals the
            * solved-implicit expansion. When label === tooltip it's
            * harmless redundancy; users only "see" the tooltip when

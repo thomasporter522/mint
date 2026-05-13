@@ -353,8 +353,20 @@ let computeType =
    meta term, its recorded expected type is unified with the solving
    term's computed type — letting structural subterm constraints
    transitively solve other metas. */
+/* Eager unification: a meta solution is committed the moment it's
+   chosen, and we never roll back. The boolean return flag reports
+   whether the structures actually matched; on a mismatch the caller
+   emits an error, but the partial solutions accumulated up to that
+   point stay in the returned state. */
+/* Conflict = a pair of subterms that genuinely don't unify (different
+   identifiers, different-arity Aps, etc.) Surfacing the pair at the
+   exact point unify gives up means the displayed terms are always,
+   themselves, inconsistent — the invariant we want from error
+   reporting. The post-follow `a`/`b` are what was actually being
+   compared, so that's what gets returned. */
 let rec unify =
-        (state: elabState, ctx: context, a: ol, b: ol): option(elabState) => {
+        (state: elabState, ctx: context, a: ol, b: ol)
+        : (elabState, option((ol, ol))) => {
   let ctxLookup = (v) =>
     switch (StringMap.find_opt(v, ctx)) {
     | Some(OL(ft, _)) => ft
@@ -365,20 +377,19 @@ let rec unify =
   let solveMeta = (state, id, term) =>
     /* Refuse to introduce a cyclic solution. Without this, a constraint
        like `?id ≡ f(?id)` records `id ↦ f(?id)` and any later `follow`
-       through `id` spins forever. The right response is to report
-       unification failure, not to record a malformed solution. */
+       through `id` spins forever. */
     if (occurs(state.solutions, id, term)) {
-      None;
+      (state, Some((a, b)));
     } else {
       let state' = {...state, solutions: IntMap.add(id, term, state.solutions)};
       switch (IntMap.find_opt(id, state.metaTypes), computeType(state', ctxLookup, term)) {
       | (Some(expectedTy), Some(actualTy)) =>
         unify(state', ctx, expectedTy, actualTy)
-      | _ => Some(state')
+      | _ => (state', None)
       };
     };
   switch (a.value, b.value) {
-  | (OLMeta(idA), OLMeta(idB)) when idA == idB => Some(state)
+  | (OLMeta(idA), OLMeta(idB)) when idA == idB => (state, None)
   | (OLMeta(idA), OLMeta(idB)) =>
     let (lo, hi) = idA < idB ? (idA, idB) : (idB, idA);
     let aliased: ol = {value: OLMeta(lo), meta: defaultMeta};
@@ -388,26 +399,36 @@ let rec unify =
       IntMap.find_opt(hi, state.metaTypes),
     ) {
     | (Some(t1), Some(t2)) => unify(state', ctx, t1, t2)
-    | _ => Some(state')
+    | _ => (state', None)
     };
   | (OLMeta(id), _) => solveMeta(state, id, b)
   | (_, OLMeta(id)) => solveMeta(state, id, a)
-  | (OLHole(_), _) | (_, OLHole(_)) => Some(state)
-  | (OLIdentifier(x), OLIdentifier(y)) when x == y => Some(state)
+  | (OLHole(_), _) | (_, OLHole(_)) => (state, None)
+  | (OLIdentifier(x), OLIdentifier(y)) when x == y => (state, None)
   | (OLAp(f1, args1), OLAp(f2, args2))
       when List.length(args1) == List.length(args2) =>
-    let init = unify(state, ctx, f1, f2);
-    List.fold_left2(
-      (acc, x, y) =>
-        switch (acc) {
-        | None => None
-        | Some(s) => unify(s, ctx, x, y)
-        },
-      init,
-      args1,
-      args2,
-    );
-  | _ => None
+    /* Same head shape → drill into each arg, propagating the first
+       sub-conflict (which is, by induction, an inconsistent pair).
+       If the heads themselves disagree, the conflict belongs at the
+       outer Ap level: showing `sym vs eq` loses context, so wrap to
+       `(sym e) vs (eq … )`. */
+    let (s, headErr) = unify(state, ctx, f1, f2);
+    let (s', argsErr) =
+      List.fold_left2(
+        ((s, err), x, y) =>
+          switch (err) {
+          | Some(_) => (s, err)
+          | None => unify(s, ctx, x, y)
+          },
+        (s, None),
+        args1,
+        args2,
+      );
+    switch (headErr, argsErr) {
+    | (Some(_), _) => (s', Some((a, b)))
+    | (None, e) => (s', e)
+    };
+  | _ => (state, Some((a, b)))
   };
 };
 
@@ -463,18 +484,24 @@ let subsume =
   let (inconsistency, state') =
     switch (expected, inferredOut) {
     | (Some(exp), Some(inf)) =>
-      switch (unify(state, ctx, exp, inf)) {
-      | Some(s) => ([], s)
-      | None =>
+      let (s, conflict) = unify(state, ctx, exp, inf);
+      /* Even on failure, keep the post-unify state so any metas
+         committed before the mismatch stay solved (eager semantics).
+         The displayed pair comes from unify itself — exactly the two
+         subterms it gave up on — so the message is honest: the things
+         we print really are inconsistent. */
+      switch (conflict) {
+      | None => ([], s)
+      | Some((cExp, cInf)) =>
         ([mark(
            "Inconsistency (expected "
-           ++ printOL(zonk(state.solutions, exp))
+           ++ printOL(cExp)
            ++ ", got "
-           ++ printOL(zonk(state.solutions, inf))
+           ++ printOL(cInf)
            ++ ")",
            from, to_,
-         )], state)
-      }
+         )], s)
+      };
     | _ => ([], state)
     };
   (tooFewArgs @ inconsistency, state');
@@ -539,15 +566,6 @@ let renderGhostInline = (t: ol): string =>
   | _ => printGhost(t)
   };
 
-/* Does a (zonked) ghost term still contain an unsolved metavariable? */
-let rec containsUnsolvedMeta = (t: ol): bool =>
-  switch (t.value) {
-  | OLMeta(_) => true
-  | OLAp(f, args) =>
-    containsUnsolvedMeta(f) || List.exists(containsUnsolvedMeta, args)
-  | OLHole(_) | OLIdentifier(_) => false
-  };
-
 /* Build the U+2026 ellipsis as a real JS 1-char string. Writing "…"
    on the OCaml side surfaces as three Latin-1-mapped chars (the UTF-8
    bytes) at the Melange→JS boundary; constructing it via JS gives a
@@ -561,35 +579,38 @@ let ellipsis = _fromCharCode(0x2026);
 let renderHintValues = (ghosts: list(ol)): string =>
   String.concat(" ", List.map(renderGhostInline, ghosts));
 
-/* The displayed label. Collapsed to a single ellipsis when every ghost
-   in the run resolved; the user can hover for the expanded form. */
-let renderHintLabel = (ghosts: list(ol)): string =>
-  if (List.exists(containsUnsolvedMeta, ghosts)) {
-    renderHintValues(ghosts);
-  } else {
-    ellipsis;
-  };
+/* The displayed label is always a single ellipsis — solved or not — so
+   the visual weight of a ghost run is constant. The expanded form lives
+   on the hover tooltip; an unsolved meta inside the run still gets its
+   red squiggly via the usual error path. */
+let renderHintLabel = (_ghosts: list(ol)): string => ellipsis;
 
-/* Walk an arg list and emit one entry per maximal run of ghost args,
-   anchored at the first non-ghost arg that follows the run. The ghost
-   terms are returned as-is so the decl boundary can zonk them with the
-   final solutions map; the API boundary then prints. */
-let extractArgRunHints = (args: list(ol)): list((int, list(ol))) => {
+/* Walk an arg list and emit one entry per maximal run of ghost args.
+   The leading run is anchored just after the head `f`'s end position so
+   that, when there's a source space between f and the first user arg,
+   the rendered ellipsis sits in that space; otherwise the renderer pads
+   it out itself. Any subsequent run (currently unused — ghosts are only
+   inserted at leading positions) is anchored at the start of the next
+   non-ghost arg. */
+let extractArgRunHints =
+    (f: ol, args: list(ol)): list((int, list(ol))) => {
   let rec go =
-          (acc: list((int, list(ol))), run: list(ol), args: list(ol))
+          (acc: list((int, list(ol))), run: list(ol), seenNonGhost: bool,
+           args: list(ol))
           : list((int, list(ol))) =>
     switch (args) {
     | [] => List.rev(acc)
     | [a, ...rest] =>
       if (a.meta.ghost) {
-        go(acc, [a, ...run], rest);
+        go(acc, [a, ...run], seenNonGhost, rest);
       } else if (run != []) {
-        go([(a.meta.start, List.rev(run)), ...acc], [], rest);
+        let anchor = seenNonGhost ? a.meta.start : f.meta.end_;
+        go([(anchor, List.rev(run)), ...acc], [], true, rest);
       } else {
-        go(acc, [], rest);
+        go(acc, [], true, rest);
       }
     };
-  go([], [], args);
+  go([], [], false, args);
 };
 
 /* --- Extracting params (name + type) from OL arg list --- */
@@ -1134,7 +1155,7 @@ and checkOLTerm =
           subsume(state3, ctx, expected, inferred, t.meta.start, t.meta.end_);
         /* Collect the ghost-arg run as a deferred inlay-hint entry; the
            ghost terms (containing metas) get zonked at the decl boundary. */
-        let hints = extractArgRunHints(effectiveArgs);
+        let hints = extractArgRunHints(f, effectiveArgs);
         /* Build the elaborated reconstruction of this OLAp: the head's
            own elaboration (typically just itself) plus the sub-elaborated
            args (with leading ghosts for any missing positions). Stored
