@@ -99,6 +99,7 @@ export type Binding = {
 export type MetaDef =
   | { kind: 'LetDef'; binding: Binding }
   | { kind: 'SchemaDef'; binding: Binding }
+  | { kind: 'CoerceDef'; binding: Binding }
 
 /* === Program structure === */
 

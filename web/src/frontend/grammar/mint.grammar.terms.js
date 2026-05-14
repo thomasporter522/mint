@@ -50,9 +50,10 @@ export const
   Meta_kw = 61,
   MetaItem = 62,
   Schema_kw = 63,
-  Construct = 64,
-  Construct_kw = 65,
-  By_kw = 66,
-  ExpressionTop = 67,
-  TopExpr = 68,
-  TopBinaryExpr = 69
+  Coerce_kw = 64,
+  Construct = 65,
+  Construct_kw = 66,
+  By_kw = 67,
+  ExpressionTop = 68,
+  TopExpr = 69,
+  TopBinaryExpr = 70

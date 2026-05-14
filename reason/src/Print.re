@@ -192,6 +192,7 @@ let printMetaDef = (d: metaDef): string =>
   switch (d) {
   | LetDef(b) => printBinding(b)
   | SchemaDef(b) => "schema " ++ printBinding(b)
+  | CoerceDef(b) => "coerce " ++ printBinding(b)
   };
 
 let printBlock = (b: block): string =>
@@ -206,4 +207,4 @@ let printBlock = (b: block): string =>
   };
 
 let printProgram = (p: program): string =>
-  String.concat("\n", List.map(printBlock, p)) ++ "\nend\n";
+  String.concat("\n", List.map(printBlock, p)) ++ "\n";

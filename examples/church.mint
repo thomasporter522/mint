@@ -55,23 +55,23 @@ abs-eq-eq (X : U) (A : to X U) (B : to X U)
 meta 
     schema void-schema = 
         fun ctx => fun s => 
-          match s with 
-          | [(_, _, _),_] => (Ok [(pi U (abs-ident)), abs-ident])
-          | _ => (Error "invalid")
-          end
+          (Ok [(pi U (abs-ident)), abs-ident])
 construct by void-schema
 void : U
 void-rec : to void (pi U (abs-ident))
 meta 
+    coerce silly-case = fun ctx => fun expected => fun found => fun contents => 
+      (Ok (ap (ap cast ?) contents))
     schema unit-schema = 
         fun ctx => fun s => 
           match s with 
           | [_, (_,_,_), _, _] => 
           (Ok [
-            (pi U (ap (ap abs-to abs-ident) abs-ident)), 
             ?,
             ?,
-            ?])
+            ?,
+            ?
+            ])
           | _ => (Error "invalid")
           end
 construct by unit-schema

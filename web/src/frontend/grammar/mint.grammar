@@ -53,7 +53,7 @@ ItemHead {
 Param { LParen Identifier+ ":" TypeExpr RParen }
 
 MetaItem {
-  Schema_kw? Identifier (":" Expr)? "=" Expr
+  (Schema_kw | Coerce_kw)? Identifier (":" Expr)? "=" Expr
 }
 
 /* === Expressions === */
@@ -196,6 +196,7 @@ Meta_kw      { @specialize<Identifier, "meta"> }
 By_kw        { @specialize<Identifier, "by"> }
 End_kw       { @specialize<Identifier, "end"> }
 Schema_kw    { @specialize<Identifier, "schema"> }
+Coerce_kw    { @specialize<Identifier, "coerce"> }
 Let_kw       { @specialize<Identifier, "let"> }
 In_kw        { @specialize<Identifier, "in"> }
 Match_kw     { @specialize<Identifier, "match"> }

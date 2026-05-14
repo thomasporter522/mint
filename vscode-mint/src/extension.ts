@@ -71,16 +71,23 @@ export function activate(context: vscode.ExtensionContext): void {
           const pos = document.positionAt(offset)
           if (!range.contains(pos)) continue
           const hint = new vscode.InlayHint(pos, label)
-          /* The hint position is exactly at `f.meta.end_` — one
-             character past the term former. If the source already
-             has whitespace at that offset (e.g. `f x`, `(f x)`,
-             `(cast      )`), that whitespace serves as separation
-             after the hint, so don't add a second one. Otherwise
-             (e.g. `cast` at end of line, or `f(x)` butted up), pad
-             on the right so the ellipsis doesn't collide with the
-             next character. */
           const ch = document.getText().charAt(offset)
-          hint.paddingRight = !(ch === ' ' || ch === '\t' || ch === '\n')
+          const prevCh = offset > 0 ? document.getText().charAt(offset - 1) : ''
+          const isWS = (c: string) => c === ' ' || c === '\t' || c === '\n' || c === ''
+          /* Implicit-args (`…`) hints are SUFFIX-anchored: positioned at
+             `f.meta.end_`, just past the term former. They want padding
+             between themselves and what follows. Coerce (`˚`) hints are
+             PREFIX-anchored: positioned right before the coerced subject,
+             hugging it. They want no right-padding (so they sit against
+             the subject) and left-padding when something non-whitespace
+             precedes them. */
+          const isCoerce = label === '˚'
+          if (isCoerce) {
+            hint.paddingLeft = !isWS(prevCh)
+            hint.paddingRight = false
+          } else {
+            hint.paddingRight = !isWS(ch)
+          }
           hint.tooltip = tooltip
           result.push(hint)
         }

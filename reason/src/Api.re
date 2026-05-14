@@ -42,7 +42,7 @@ let contextToJsMap = (ctx: context): jsMap => {
       switch (v) {
       | OL(Some(ft), _) => jsMapSet(m, k, displayBinding(k, ft))
       | ML(ty) => jsMapSet(m, k, displayBinding(k, ([], mkOL(OLIdentifier(MLType.printType(ty))))))
-      | Builtin(_) | SchemaBinding(_) | MetaLet(_, _) => ()
+      | Builtin(_) | SchemaBinding(_) | CoerceBinding(_) | MetaLet(_, _) => ()
       | OL(None, _) => ()
       },
     ctx,
@@ -113,10 +113,10 @@ let resultOfStatics = (statics: staticInfo): jsResult => {
   let inlayHints =
     Array.of_list(
       List.map(
-        ((pos, ghosts): (int, list(ol))) =>
+        ((pos, kind, ghosts): (int, Check.hintKind, list(ol))) =>
           [|
             Obj.repr(pos),
-            Obj.repr(Check.renderHintLabel(ghosts)),
+            Obj.repr(Check.renderHintLabel(kind, ghosts)),
             Obj.repr(Check.renderHintValues(ghosts)),
           |],
         statics.inlayHints,

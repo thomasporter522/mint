@@ -253,6 +253,7 @@ let decodeMetaDef = (j: jsObj): metaDef => {
   let binding = decodeBinding(_obj(j, "binding"));
   switch (kind) {
   | "SchemaDef" => SchemaDef(binding)
+  | "CoerceDef" => CoerceDef(binding)
   | _ => LetDef(binding)
   };
 };

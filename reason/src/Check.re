@@ -18,6 +18,9 @@ type binding =
   | ML(mlType)
   | Builtin(string)
   | SchemaBinding(ml)
+  /* CoerceBinding(idx, body): idx records source-order registration so
+     subsume can iterate coerce procedures bottom-up (highest idx first). */
+  | CoerceBinding(int, ml)
   | MetaLet(ml, mlType);
 
 type context = StringMap.t(binding);
@@ -28,6 +31,13 @@ type context = StringMap.t(binding);
    whenever two types are compared. Solutions are threaded through the
    check functionally (no refs); each top-level entry into OL checking
    (each decl, each schema-generated witness) gets a fresh state. */
+
+/* Inlay-hint kinds. ImplicitArgs renders as `…` and shows ghost args of
+   an underapplied head. Coerce renders as `°` at the boundary of the
+   coerced subterm and shows the wrapping in its tooltip. */
+type hintKind =
+  | ImplicitArgs
+  | Coerce;
 
 type elabState = {
   solutions: IntMap.t(ol),
@@ -46,13 +56,28 @@ type elabState = {
      substituted-in foreign positions — the state is per-decl, so every
      entry here is from this decl's own elaboration. */
   ghostInsertions: list((meta, list(int))),
+  /* Recursion budget for coercion attempts. Decremented each time
+     subsume invokes a coerce procedure and recursively re-checks the
+     wrapped term; zero blocks further coercion (prevents loops when a
+     coercion's output still fails to typecheck and would re-fire). */
+  coerceDepth: int,
+  /* Per successful coercion: (anchor, metaIDs) where anchor is the
+     coerced subject's source meta and metaIDs are the metas allocated
+     during the re-check of the coerced wrapping. Mirrors
+     `ghostInsertions` and feeds a "coercion not fully solved" warning
+     when any metaID stays unsolved at the decl boundary. */
+  coerceInsertions: list((meta, list(int))),
 };
+
+let maxCoerceDepth = 4;
 
 let emptyElabState: elabState = {
   solutions: IntMap.empty,
   metaTypes: IntMap.empty,
   nextMetaId: 0,
   ghostInsertions: [],
+  coerceDepth: maxCoerceDepth,
+  coerceInsertions: [],
 };
 
 /* Allocate a fresh meta as a ghost subterm at the given source meta,
@@ -127,12 +152,11 @@ type staticInfo = {
      `postulate` / `construct` keyword) and the bridge filters out
      blocks whose range overlaps a syntax error. */
   completeBlocks: list(meta),
-  /* Inlay hints: (offset, ghost terms) — anchored just before `offset`.
-     Carried as terms (not rendered strings) so they can be zonked at
-     the decl boundary against the local solutions map; the API boundary
-     prints them. Adding new kinds of ghost insertions only requires
-     marking them with meta.ghost = true. */
-  inlayHints: list((int, list(ol))),
+  /* Inlay hints: (offset, hintKind, ghost terms) — anchored just before
+     `offset`. Ghost terms carried (not rendered strings) so they can be
+     zonked at the decl boundary against the local solutions map; the
+     API boundary prints them. */
+  inlayHints: list((int, hintKind, list(ol))),
   /* Definitions: (use, def) — for each OL identifier reference that
      resolves to an OL binding, the meta of the use and the meta of the
      declaration site. Drives go-to-definition. */
@@ -480,7 +504,7 @@ type lookupResult =
 let lookupCtx = (ctx: context, x: string): lookupResult =>
   switch (StringMap.find_opt(x, ctx)) {
   | Some(OL(ft, defSite)) => Found(ft, defSite)
-  | Some(ML(_)) | Some(Builtin(_)) | Some(SchemaBinding(_)) | Some(MetaLet(_, _)) => NotFound
+  | Some(ML(_)) | Some(Builtin(_)) | Some(SchemaBinding(_)) | Some(CoerceBinding(_)) | Some(MetaLet(_, _)) => NotFound
   | None => NotFound
   };
 
@@ -494,35 +518,19 @@ let lookupCtx = (ctx: context, x: string): lookupResult =>
    ghost metas at value positions, so a leftover param-typed inferred
    only reaches here from contexts (like OLAp head) where the partial
    shape is wanted. */
-let subsume =
-    (state: elabState,
-     ctx: context,
-     expected: option(ol),
-     inferred: option(fullType),
-     from, to_)
-    : (list(error), elabState) => {
-  let inferredOut = Option.map(((_, out)) => out, inferred);
-  switch (expected, inferredOut) {
-  | (Some(exp), Some(inf)) =>
-    let (s, conflict) = unify(state, ctx, exp, inf);
-    /* Keep the post-unify state on failure so metas committed before
-       the mismatch stay solved. The message reports the top-level
-       expected and inferred types — not unify's drilled-down conflict
-       subterms — zonked against the final state. */
-    switch (conflict) {
-    | None => ([], s)
-    | Some(_) =>
-      ([mark(
-         "Inconsistency (expected "
-         ++ printOL(zonk(s.solutions, exp))
-         ++ ", got "
-         ++ printOL(zonk(s.solutions, inf))
-         ++ ")",
-         from, to_,
-       )], s)
-    };
-  | _ => ([], state)
-  };
+/* Coerce procedures registered in ctx, sorted bottom-up (highest idx
+   first) so the most-recently-declared coercion is tried first. */
+let collectCoerceBindings = (ctx: context): list((int, string, ml)) => {
+  let xs =
+    StringMap.fold(
+      (name, binding, acc) =>
+        switch (binding) {
+        | CoerceBinding(idx, body) => [(idx, name, body), ...acc]
+        | _ => acc
+        },
+      ctx, [],
+    );
+  List.sort(((i1, _, _), (i2, _, _)) => compare(i2, i1), xs);
 };
 
 let checkArity = (expected, found, from, to_) =>
@@ -590,6 +598,10 @@ let renderGhostInline = (t: ol): string =>
    proper single-codepoint string. */
 [@mel.scope "String"] external _fromCharCode: int => string = "fromCharCode";
 let ellipsis = _fromCharCode(0x2026);
+/* U+02DA RING ABOVE — narrower than U+00B0 DEGREE SIGN. Reads as a
+   "coerced" marker without the typographic weight of the math degree. */
+let degree = _fromCharCode(0x02DA);
+let boxChar = _fromCharCode(0x25A1);
 
 /* The full values rendering of a ghost run: each ghost printed (compounds
    in parens), joined by spaces. Used both for the partially-unsolved
@@ -597,11 +609,14 @@ let ellipsis = _fromCharCode(0x2026);
 let renderHintValues = (ghosts: list(ol)): string =>
   String.concat(" ", List.map(renderGhostInline, ghosts));
 
-/* The displayed label is always a single ellipsis — solved or not — so
-   the visual weight of a ghost run is constant. The expanded form lives
-   on the hover tooltip; an unsolved meta inside the run still gets its
-   red squiggly via the usual error path. */
-let renderHintLabel = (_ghosts: list(ol)): string => ellipsis;
+/* Displayed label, by kind. ImplicitArgs renders a single ellipsis (one
+   visual unit regardless of how many ghost args); Coerce renders a
+   degree sign sitting just past the coerced subterm. */
+let renderHintLabel = (kind: hintKind, _ghosts: list(ol)): string =>
+  switch (kind) {
+  | ImplicitArgs => ellipsis
+  | Coerce => degree
+  };
 
 /* Walk an arg list and emit one entry per maximal run of ghost args.
    The leading run is anchored just after the head `f`'s end position so
@@ -612,31 +627,50 @@ let renderHintLabel = (_ghosts: list(ol)): string => ellipsis;
    following non-ghost (e.g. `(C)` parsed as OLAp(C, []) → all leading
    ghosts after elaboration) is flushed at end-of-args with the same
    leading-run anchor. */
+/* An underapplication-inserted implicit arg is always a bare OLMeta —
+   distinct from a coerce-wrapped arg whose outer node is ghost-flagged
+   but is structurally an OLAp. */
+let isImplicitGhost = (a: ol): bool =>
+  a.meta.ghost
+  && (
+    switch (a.value) {
+    | OLMeta(_) => true
+    | _ => false
+    }
+  );
+
 let extractArgRunHints =
-    (f: ol, args: list(ol)): list((int, list(ol))) => {
+    (f: ol, args: list(ol)): list((int, hintKind, list(ol))) =>
+  /* When `f` itself is ghost (e.g. an OLAp nested inside a coerce
+     wrapping), the whole spine belongs to a synthesized wrapper that
+     already has its own `˚` hint at the subject — don't double-surface
+     its args with `…` hints. */
+  if (f.meta.ghost) {
+    [];
+  } else {
   let rec go =
-          (acc: list((int, list(ol))), run: list(ol), seenNonGhost: bool,
+          (acc: list((int, hintKind, list(ol))), run: list(ol), seenNonGhost: bool,
            args: list(ol))
-          : list((int, list(ol))) =>
+          : list((int, hintKind, list(ol))) =>
     switch (args) {
     | [] =>
       if (run == []) {
         List.rev(acc);
       } else {
-        List.rev([(f.meta.end_, List.rev(run)), ...acc]);
+        List.rev([(f.meta.end_, ImplicitArgs, List.rev(run)), ...acc]);
       }
     | [a, ...rest] =>
-      if (a.meta.ghost) {
+      if (isImplicitGhost(a)) {
         go(acc, [a, ...run], seenNonGhost, rest);
       } else if (run != []) {
         let anchor = seenNonGhost ? a.meta.start : f.meta.end_;
-        go([(anchor, List.rev(run)), ...acc], [], true, rest);
+        go([(anchor, ImplicitArgs, List.rev(run)), ...acc], [], true, rest);
       } else {
         go(acc, [], true, rest);
       }
     };
   go([], [], false, args);
-};
+  };
 
 /* --- Extracting params (name + type) from OL arg list --- */
 
@@ -740,6 +774,16 @@ let signatureType = MTuple([MTerm, MList(MTuple([MTerm, MTerm])), MTerm]);
 let schemaType =
   MArrow(MList(signatureType), MArrow(MList(signatureType), MResult(MList(MTerm))));
 
+/* Coerce type: ctx -> expected -> found -> contents -> Result Term.
+   Invoked by `subsume` on inconsistency: the procedure may wrap the
+   inferred subterm with a coercion (e.g. cast through an equality),
+   and the result is re-checked against the expected type. */
+let coerceType =
+  MArrow(
+    MList(signatureType),
+    MArrow(MTerm, MArrow(MTerm, MArrow(MTerm, MResult(MTerm)))),
+  );
+
 /* ML builtins context — every ML builtin must be declared here.
    No OL-level built-ins: the OL context begins empty, so Sort must be
    declared by the user (typically `Sort : Sort` at the top of the first
@@ -771,7 +815,7 @@ let zonkInlayHints =
     (sols: IntMap.t(ol), info: staticInfo): staticInfo => {
   let zonked =
     List.map(
-      ((pos, ghosts)) => (pos, List.map(zonk(sols), ghosts)),
+      ((pos, kind, ghosts)) => (pos, kind, List.map(zonk(sols), ghosts)),
       info.inlayHints,
     );
   {...info, inlayHints: zonked};
@@ -845,6 +889,26 @@ let collectGhostWarnings = (state: elabState): list(error) => {
   );
 };
 
+let collectCoerceWarnings = (state: elabState): list(error) => {
+  let isUnsolved = (id: int) => {
+    let probe: ol = {value: OLMeta(id), meta: defaultMeta};
+    switch (zonk(state.solutions, probe).value) {
+    | OLMeta(_) => true
+    | _ => false
+    };
+  };
+  List.filter_map(
+    ((anchor, ids): (meta, list(int))) =>
+      List.exists(isUnsolved, ids)
+        ? Some(Error.warn(
+            "Coercion not fully solved",
+            anchor.start, anchor.end_,
+          ))
+        : None,
+    state.coerceInsertions,
+  );
+};
+
 /* Zonk a term and replace any surviving (unsolved) metas with user
    holes. Used to clean up a per-decl elaborated term before it's stored
    in an externally-visible binding: meta IDs are decl-local and would
@@ -890,11 +954,224 @@ let shadowCheck =
     (warns, defs);
   };
 
+/* Project every OL binding in `ctx` into a schema-input signature
+   (same shape as Eval.declToSignature produces for construct decls):
+   `(name, [(p, ty)...], retType)` as an ml tuple. ML / Builtin /
+   schema / metaLet bindings are skipped — they're not OL constructors. */
+let bindingsToSignatures = (ctx: context): list(ml) =>
+  StringMap.fold(
+    (name, b, acc) =>
+      switch (b) {
+      | OL(Some((params, retType)), _) =>
+        let nameTerm = mkML(Identifier(name));
+        let paramTuples =
+          List.map(
+            ((pname, ty)) => {
+              let pnameTerm =
+                switch (pname) {
+                | Some(n) => mkML(Identifier(n))
+                | None => mkML(Hole(Synthesized))
+                };
+              mkML(Tuple([pnameTerm, embedOL(ty)]));
+            },
+            params,
+          );
+        let sig_ =
+          mkML(
+            Tuple([nameTerm, mkML(List(paramTuples)), embedOL(retType)]),
+          );
+        [sig_, ...acc];
+      | _ => acc
+      },
+    ctx,
+    [],
+  );
+
 /* Check a single declaration line: (name (p1:T1) ...) : RetType.
    Per-decl elaboration state is created here, threaded through every
    sub-check, and consumed at the end via zonkInlayHints. Solutions
    never escape this scope. */
-let rec checkDeclLine = (ctx: context, d: decl): staticInfo => {
+let coerceSentinelName = "__coerce_subject__";
+
+/* Substitute the original `contents` term back into the procedure's
+   result wherever the sentinel identifier appears, and mark every other
+   node (the wrapping) as ghost. Result tree: outer wrapping is ghost,
+   inner subterm is the unghosted user content. */
+let rec substituteAndGhost = (contents: ol, t: ol): ol =>
+  switch (t.value) {
+  | OLIdentifier(n) when n == coerceSentinelName => contents
+  | OLAp(f, args) =>
+    let f' = substituteAndGhost(contents, f);
+    let args' = List.map(substituteAndGhost(contents), args);
+    {value: OLAp(f', args'), meta: {...t.meta, ghost: true}}
+  | _ => {...t, meta: {...t.meta, ghost: true}}
+  };
+
+/* Same shape walk but only substitutes — for tooltip rendering, where
+   we want the wrapping shown with the subject replaced by a placeholder
+   (box) rather than duplicated. No ghost flagging. */
+let rec substituteOnly = (replacement: ol, t: ol): ol =>
+  switch (t.value) {
+  | OLIdentifier(n) when n == coerceSentinelName => replacement
+  | OLAp(f, args) =>
+    let f' = substituteOnly(replacement, f);
+    let args' = List.map(substituteOnly(replacement), args);
+    {...t, value: OLAp(f', args')}
+  | _ => t
+  };
+
+let rec subsume =
+    (state: elabState,
+     ctx: context,
+     expected: option(ol),
+     inferred: option(fullType),
+     subterm: option(ol),
+     from, to_)
+    : (list(error), elabState, option(ol), list((int, hintKind, list(ol)))) => {
+  let inferredOut = Option.map(((_, out)) => out, inferred);
+  switch (expected, inferredOut) {
+  | (Some(exp), Some(inf)) =>
+    let (s, conflict) = unify(state, ctx, exp, inf);
+    /* Keep the post-unify state on failure so metas committed before
+       the mismatch stay solved. The message reports the top-level
+       expected and inferred types — not unify's drilled-down conflict
+       subterms — zonked against the final state. */
+    switch (conflict) {
+    | None => ([], s, None, [])
+    | Some(_) =>
+      let coerceCandidates = collectCoerceBindings(ctx);
+      let canCoerce =
+        switch (subterm) {
+        | Some(_) when s.coerceDepth > 0 && coerceCandidates != [] => true
+        | _ => false
+        };
+      if (canCoerce) {
+        switch (tryCoercions(s, ctx, exp, inf, Option.get(subterm), coerceCandidates)) {
+        | Some((newState, coercedTerm, hints)) =>
+          ([], newState, Some(coercedTerm), hints)
+        | None =>
+          ([mark(
+             "Inconsistency (expected "
+             ++ printOL(zonk(s.solutions, exp))
+             ++ ", got "
+             ++ printOL(zonk(s.solutions, inf))
+             ++ ")",
+             from, to_,
+           )], s, None, [])
+        };
+      } else {
+        ([mark(
+           "Inconsistency (expected "
+           ++ printOL(zonk(s.solutions, exp))
+           ++ ", got "
+           ++ printOL(zonk(s.solutions, inf))
+           ++ ")",
+           from, to_,
+         )], s, None, []);
+      };
+    };
+  | _ => ([], state, None, [])
+  };
+}
+
+and tryCoercions =
+    (state: elabState,
+     ctx: context,
+     expected: ol,
+     found: ol,
+     contents: ol,
+     candidates: list((int, string, ml)))
+    : option((elabState, ol, list((int, hintKind, list(ol))))) =>
+  switch (candidates) {
+  | [] => None
+  | [(_idx, _name, body), ...rest] =>
+    let mlCtx = StringMap.union((_, _, v) => Some(v), ctx, mlBuiltins);
+    let evalEnv =
+      StringMap.fold(
+        (name, binding, acc) =>
+          switch (binding) {
+          | MetaLet(rhs, _) =>
+            switch (Eval.evalExpr(acc, rhs)) {
+            | Ok(v) => StringMap.add(name, v, acc)
+            | _ => acc
+            }
+          | _ => acc
+          },
+        mlCtx, StringMap.empty,
+      );
+    switch (Eval.evalExpr(evalEnv, body)) {
+    | Err(_) => tryCoercions(state, ctx, expected, found, contents, rest)
+    | Ok(procVal) =>
+      let outerSigs = bindingsToSignatures(ctx);
+      let zExp = zonk(state.solutions, expected);
+      let zFound = zonk(state.solutions, found);
+      let zContents = zonk(state.solutions, contents);
+      /* Pass a sentinel identifier as `contents` to the procedure so we
+         can locate the user's subterm in the procedure's result and
+         distinguish it from the synthesised wrapping. */
+      let sentinel: ol = {
+        value: OLIdentifier(coerceSentinelName),
+        meta: defaultMeta,
+      };
+      switch (Eval.runCoerce(procVal, outerSigs, zExp, zFound, sentinel)) {
+      | CoerceFailed(_) => tryCoercions(state, ctx, expected, found, contents, rest)
+      | Coerced(mlResult) =>
+        /* Convert the procedure's ML result back to OL, substitute the
+           real contents back into the sentinel position, mark the rest
+           ghost, then re-check at the expected type. */
+        let rawOL = mlToOL(mlResult);
+        let coercedInner = substituteAndGhost(zContents, rawOL);
+        /* Force parens at the root so when this replaces the user's
+           subterm as an argument it doesn't flatten into the parent's
+           spine on print/round-trip. */
+        let coerced: ol = {
+          ...coercedInner,
+          meta: {...coercedInner.meta, parens: true},
+        };
+        let stateDec = {...state, coerceDepth: state.coerceDepth - 1};
+        let metasBefore = stateDec.nextMetaId;
+        let (info, newState) =
+          checkOLTerm(stateDec, ctx, Expression(Some(expected)), coerced);
+        if (info.errors == []) {
+          let final =
+            switch (info.elaborated) {
+            | Some(t) => t
+            | None => coerced
+            };
+          /* Anchor the `°` sigil just before the user's subterm; tooltip
+             shows the wrapping with the subject replaced by a `□` box,
+             so the user's source text isn't duplicated. */
+          let boxOL: ol = {
+            value: OLIdentifier(boxChar),
+            meta: defaultMeta,
+          };
+          let tooltipTree = substituteOnly(boxOL, rawOL);
+          let hint = (zContents.meta.start, Coerce, [tooltipTree]);
+          /* Record the meta IDs allocated by the wrapping's re-check so
+             a "Coercion not fully solved" warning fires at the subject
+             if any stays unsolved at the decl boundary. */
+          let metasAfter = newState.nextMetaId;
+          let wrappingMetaIds =
+            metasAfter > metasBefore
+              ? List.init(metasAfter - metasBefore, i => metasBefore + i)
+              : [];
+          let newState =
+            wrappingMetaIds == []
+              ? newState
+              : {
+                  ...newState,
+                  coerceInsertions:
+                    newState.coerceInsertions @ [(zContents.meta, wrappingMetaIds)],
+                };
+          Some((newState, final, info.inlayHints @ [hint]));
+        } else {
+          tryCoercions(state, ctx, expected, found, contents, rest);
+        };
+      };
+    };
+  }
+
+and checkDeclLine = (ctx: context, d: decl): staticInfo => {
   /* Matches typeDeclaration in the formalism:
        typeArgs(Γ[x ā : T])(ā)
        typeTerm(Γ[x ā : T][ā])(T)(T')
@@ -987,7 +1264,8 @@ let rec checkDeclLine = (ctx: context, d: decl): staticInfo => {
      allocates a user-hole meta (with ghost=false; the insertion isn't
      recorded in ghostInsertions), which the walker doesn't flag. */
   let ghostWarns = collectGhostWarnings(finalState);
-  let resolved = withErrors(resolved, ghostWarns);
+  let coerceWarns = collectCoerceWarnings(finalState);
+  let resolved = withErrors(resolved, ghostWarns @ coerceWarns);
   /* Per-decl completeness (type-level only; witness-level is added by
      runConstructSchema for construct decls). A decl is type-complete iff
      no hole survives in its elaborated paramTypes / retType, no semantic
@@ -1086,27 +1364,32 @@ and checkOLTerm =
         };
         let resolvedRet = resolve(env, retType);
         let inferred = Some(([], resolvedRet));
-        let (subErrors, state3) =
-          subsume(state2, ctx, expected, inferred, t.meta.start, t.meta.end_);
+        /* Wrap with parens=true so a nested elaborated `(d ? ?)`
+           prints with its own parens and doesn't flatten into the
+           surrounding spine on re-parse — load-bearing for
+           idempotence when this elaboration sits as an arg. */
+        let elaboratedPre: ol = {
+          value: OLAp(t, ghosts),
+          meta: {...t.meta, parens: true},
+        };
+        let (subErrors, state3, coerced, coerceHints) =
+          subsume(state2, ctx, expected, inferred, Some(elaboratedPre), t.meta.start, t.meta.end_);
+        let elaborated =
+          switch (coerced) {
+          | Some(t) => t
+          | None => elaboratedPre
+          };
         /* Anchor the inlay hint just after the identifier — its source
            range ends right after the last char of the name (whitespace
            inside surrounding parens does NOT extend it, because the
            builder lifts paren-wrapped identifiers to OLAp(_, [])). */
         let anchor = t.meta.end_;
-        let hints = [(anchor, ghosts)];
+        let hints = [(anchor, ImplicitArgs, ghosts), ...coerceHints];
         let definitions =
           switch (defSite) {
           | Some(dm) when !t.meta.ghost => [(t.meta, dm)]
           | _ => []
           };
-        /* Wrap with parens=true so a nested elaborated `(d ? ?)`
-           prints with its own parens and doesn't flatten into the
-           surrounding spine on re-parse — load-bearing for
-           idempotence when this elaboration sits as an arg. */
-        let elaborated: ol = {
-          value: OLAp(t, ghosts),
-          meta: {...t.meta, parens: true},
-        };
         let info = {
           errors: modeErrors @ subErrors,
           holes: [],
@@ -1122,14 +1405,19 @@ and checkOLTerm =
         };
         (info, state3);
       | Found(inferred, defSite) =>
-        let (subErrors, state') =
-          subsume(state, ctx, expected, inferred, t.meta.start, t.meta.end_);
+        let (subErrors, state', coerced, coerceHints) =
+          subsume(state, ctx, expected, inferred, Some(t), t.meta.start, t.meta.end_);
+        let elaborated =
+          switch (coerced) {
+          | Some(c) => c
+          | None => t
+          };
         let definitions =
           switch (defSite) {
           | Some(dm) when !t.meta.ghost => [(t.meta, dm)]
           | _ => []
           };
-        let info = {errors: modeErrors @ subErrors, pendingHoleGoals: [], holes: [], inlayHints: [], definitions, inferred, mlInferred: None, elaborated: Some(t), elaboratedDecls: [], completeBlocks: [], bindings: StringMap.empty};
+        let info = {errors: modeErrors @ subErrors, pendingHoleGoals: [], holes: [], inlayHints: coerceHints, definitions, inferred, mlInferred: None, elaborated: Some(elaborated), elaboratedDecls: [], completeBlocks: [], bindings: StringMap.empty};
         (info, state');
       }
     | _ =>
@@ -1244,19 +1532,24 @@ and checkOLTerm =
         let info = List.fold_left(mergeInfos, funInfo, argInfos);
         let resolvedRet = resolve(finalEnv, retType);
         let inferred = Some(([], resolvedRet));
-        let (subErrors, state4) =
-          subsume(state3, ctx, expected, inferred, t.meta.start, t.meta.end_);
-        /* Collect the ghost-arg run as a deferred inlay-hint entry; the
-           ghost terms (containing metas) get zonked at the decl boundary. */
-        let hints = extractArgRunHints(f, effectiveArgs);
         let elabHead = switch (funInfo.elaborated) {
           | Some(e) => e
           | None => f
         };
-        let elaborated: ol = {...t, value: OLAp(elabHead, elabArgs)};
+        let elaboratedPre: ol = {...t, value: OLAp(elabHead, elabArgs)};
+        let (subErrors, state4, coerced, coerceHints) =
+          subsume(state3, ctx, expected, inferred, Some(elaboratedPre), t.meta.start, t.meta.end_);
+        let elaborated =
+          switch (coerced) {
+          | Some(c) => c
+          | None => elaboratedPre
+          };
+        /* Collect the ghost-arg run as a deferred inlay-hint entry; the
+           ghost terms (containing metas) get zonked at the decl boundary. */
+        let hints = extractArgRunHints(f, effectiveArgs);
         let info = {
           ...info,
-          inlayHints: info.inlayHints @ hints,
+          inlayHints: info.inlayHints @ hints @ coerceHints,
         };
         let final = withErrors({...info, inferred, elaborated: Some(elaborated)}, hardArityErrors @ subErrors);
         (final, state4);
@@ -1345,6 +1638,11 @@ and checkOLTerm =
 and checkSchema = (ctx: context, body: ml): staticInfo => {
   let mlCtx = StringMap.union((_, _, v) => Some(v), ctx, mlBuiltins);
   checkExpr(mlCtx, schemaType, body);
+}
+
+and checkCoerce = (ctx: context, body: ml): staticInfo => {
+  let mlCtx = StringMap.union((_, _, v) => Some(v), ctx, mlBuiltins);
+  checkExpr(mlCtx, coerceType, body);
 }
 
 and checkPat = (ctx: context, ty: mlType, t: pat): (context, staticInfo) =>
@@ -1500,7 +1798,7 @@ and inferExpr = (ctx: context, t: ml): staticInfo =>
     switch (StringMap.find_opt(name, ctx)) {
     | Some(ML(ty)) => setMlType(emptyInfo, ty)
     | Some(Builtin(_)) => setMlType(emptyInfo, MTerm) /* builtins are typed at application site */
-    | Some(OL(_)) | Some(SchemaBinding(_)) => setMlType(emptyInfo, MTerm)
+    | Some(OL(_)) | Some(SchemaBinding(_)) | Some(CoerceBinding(_)) => setMlType(emptyInfo, MTerm)
     | Some(MetaLet(_, ty)) => setMlType(emptyInfo, ty)
     | None =>
       if (!hasOLBindings(ctx)) {
@@ -1861,6 +2159,42 @@ and processMetaDefs =
     let newCtx = StringMap.add(b.name, SchemaBinding(b.rhs), accCtx);
     processMetaDefs(info, newCtx, accDefs, rest);
 
+  | [CoerceDef(b), ...rest] =>
+    let coerceInfo = checkCoerce(accCtx, b.rhs);
+    let annotErrors =
+      switch (b.annotation, b.rawAnnotation) {
+      | (Some(ty), _) when !eqType(ty, coerceType) =>
+        [mark(
+          "Coerce type mismatch: annotated "
+          ++ printType(ty)
+          ++ ", expected "
+          ++ printType(coerceType),
+          b.bindingMeta.start, b.bindingMeta.end_,
+        )]
+      | (None, Some(rawExpr)) =>
+        [mark("Invalid type annotation", rawExpr.meta.start, rawExpr.meta.end_)]
+      | _ => []
+      };
+    let nameMeta = {
+      ...b.bindingMeta,
+      end_: b.bindingMeta.start + String.length(b.name),
+    };
+    let (shadowWarns, shadowDefs) = shadowCheck(b.name, nameMeta, accCtx);
+    let info =
+      withErrors(mergeInfos(accInfo, coerceInfo), annotErrors @ shadowWarns);
+    let info = {...info, definitions: info.definitions @ shadowDefs};
+    let coerceIdx =
+      StringMap.fold(
+        (_, binding, acc) =>
+          switch (binding) {
+          | CoerceBinding(_, _) => acc + 1
+          | _ => acc
+          },
+        accCtx, 0,
+      );
+    let newCtx = StringMap.add(b.name, CoerceBinding(coerceIdx, b.rhs), accCtx);
+    processMetaDefs(info, newCtx, accDefs, rest);
+
   | [LetDef(b), ...rest] =>
     let (bodyInfo, rhsTy) =
       switch (b.annotation) {
@@ -1890,39 +2224,6 @@ and processMetaDefs =
    runConstructSchema so witnesses are checked against the elaborated
    form — same invariant as if the user had written the implicits
    explicitly. */
-/* Project every OL binding in `ctx` into a schema-input signature
-   (same shape as Eval.declToSignature produces for construct decls):
-   `(name, [(p, ty)...], retType)` as an ml tuple. ML / Builtin /
-   schema / metaLet bindings are skipped — they're not OL constructors. */
-let bindingsToSignatures = (ctx: context): list(ml) =>
-  StringMap.fold(
-    (name, b, acc) =>
-      switch (b) {
-      | OL(Some((params, retType)), _) =>
-        let nameTerm = mkML(Identifier(name));
-        let paramTuples =
-          List.map(
-            ((pname, ty)) => {
-              let pnameTerm =
-                switch (pname) {
-                | Some(n) => mkML(Identifier(n))
-                | None => mkML(Hole(Synthesized))
-                };
-              mkML(Tuple([pnameTerm, embedOL(ty)]));
-            },
-            params,
-          );
-        let sig_ =
-          mkML(
-            Tuple([nameTerm, mkML(List(paramTuples)), embedOL(retType)]),
-          );
-        [sig_, ...acc];
-      | _ => acc
-      },
-    ctx,
-    [],
-  );
-
 let elabDeclTypes =
     (declCtx: context, d: decl): (list((option(string), ol)), ol) =>
   switch (StringMap.find_opt(d.declName, declCtx)) {

@@ -447,8 +447,9 @@ function buildLet(node: SyntaxNode, src: string, m: Meta): ML {
 /* === MetaDef and Block building === */
 
 function buildMetaDef(node: SyntaxNode, src: string): MetaDef {
-  // MetaItem { Schema_kw? Identifier (":" Expr)? "=" Expr }
+  // MetaItem { (Schema_kw | Coerce_kw)? Identifier (":" Expr)? "=" Expr }
   const isSchema = !!firstChildByName(node, 'Schema_kw')
+  const isCoerce = !!firstChildByName(node, 'Coerce_kw')
   const id = firstChildByName(node, 'Identifier')
   const exprs = children(node).filter(c => c.name === 'Expr')
   let rawAnnotation: ML | null = null
@@ -468,7 +469,9 @@ function buildMetaDef(node: SyntaxNode, src: string): MetaDef {
     rhs,
     bindingMeta: metaOf(node),
   }
-  return isSchema ? { kind: 'SchemaDef', binding } : { kind: 'LetDef', binding }
+  if (isSchema) return { kind: 'SchemaDef', binding }
+  if (isCoerce) return { kind: 'CoerceDef', binding }
+  return { kind: 'LetDef', binding }
 }
 
 function buildBlock(node: SyntaxNode, src: string): Block | null {

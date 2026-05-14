@@ -124,6 +124,7 @@ and binding = {
 type metaDef =
   | LetDef(binding)                          /* name (: type) = body */
   | SchemaDef(binding)                       /* schema name (: type) = body */
+  | CoerceDef(binding)                       /* coerce name (: type) = body */
 
 /* === Program structure === */
 

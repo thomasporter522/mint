@@ -434,3 +434,34 @@ let runSchema =
     };
   };
 };
+
+type coerceResult =
+  | Coerced(ml)         /* the procedure returned (Ok wrappedTerm) */
+  | CoerceFailed(string) /* (Error msg), or evaluator error, or shape mismatch */
+;
+
+/* Run a coerce procedure: schemaVal outerSigs expected found contents.
+   Returns Coerced(t) if the procedure produced (Ok t); otherwise CoerceFailed. */
+let runCoerce =
+    (coerceVal: mlValue, outerSigs: list(ml),
+     expected: Term.ol, found: Term.ol, contents: Term.ol)
+    : coerceResult => {
+  let outerSigList = mk(List(outerSigs));
+  let argChain = [outerSigList, embedOL(expected), embedOL(found), embedOL(contents)];
+  let rec apply = (clos: mlValue, args: list(ml)): result(mlValue, string) =>
+    switch (args) {
+    | [] => Ok(clos)
+    | [a, ...rest] =>
+      switch (applyClosure(clos, a)) {
+      | Error(msg) => Error(msg)
+      | Ok(next) => apply(next, rest)
+      }
+    };
+  switch (apply(coerceVal, argChain)) {
+  | Error(msg) => CoerceFailed("Coerce evaluation error: " ++ msg)
+  | Ok(Val({value: Ap({value: Identifier("Ok"), _}, [t]), _})) => Coerced(t)
+  | Ok(Val({value: Ap({value: Identifier("Error"), _}, [{value: StringLit(msg), _}]), _})) =>
+    CoerceFailed(msg)
+  | Ok(_) => CoerceFailed("Coerce returned invalid result")
+  };
+};
