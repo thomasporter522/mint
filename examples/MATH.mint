@@ -71,8 +71,8 @@ combinator-to-eq (l1 l2 l3 : level)
 meta
   schema definition =
     fun outer => fun s => match s with
-    | [(a, [], _),
-       (a_eq, [], eq _ _ _ _ a body)]
+    | [(a, [], _, _),
+       (a_eq, [], eq _ _ _ _ a body, _)]
         => (Ok [body, (refl)])
     | _ => (Error "invalid definition")
     end
@@ -117,8 +117,8 @@ meta
   end
   end
     schema abstraction = fun outer => fun s => match s with
-  | [(f, f-params, (to l1 l2 A B)),
-     (_, eq-params, (eq _ _ _ _ (ap _ _ _ _ f-applied x-id) body))] =>
+  | [(f, f-params, (to l1 l2 A B), _),
+     (_, eq-params, (eq _ _ _ _ (ap _ _ _ _ f-applied x-id) body), _)] =>
       -- f's param names, in declaration order. Two folds: the first
       -- collects (fst p) values (giving reverse order), the second
       -- reverses again.
@@ -170,7 +170,7 @@ double-beta (n : N) : eq (ap double n) (ap (ap plus n) n)
 meta
     reverse : ((List Term) -> (List Term)) = fun xs => (foldl (fun acc => fun x => x :: acc) [] xs)
     reverse-triples : ((List (Term, (Term, Term))) -> (List (Term, (Term, Term)))) = fun xs => (foldl (fun acc => fun x => x :: acc) [] xs)
-    append : ((List Term) -> ((List Term) -> (List Term))) = fun xs => fun ys => (foldl (fun acc => fun x => x :: acc) ys (reverse xs))
+    -- append : ((List Term) -> ((List Term) -> (List Term))) = fun xs => fun ys => (foldl (fun acc => fun x => x :: acc) ys (reverse xs))
     concat : ((List (List Term)) -> (List Term)) = fun xss => (foldl (fun acc => fun xs => (append acc xs)) [] xss)
     build-injs-and-type : ((List Term) -> ((List Term), (Term, Term))) = fun rest =>
     (foldl (fun acc => fun _ =>
@@ -254,20 +254,20 @@ meta
     end
 
     schema enum = fun outer => fun s => match s with
-    | [(type-name, [], (Ul lT)),
-        (case-name, [(_, level), (mvar, (Ul lM))], (to _ _ type-name mvar))]
+    | [(type-name, [], (Ul lT), _),
+        (case-name, [(_, level), (mvar, (Ul lM))], (to _ _ type-name mvar), _)]
         => (Ok [void, (void-case lM mvar)])
-    | [(type-name, [], (Ul lT)),
-        (ctor, [], type-name),
-        (case-name, [(_, level), (mvar, (Ul lM)), (tc, mvar)], (to _ _ type-name mvar)),
-        (eq-name, [(_, level), (mvar2, (Ul lM2)), (tc2, mvar2)], _)]
+    | [(type-name, [], (Ul lT), _),
+        (ctor, [], type-name, _),
+        (case-name, [(_, level), (mvar, (Ul lM)), (tc, mvar)], (to _ _ type-name mvar), _),
+        (eq-name, [(_, level), (mvar2, (Ul lM2)), (tc2, mvar2)], _, _)]
         => (Ok [unit, trivial, (unit-case lM mvar tc), (unit-comp lM2 mvar2 tc2)])
-    | (type-name, [], (Ul lT)) :: all-rest =>
+    | (type-name, [], (Ul lT), _) :: all-rest =>
         let found-params = (foldl (fun acc => fun entry =>
         if (fst acc) == true then acc
         else match entry with
-            | (_, [], _) => acc
-            | (_, params, _) => (true, params)
+            | (_, [], _, _) => acc
+            | (_, params, _, _) => (true, params)
             end
         end
         ) (false, [(trivial, trivial)]) all-rest) in
@@ -315,12 +315,12 @@ bool-case-false (lM : level) (M : Ul lM) (true-case false-case : M) : eq (ap (bo
 -- triple-case-c (lM : level) (M : Ul lM) (a-case b-case c-case : M) : eq (ap (triple-case a-case b-case c-case) c) c-case
 meta
     schema cases = fun outer => fun block => match block with
-    | (name, [], (to _ lM T M)) :: eq-decls =>
+    | (name, [], (to _ lM T M), _) :: eq-decls =>
         -- find the case-eliminator E for T in outer (works for any arity)
         let e-info = (foldl (fun acc => fun entry =>
             if (fst acc) == true then acc
             else match entry with
-                | (E, (_, level) :: (m, (Ul _)) :: _, (to _ _ T-cand m)) =>
+                | (E, (_, level) :: (m, (Ul _)) :: _, (to _ _ T-cand m), _) =>
                     if T-cand == T then (true, E) else acc end
                 | _ => acc
                 end
@@ -333,7 +333,7 @@ meta
             -- the user lists equations in slot order
             let cv-vals = (reverse (foldl (fun acc => fun decl =>
                 match decl with
-                | (_, [], (eq _ _ _ _ (ap _ _ _ _ name-cand _) v)) =>
+                | (_, [], (eq _ _ _ _ (ap _ _ _ _ name-cand _) v), _) =>
                     if name-cand == name then v :: acc else acc end
                 | _ => acc
                 end
@@ -342,12 +342,12 @@ meta
             let fn-witness = (apply E args) in
             let comp-witnesses = (reverse (foldl (fun acc => fun decl =>
                 match decl with
-                | (_, [], (eq _ _ _ _ (ap _ _ _ _ name-cand ctor) _)) =>
+                | (_, [], (eq _ _ _ _ (ap _ _ _ _ name-cand ctor) _), _) =>
                     if name-cand == name then
                         let comp-info = (foldl (fun a => fun entry =>
                             if (fst a) == true then a
                             else match entry with
-                                | (cn, params, (eq _ _ _ _ (ap _ _ _ _ inner-fn c-cand) _)) =>
+                                | (cn, params, (eq _ _ _ _ (ap _ _ _ _ inner-fn c-cand) _), _) =>
                                     -- the right comp rule applies E to its own
                                     -- params (lM, M, then each case-var), so the
                                     -- inner-fn must equal (apply E param-names)
@@ -443,11 +443,11 @@ meta
 -- todo: induction
 
 
-construct by induction
-N : Ul lz 
-zero : N 
-suc : to N N 
-N-rec : ?
+-- construct by induction
+-- N : Ul lz 
+-- zero : N 
+-- suc : to N N 
+-- N-rec : ?
 
 -- construct by quotient
 -- Z : Ul lz

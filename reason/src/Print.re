@@ -84,6 +84,7 @@ let rec printML = (t: ml): string => {
     | Hole(User) => "?"
     | Hole(Synthesized) => ""
     | Hole(Auto) => "\xE2\x9F\x90"
+    | TagLit(name) => "#" ++ name
     | Identifier(v) => v
     | StringLit(s) => "\"" ++ s ++ "\""
     | Tuple(items) =>
@@ -140,6 +141,7 @@ let rec debugML = (t: ml): string => {
   | Hole(Auto) => "Auto"
   | Identifier(v) => "Id(" ++ v ++ ")"
   | StringLit(s) => "Str(" ++ s ++ ")"
+  | TagLit(name) => "Tag(#" ++ name ++ ")"
   | Tuple(items) =>
     p ++ "Tuple(" ++ String.concat(",", List.map(debugML, items)) ++ ")"
   | Asc(l, r) =>
@@ -197,18 +199,25 @@ let printMetaDef = (d: metaDef): string =>
   | LetDef(b) => printBinding(b)
   | SchemaDef(b) => "schema " ++ printBinding(b)
   | CoerceDef(b) => "coerce " ++ printBinding(b)
+  | NewtagDef(tag, _) => "newtag #" ++ tag
   };
 
-let printBlock = (b: block): string =>
-  switch (b) {
-  | Postulate(_, decls) =>
-    "postulate\n" ++ String.concat("\n", List.map(printDecl, decls))
-  | Meta(defs) =>
-    "meta\n" ++ String.concat("\n", List.map(printMetaDef, defs))
-  | Construct(schemaName, _, _, decls) =>
-    "construct by " ++ schemaName ++ "\n"
-    ++ String.concat("\n", List.map(printDecl, decls))
+let printTagLine = (t: tagLine): string =>
+  "#" ++ t.tag ++ " " ++ t.target;
+
+let printBlock = (b: block): string => {
+  let printDecls = (decls, tagLines) => {
+    let dStrs = List.map(printDecl, decls);
+    let tStrs = List.map(printTagLine, tagLines);
+    String.concat("\n", dStrs @ tStrs);
   };
+  switch (b) {
+  | Postulate(_, decls, tagLines) => "postulate\n" ++ printDecls(decls, tagLines)
+  | Meta(defs) => "meta\n" ++ String.concat("\n", List.map(printMetaDef, defs))
+  | Construct(schemaName, _, _, decls, tagLines) =>
+    "construct by " ++ schemaName ++ "\n" ++ printDecls(decls, tagLines)
+  };
+};
 
 let printProgram = (p: program): string =>
   String.concat("\n", List.map(printBlock, p)) ++ "\n";

@@ -287,6 +287,10 @@ export function buildML(node: SyntaxNode, src: string): ML {
       const raw = text(node, src)
       return mkML({ kind: 'StringLit', value: raw.slice(1, -1) }, m)
     }
+    case 'Tag': {
+      const lex = text(node, src)
+      return mkML({ kind: 'TagLit', name: lex.startsWith('#') ? lex.slice(1) : lex }, m)
+    }
     case 'Fun':
       return buildFun(node, src, m)
     case 'Match':
@@ -449,7 +453,18 @@ function buildLet(node: SyntaxNode, src: string, m: Meta): ML {
 /* === MetaDef and Block building === */
 
 function buildMetaDef(node: SyntaxNode, src: string): MetaDef {
-  // MetaItem { (Schema_kw | Coerce_kw)? Identifier (":" Expr)? "=" Expr }
+  // MetaItem { (Schema_kw | Coerce_kw)? Identifier (":" Expr)? "=" Expr
+  //          | Newtag_kw Tag }
+  const isNewtag = !!firstChildByName(node, 'Newtag_kw')
+  if (isNewtag) {
+    const tagNode = firstChildByName(node, 'Tag')
+    /* The `#` prefix is part of the lexeme; strip it for the tag's
+       canonical name (we display tags with `#` in the IDE and meta-
+       language but store the bare identifier internally). */
+    const lexeme = tagNode ? text(tagNode, src) : '#_'
+    const tag = lexeme.startsWith('#') ? lexeme.slice(1) : lexeme
+    return { kind: 'NewtagDef', tag, defMeta: metaOf(node) }
+  }
   const isSchema = !!firstChildByName(node, 'Schema_kw')
   const isCoerce = !!firstChildByName(node, 'Coerce_kw')
   const id = firstChildByName(node, 'Identifier')
@@ -476,6 +491,20 @@ function buildMetaDef(node: SyntaxNode, src: string): MetaDef {
   return { kind: 'LetDef', binding }
 }
 
+/* Read a `Tag Identifier Terminator` line: e.g. `#reduction abs-ident-eq`.
+   Returns the bare tag name (without `#`), the targeted constructor
+   name, and the source meta for diagnostics. */
+function buildTagLine(node: SyntaxNode, src: string): { tag: string; target: string; lineMeta: Meta } {
+  const tagNode = firstChildByName(node, 'Tag')
+  const idNode = firstChildByName(node, 'Identifier')
+  const lex = tagNode ? text(tagNode, src) : '#_'
+  return {
+    tag: lex.startsWith('#') ? lex.slice(1) : lex,
+    target: idNode ? text(idNode, src) : '_',
+    lineMeta: metaOf(node),
+  }
+}
+
 function buildBlock(node: SyntaxNode, src: string): Block | null {
   switch (node.name) {
     case 'Postulate': {
@@ -487,7 +516,8 @@ function buildBlock(node: SyntaxNode, src: string): Block | null {
       const decls = [...items, ...tail]
         .filter((d): d is SyntaxNode => d !== null)
         .map(d => buildDecl(d, src))
-      return { kind: 'Postulate', blockMeta: metaOf(node), decls }
+      const tagLines = childrenByName(node, 'TagLine').map(t => buildTagLine(t, src))
+      return { kind: 'Postulate', blockMeta: metaOf(node), decls, tagLines }
     }
     case 'Construct': {
       // First Identifier child is the schema name
@@ -500,7 +530,8 @@ function buildBlock(node: SyntaxNode, src: string): Block | null {
       const decls = [...items, ...tail]
         .filter((d): d is SyntaxNode => d !== null)
         .map(d => buildDecl(d, src))
-      return { kind: 'Construct', schema, schemaMeta, blockMeta: metaOf(node), decls }
+      const tagLines = childrenByName(node, 'TagLine').map(t => buildTagLine(t, src))
+      return { kind: 'Construct', schema, schemaMeta, blockMeta: metaOf(node), decls, tagLines }
     }
     case 'Meta': {
       const defs = childrenByName(node, 'MetaItem').map(m => buildMetaDef(m, src))

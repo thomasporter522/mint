@@ -111,8 +111,9 @@ let rec mlToType = (t: ml): option(mlType) =>
   | Identifier("Sort") => Some(MSort)
   | Identifier("Bool") => Some(MBool)
   | Identifier("String") => Some(MString)
+  | Identifier("Tag") => Some(MTag)
   | Identifier("Signature") =>
-    Some(MTuple([MTerm, MList(MTuple([MTerm, MTerm])), MTerm]))
+    Some(MTuple([MTerm, MList(MTuple([MTerm, MTerm])), MTerm, MList(MTag)]))
   | Ap({value: Identifier("List"), _}, [arg]) =>
     switch (mlToType(arg)) {
     | Some(t) => Some(MList(t))
@@ -187,6 +188,7 @@ let rec decodeML = (j: jsObj): ml => {
     | "Hole" => Hole(decodeHoleKind(_str(v, "hk")))
     | "Identifier" => Identifier(_str(v, "name"))
     | "StringLit" => StringLit(_str(v, "value"))
+    | "TagLit" => TagLit(_str(v, "name"))
     | "Tuple" =>
       Tuple(Array.map(decodeML, _arr(v, "items")) |> Array.to_list)
     | "Asc" => Asc(decodeML(_obj(v, "expr")), decodeML(_obj(v, "type")))
@@ -251,12 +253,35 @@ and decodeBinding = (j: jsObj): binding => {
 
 let decodeMetaDef = (j: jsObj): metaDef => {
   let kind = getKind(j);
-  let binding = decodeBinding(_obj(j, "binding"));
   switch (kind) {
-  | "SchemaDef" => SchemaDef(binding)
-  | "CoerceDef" => CoerceDef(binding)
-  | _ => LetDef(binding)
+  | "NewtagDef" =>
+    let m = _obj(j, "defMeta");
+    let meta = {
+      parens: _bool(m, "parens"),
+      start: _int(m, "start"),
+      end_: _int(m, "end"),
+      ghost: false,
+    };
+    NewtagDef(_str(j, "tag"), meta);
+  | _ =>
+    let binding = decodeBinding(_obj(j, "binding"));
+    switch (kind) {
+    | "SchemaDef" => SchemaDef(binding)
+    | "CoerceDef" => CoerceDef(binding)
+    | _ => LetDef(binding)
+    };
   };
+};
+
+let decodeTagLine = (j: jsObj): tagLine => {
+  let m = _obj(j, "lineMeta");
+  let meta = {
+    parens: _bool(m, "parens"),
+    start: _int(m, "start"),
+    end_: _int(m, "end"),
+    ghost: false,
+  };
+  {tag: _str(j, "tag"), target: _str(j, "target"), lineMeta: meta};
 };
 
 /* === Blocks === */
@@ -272,11 +297,17 @@ let decodeBlock = (j: jsObj): block => {
       ghost: false,
     };
   };
+  let readTagLines = (): list(tagLine) =>
+    switch (Js.Undefined.toOption(Obj.magic(Js.Dict.get(Obj.magic(j), "tagLines")))) {
+    | Some(arr) => Array.map(decodeTagLine, arr) |> Array.to_list
+    | None => []
+    };
   switch (kind) {
   | "Postulate" =>
     Postulate(
       readMeta("blockMeta"),
       Array.map(decodeDecl, _arr(j, "decls")) |> Array.to_list,
+      readTagLines(),
     )
   | "Construct" =>
     Construct(
@@ -284,10 +315,11 @@ let decodeBlock = (j: jsObj): block => {
       readMeta("schemaMeta"),
       readMeta("blockMeta"),
       Array.map(decodeDecl, _arr(j, "decls")) |> Array.to_list,
+      readTagLines(),
     )
   | "Meta" =>
     Meta(Array.map(decodeMetaDef, _arr(j, "defs")) |> Array.to_list)
-  | _ => Postulate(defaultMeta, [])
+  | _ => Postulate(defaultMeta, [], [])
   };
 };
 

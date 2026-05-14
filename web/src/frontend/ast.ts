@@ -100,13 +100,26 @@ export type MetaDef =
   | { kind: 'LetDef'; binding: Binding }
   | { kind: 'SchemaDef'; binding: Binding }
   | { kind: 'CoerceDef'; binding: Binding }
+  | { kind: 'NewtagDef'; tag: string; defMeta: Meta }
+
+/* A tag-line `#tagname constructorname` decorates an existing OL
+   binding. It doesn't introduce a name; it records that this tag
+   applies to `target`. */
+export type TagLine = { tag: string; target: string; lineMeta: Meta }
 
 /* === Program structure === */
 
 export type Block =
-  | { kind: 'Postulate'; blockMeta: Meta; decls: Decl[] }
+  | { kind: 'Postulate'; blockMeta: Meta; decls: Decl[]; tagLines: TagLine[] }
   | { kind: 'Meta'; defs: MetaDef[] }
-  | { kind: 'Construct'; schema: string; schemaMeta: Meta; blockMeta: Meta; decls: Decl[] }
+  | {
+      kind: 'Construct'
+      schema: string
+      schemaMeta: Meta
+      blockMeta: Meta
+      decls: Decl[]
+      tagLines: TagLine[]
+    }
 
 export type Program = Block[]
 

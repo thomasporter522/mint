@@ -229,6 +229,24 @@ function refresh(document: vscode.TextDocument): void {
     items.push(diag)
   }
 
+  /* Auto-hole failures (`⟐` where Canonical timed out or where its
+     candidate didn't type-check) get a red squiggle right on the
+     sigil. The successful case is already surfaced via hover. */
+  for (const res of result.autoResults.values()) {
+    if (res.ok) continue
+    const message =
+      res.candidate == null
+        ? 'Canonical: no solution'
+        : `Canonical: candidate rejected — ${res.candidate}`
+    const diag = new vscode.Diagnostic(
+      rangeFromOffsets(document, res.offset, res.offset + 1),
+      message,
+      vscode.DiagnosticSeverity.Error,
+    )
+    diag.source = 'canonical'
+    items.push(diag)
+  }
+
   diagnostics.set(document.uri, items)
   inlayHintsByDoc.set(document.uri.toString(), result.inlayHints)
   definitionsByDoc.set(document.uri.toString(), result.definitions)

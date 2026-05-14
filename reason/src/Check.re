@@ -214,6 +214,16 @@ let completenessRef: ref(StringMap.t(bool)) = ref(StringMap.empty);
    Reset per `checkProgram`. */
 let autoHoleContextsRef: ref(IntMap.t((context, ol))) = ref(IntMap.empty);
 
+/* Tag-introduction namespace. Populated by `meta { newtag #foo }`,
+   read by tag-line validation and by `bindingsToSignatures` (which
+   queries `tagsByNameRef` per-binding). Reset per `checkProgram`. */
+module StringSet = Set.Make(String);
+let tagNamespaceRef: ref(StringSet.t) = ref(StringSet.empty);
+
+/* Per-binding tag annotations. Each OL name → list of tag names
+   applied via `#tag name` lines. Reset per `checkProgram`. */
+let tagsByNameRef: ref(StringMap.t(list(string))) = ref(StringMap.empty);
+
 /* True if a term contains any hole-shaped subterm (user hole,
    synthesized hole, or unsolved meta). */
 let rec olHasHoles = (t: ol): bool =>
@@ -707,6 +717,7 @@ let rec mlTypeToTerm = (ty: mlType): ml =>
   | MSort => mkML(Identifier("Sort"))
   | MBool => mkML(Identifier("Bool"))
   | MString => mkML(Identifier("String"))
+  | MTag => mkML(Identifier("Tag"))
   | MList(t) => mkML(Ap(mkML(Identifier("List")), [addParens(mlTypeToTerm(t))]))
   | MResult(t) => mkML(Ap(mkML(Identifier("Result")), [addParens(mlTypeToTerm(t))]))
   | MTuple(items) => {
@@ -740,8 +751,9 @@ let rec mlExprToType = (t: ml): option(mlType) =>
   | Identifier("Sort") => Some(MSort)
   | Identifier("Bool") => Some(MBool)
   | Identifier("String") => Some(MString)
+  | Identifier("Tag") => Some(MTag)
   | Identifier("Signature") =>
-    Some(MTuple([MTerm, MList(MTuple([MTerm, MTerm])), MTerm]))
+    Some(MTuple([MTerm, MList(MTuple([MTerm, MTerm])), MTerm, MList(MTag)]))
   | Ap({value: Identifier("List"), _}, [arg]) =>
     switch (mlExprToType(arg)) {
     | Some(t) => Some(MList(t))
@@ -782,9 +794,12 @@ let hasOLBindings = (ctx: context): bool =>
     ctx,
   );
 
-/* Signature = (Term, List (Term, Term), Term) — name, params, return type.
-   Matches Eval.declToSignature: Tuple([name, List(params), retType]) */
-let signatureType = MTuple([MTerm, MList(MTuple([MTerm, MTerm])), MTerm]);
+/* Signature = (Term, List (Term, Term), Term, List Tag) — name, params,
+   return type, attached tags. Matches Eval.declToSignature:
+   Tuple([name, List(params), retType, List(tags)]). The tag list is
+   read from `tagsByNameRef` for each context entry. */
+let signatureType =
+  MTuple([MTerm, MList(MTuple([MTerm, MTerm])), MTerm, MList(MTag)]);
 
 /* Schema type: a curried function taking the outer scope's signatures
    first, then the construct block's signatures, returning a Result-list
@@ -1002,9 +1017,19 @@ let bindingsToSignatures = (ctx: context): list(ml) =>
             },
             params,
           );
+        let tagList =
+          switch (StringMap.find_opt(name, tagsByNameRef^)) {
+          | Some(ts) => List.map(t => mkML(TagLit(t)), ts)
+          | None => []
+          };
         let sig_ =
           mkML(
-            Tuple([nameTerm, mkML(List(paramTuples)), embedOL(retType)]),
+            Tuple([
+              nameTerm,
+              mkML(List(paramTuples)),
+              embedOL(retType),
+              mkML(List(tagList)),
+            ]),
           );
         [sig_, ...acc];
       | _ => acc
@@ -1864,6 +1889,20 @@ and inferExpr = (ctx: context, t: ml): staticInfo =>
 
   | StringLit(_) => setMlType(emptyInfo, MString)
 
+  | TagLit(name) =>
+    /* `#name` must reference an introduced tag. Unknown tag → error;
+       still ascribe MTag so downstream checks don't cascade. */
+    let errs =
+      if (StringSet.mem(name, tagNamespaceRef^)) {
+        [];
+      } else {
+        [mark(
+          "Unknown tag #" ++ name ++ " (introduce with `newtag #" ++ name ++ "`)",
+          t.meta.start, t.meta.end_,
+        )]
+      };
+    setMlType(withErrors(emptyInfo, errs), MTag);
+
   | Hole(_) =>
     {errors: [], pendingHoleGoals: [], holes: [(t.meta.start, {goal: mlHole, context: ctx})], inlayHints: [], definitions: [],
      inferred: Some(([], olHole)), mlInferred: Some(MTerm), elaborated: None, elaboratedDecls: [], completeBlocks: [], bindings: StringMap.empty, autoHoles: [], allBlocks: []}
@@ -2283,6 +2322,21 @@ and processMetaDefs =
     let newCtx = StringMap.add(b.name, MetaLet(b.rhs, rhsTy), accCtx);
     let newDefs = accDefs @ [(b.name, b.rhs)];
     processMetaDefs(mergeInfos(accInfo, bodyInfo), newCtx, newDefs, rest);
+
+  | [NewtagDef(tag, defMeta), ...rest] =>
+    /* Register the tag in the global tag namespace. Redeclaration of an
+       existing tag is a warning (consistent with binding shadowing). */
+    let errs =
+      if (StringSet.mem(tag, tagNamespaceRef^)) {
+        [Error.warn(
+          "Tag #" ++ tag ++ " already declared",
+          defMeta.start, defMeta.end_,
+        )];
+      } else {
+        tagNamespaceRef := StringSet.add(tag, tagNamespaceRef^);
+        [];
+      };
+    processMetaDefs(withErrors(accInfo, errs), accCtx, accDefs, rest);
   };
 
 /* Look up a construct decl's elaborated paramTypes and retType from the
@@ -2482,12 +2536,56 @@ let allDeclsComplete = (decls: list(decl)): bool =>
     decls,
   );
 
+/* Validate each tag-line in a postulate/construct block:
+   - tag must be in the tag namespace (newtag'd earlier)
+   - target must be an OL binding in the current/outer scope
+   On success, append the tag to `tagsByNameRef`. */
+let processTagLines = (ctx: context, lines: list(tagLine)): list(error) =>
+  List.concat_map(
+    (line: tagLine) => {
+      let tagOK = StringSet.mem(line.tag, tagNamespaceRef^);
+      let targetOK =
+        switch (StringMap.find_opt(line.target, ctx)) {
+        | Some(OL(_, _)) => true
+        | _ => false
+        };
+      switch (tagOK, targetOK) {
+      | (false, _) =>
+        [mark(
+          "Unknown tag #" ++ line.tag ++ " (introduce with `newtag #" ++ line.tag ++ "`)",
+          line.lineMeta.start, line.lineMeta.end_,
+        )]
+      | (_, false) =>
+        [mark(
+          "Unknown constructor `" ++ line.target ++ "`",
+          line.lineMeta.start, line.lineMeta.end_,
+        )]
+      | (true, true) =>
+        let existing =
+          switch (StringMap.find_opt(line.target, tagsByNameRef^)) {
+          | Some(ts) => ts
+          | None => []
+          };
+        if (List.mem(line.tag, existing)) {
+          [];
+        } else {
+          tagsByNameRef :=
+            StringMap.add(line.target, existing @ [line.tag], tagsByNameRef^);
+          [];
+        };
+      };
+    },
+    lines,
+  );
+
 let checkBlock = (ctx: context, block: block): (staticInfo, context) =>
   switch (block) {
-  | Postulate(blockMeta, decls) =>
+  | Postulate(blockMeta, decls, tagLines) =>
     let (info, finalCtx) = checkDeclList(ctx, decls);
+    let tagErrs = processTagLines(finalCtx, tagLines);
     let completeBlocks =
       allDeclsComplete(decls) ? [blockMeta] : [];
+    let info = withErrors(info, tagErrs);
     let info = {
       ...info,
       completeBlocks: info.completeBlocks @ completeBlocks,
@@ -2518,9 +2616,10 @@ let checkBlock = (ctx: context, block: block): (staticInfo, context) =>
       );
     (withBindings(metaInfo, cleanCtx), cleanCtx);
 
-  | Construct(schemaName, schemaMeta, blockMeta, decls) =>
+  | Construct(schemaName, schemaMeta, blockMeta, decls, tagLines) =>
     let (bodyInfo, finalCtx) = checkDeclList(ctx, decls);
     let witnessErrors = runConstructSchema(ctx, finalCtx, schemaName, schemaMeta, decls);
+    let tagErrs = processTagLines(finalCtx, tagLines);
     /* If the schema didn't run cleanly (not found, wrong arity, eval
        failure, etc.), every decl in the block fails completeness — the
        per-witness fold may not have even run. */
@@ -2531,7 +2630,7 @@ let checkBlock = (ctx: context, block: block): (staticInfo, context) =>
         decls,
       );
     };
-    let info = withErrors(bodyInfo, witnessErrors);
+    let info = withErrors(bodyInfo, witnessErrors @ tagErrs);
     let completeBlocks =
       allDeclsComplete(decls) ? [blockMeta] : [];
     let info = {
@@ -2547,6 +2646,8 @@ let checkProgram = (ctx: context, prog: program): staticInfo => {
   completenessRef := StringMap.empty;
   metaDefsRef := [];
   autoHoleContextsRef := IntMap.empty;
+  tagNamespaceRef := StringSet.empty;
+  tagsByNameRef := StringMap.empty;
   let (info, _) =
     List.fold_left(
       ((accInfo, accCtx), block) => {
@@ -2609,10 +2710,10 @@ let elaborateProgram =
     List.map(
       block =>
         switch (block) {
-        | Postulate(m, decls) => Postulate(m, elabDecls(decls))
+        | Postulate(m, decls, tagLines) => Postulate(m, elabDecls(decls), tagLines)
         | Meta(_) => block
-        | Construct(name, sm, bm, decls) =>
-          Construct(name, sm, bm, elabDecls(decls))
+        | Construct(name, sm, bm, decls, tagLines) =>
+          Construct(name, sm, bm, elabDecls(decls), tagLines)
         },
       prog,
     );

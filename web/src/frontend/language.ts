@@ -6,10 +6,11 @@ import { parser } from './grammar/mint.grammar.js'
 const mintParser = parser.configure({
   props: [
     styleTags({
-      'Postulate_kw Construct_kw Meta_kw By_kw End_kw Schema_kw Coerce_kw Let_kw In_kw Match_kw With_kw Fun_kw If_kw Then_kw Else_kw': t.keyword,
+      'Postulate_kw Construct_kw Meta_kw By_kw End_kw Schema_kw Coerce_kw Newtag_kw Let_kw In_kw Match_kw With_kw Fun_kw If_kw Then_kw Else_kw': t.keyword,
       Identifier: t.variableName,
       Hole: t.punctuation,
       Auto: t.punctuation,
+      Tag: t.annotation,
       StringLit: t.string,
       LineComment: t.lineComment,
       LParen: t.paren,

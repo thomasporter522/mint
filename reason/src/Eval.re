@@ -195,6 +195,8 @@ let rec evalExpr = (env: evalEnv, t: ml): evalResult =>
 
   | StringLit(_) => Ok(Val(t))
 
+  | TagLit(_) => Ok(Val(t))
+
   | Hole(_) => Ok(Val(t))
 
   | List(items) => evalList(env, items)
@@ -456,6 +458,12 @@ and evalBinOp = (op: binOp, lv: mlValue, rv: mlValue): evalResult =>
 
 /* === Top-level: run a schema on construct declarations === */
 
+/* declToSignature takes the construct-block's decls. These are
+   freshly-introduced names that haven't yet been tag-lined (tag-lines
+   appear after the decls inside the block); so the tag list is empty
+   here. (Future: if tag-lines target a freshly-introduced name, the
+   schema sees them only on the OUTER scope's view, not this fresh
+   one. That matches the "target must already be declared" rule.) */
 let declToSignature = (d: decl): ml => {
   let name = mk(Identifier(d.declName));
   let params =
@@ -464,7 +472,7 @@ let declToSignature = (d: decl): ml => {
         mk(Tuple([mk(Identifier(p.paramName)), embedOL(p.paramType)])),
       d.params,
     );
-  mk(Tuple([name, mk(List(params)), embedOL(d.retType)]));
+  mk(Tuple([name, mk(List(params)), embedOL(d.retType), mk(List([]))]));
 };
 
 type schemaResult =

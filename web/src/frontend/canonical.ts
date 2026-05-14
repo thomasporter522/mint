@@ -30,12 +30,13 @@ const TAG = {
   Hole: 1,
   Identifier: 2,
   StringLit: 3,
-  Tuple: 4,
-  Asc: 5,
-  BinOp: 6,
-  Ap: 7,
-  List: 8,
-  Cons: 9,
+  TagLit: 4,
+  Tuple: 5,
+  Asc: 6,
+  BinOp: 7,
+  Ap: 8,
+  List: 9,
+  Cons: 10,
 } as const
 
 type MlNode = { value: any; meta: any }

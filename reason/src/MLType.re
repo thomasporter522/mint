@@ -5,6 +5,7 @@ type mlType = Term.mlType =
   | MSort
   | MBool
   | MString
+  | MTag
   | MList(mlType)
   | MResult(mlType)
   | MTuple(list(mlType))
@@ -16,13 +17,14 @@ let rec printType =
   | MSort => "Sort"
   | MBool => "Bool"
   | MString => "String"
+  | MTag => "Tag"
   | MList(t) => "List " ++ printTypeAtom(t)
   | MResult(t) => "Result " ++ printTypeAtom(t)
   | MTuple(items) => "(" ++ String.concat(", ", List.map(printType, items)) ++ ")"
   | MArrow(a, b) => printTypeAtom(a) ++ " -> " ++ printTypeAtom(b)
 and printTypeAtom =
   fun
-  | (MTerm | MSort | MBool | MString | MTuple(_)) as t => printType(t)
+  | (MTerm | MSort | MBool | MString | MTag | MTuple(_)) as t => printType(t)
   | t => "(" ++ printType(t) ++ ")";
 
 let rec eqType = (a: mlType, b: mlType): bool =>
@@ -30,7 +32,8 @@ let rec eqType = (a: mlType, b: mlType): bool =>
   | (MTerm, MTerm)
   | (MSort, MSort)
   | (MBool, MBool)
-  | (MString, MString) => true
+  | (MString, MString)
+  | (MTag, MTag) => true
   | (MList(a), MList(b)) => eqType(a, b)
   | (MResult(a), MResult(b)) => eqType(a, b)
   | (MTuple(as_), MTuple(bs)) =>

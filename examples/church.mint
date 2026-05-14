@@ -14,6 +14,11 @@ cast (A B : U) : to (eq A B) (to A B)
 sym (A B : U) (a : A) (b : B) : to (eq a b) (eq b a)
 trans (A B C : U) (a : A) (b : B) (c : C) : to (eq a b) (to (eq b c) (eq a c))
 
+meta 
+newtag #reduction
+
+postulate
+
 cong-ap (A B : U)
   (f : to A B) (g : to A B)
   (a : A) (b : A) 
@@ -34,6 +39,7 @@ abs-ident (X : U)
 abs-ident-eq (X : U) 
   (x : X)
   : eq (ap (abs-ident) x) x
+#reduction abs-ident-eq
 abs-ap (X A B : U) 
   : to (to X (to A B)) (to (to X A) (to X B))
 abs-ap-eq (X A B : U) 
@@ -41,16 +47,19 @@ abs-ap-eq (X A B : U)
   (a : to X A) 
   (x : X) 
   : eq (ap (ap (ap (abs-ap) f) a) x) (ap (ap f x) (ap a x))
+#reduction abs-ap-eq
 abs-to (X : U)
   : to (to X U) (to (to X U) (to X U))
 abs-to-eq (X : U) (A : to X U) (B : to X U) 
   (x : X) 
   : eq (ap (ap (ap (abs-to) A) B) x) (to (ap A x) (ap B x))
+#reduction abs-to-eq
 abs-eq (X : U)
   : to (to X U) (to (to X U) (to X U))
 abs-eq-eq (X : U) (A : to X U) (B : to X U) 
   (x : X) 
   : eq (ap (ap (ap (abs-eq) A) B) x) (eq (ap A x) (ap B x))
+#reduction abs-eq-eq
 
 meta 
     schema void-schema = 
@@ -65,7 +74,7 @@ meta
     schema unit-schema = 
         fun ctx => fun s => 
           match s with 
-          | [_, (_,_,_), _, _] => 
+          | [_, (_,_,_,_), _, _] =>
           (Ok [
             ?,
             ?,
@@ -74,18 +83,18 @@ meta
             ])
           | _ => (Error "invalid")
           end
-construct by unit-schema
+-- construct by unit-schema
+postulate
 unit : U
 unit-star : unit
 unit-rec : pi (ap (ap abs-to (ap abs-const unit)) (ap (ap abs-to abs-ident) abs-ident))
 unit-rec-eq (M : U) (star-case : M) : 
-  -- eq ap ...
-  -- ap (ap (ap cast ⟐) (dap unit-rec M)) unit-star
   eq M M (ap (ap 
-    (ap (ap cast ⟐) (dap unit-rec M))
+    (dap unit-rec M)
      unit-star) star-case) star-case
-  -- ... star-case star-case
 
+    -- (ap (ap cast ?) (dap unit-rec M))
+    
 -- doesn't work because the motive needs to be abstractible
 -- construct by unit-schema
 -- unit : U

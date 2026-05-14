@@ -35,11 +35,15 @@ TopBinaryExpr {
 
 Block { Postulate | Meta | Construct }
 
-Postulate { Postulate_kw (Terminator | PostItem)+ Decl? }
-Construct { Construct_kw By_kw Identifier (Terminator | PostItem)+ Decl? }
+Postulate { Postulate_kw (Terminator | PostItem | TagLine)+ Decl? }
+Construct { Construct_kw By_kw Identifier (Terminator | PostItem | TagLine)+ Decl? }
 Meta      { Meta_kw      (Terminator | MetaItem)+ }
 
 PostItem { Decl Terminator }
+
+/* A tag-line decorates an existing OL binding with a previously-
+   introduced tag. Doesn't bind a new name. */
+TagLine { Tag Identifier Terminator }
 
 Decl {
   ItemHead (":" TypeExpr)?
@@ -54,6 +58,7 @@ Param { LParen Identifier+ ":" TypeExpr RParen }
 
 MetaItem {
   (Schema_kw | Coerce_kw)? Identifier (":" Expr)? "=" Expr
+| Newtag_kw Tag
 }
 
 /* === Expressions === */
@@ -117,6 +122,7 @@ AtomExpr {
 | Auto
 | Wildcard
 | StringLit
+| Tag
 | LParen CommaSep<ParenInner>? RParen
 | LBracket CommaSep<ParenInner>? RBracket
 }
@@ -178,6 +184,11 @@ PatAtom {
   Hole { "?" }
   Auto { "\u{27D0}" }
   Wildcard { "_" }
+  /* A tag reference: `#name` where the name follows identifier rules. */
+  Tag {
+    "#" @asciiLetter (@asciiLetter | @digit | "_")*
+    ("-" (@asciiLetter | @digit | "_")+)*
+  }
 
   StringLit { "\"" ![\"]* "\"" }
 
@@ -200,6 +211,7 @@ By_kw        { @specialize<Identifier, "by"> }
 End_kw       { @specialize<Identifier, "end"> }
 Schema_kw    { @specialize<Identifier, "schema"> }
 Coerce_kw    { @specialize<Identifier, "coerce"> }
+Newtag_kw    { @specialize<Identifier, "newtag"> }
 Let_kw       { @specialize<Identifier, "let"> }
 In_kw        { @specialize<Identifier, "in"> }
 Match_kw     { @specialize<Identifier, "match"> }

@@ -68,6 +68,7 @@ type mlType =
   | MSort
   | MBool
   | MString
+  | MTag                                     /* `#name` tag value */
   | MList(mlType)
   | MResult(mlType)
   | MTuple(list(mlType))                     /* (A, B, C) — arbitrary arity */
@@ -96,6 +97,7 @@ type cML =
   | Hole(holeKind)
   | Identifier(string)                        /* x — could be OL or ML, resolved by checker */
   | StringLit(string)
+  | TagLit(string)                            /* #name — tag-value literal */
   | Tuple(list(ml))                          /* (a, b, c) */
   | Asc(ml, ml)                              /* x : T — ascription (mostly syntactic) */
   | BinOp(binOp, ml, ml)                     /* a == b, a && b, etc. */
@@ -126,20 +128,30 @@ type metaDef =
   | LetDef(binding)                          /* name (: type) = body */
   | SchemaDef(binding)                       /* schema name (: type) = body */
   | CoerceDef(binding)                       /* coerce name (: type) = body */
+  /* `newtag #foo` — introduces the tag #foo into the tag namespace. */
+  | NewtagDef(string, meta)
+
+/* `#tag constructor` decoration in a postulate/construct block. Doesn't
+   introduce a name; records that `target` carries `tag`. */
+type tagLine = {
+  tag: string,
+  target: string,
+  lineMeta: meta,
+};
 
 /* === Program structure === */
 
 type block =
-  /* Postulate(blockMeta, decls) — blockMeta is the full source range of
-     the block (from the `postulate` keyword to the last decl). Used to
-     anchor the per-block completeness ✓ and to filter against errors. */
-  | Postulate(meta, list(decl))
+  /* Postulate(blockMeta, decls, tagLines) — blockMeta is the full source
+     range of the block (from the `postulate` keyword to the last decl).
+     Used to anchor the per-block completeness ✓ and to filter against
+     errors. tagLines decorate already-declared bindings. */
+  | Postulate(meta, list(decl), list(tagLine))
   | Meta(list(metaDef))
-  /* Construct(schemaName, schemaMeta, blockMeta, decls) — schemaMeta is
-     the source range of the schema-name identifier (used to localize
-     schema-related errors); blockMeta is the full block range (used for
-     the completeness ✓). */
-  | Construct(string, meta, meta, list(decl))
+  /* Construct(schemaName, schemaMeta, blockMeta, decls, tagLines) —
+     schemaMeta localizes schema-related errors; blockMeta is the full
+     block range. */
+  | Construct(string, meta, meta, list(decl), list(tagLine))
 
 type program = list(block);
 
