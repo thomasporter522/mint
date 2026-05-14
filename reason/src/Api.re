@@ -77,9 +77,11 @@ external makeJsResult:
   (
     ~errors: array(jsError),
     ~holes: array(array(Obj.t)),
+    ~autoHoles: array(array(Obj.t)),
     ~inlayHints: array(array(Obj.t)),
     ~definitions: array(array(int)),
     ~completeBlocks: array(array(int)),
+    ~allBlocks: array(array(int)),
   ) =>
   jsResult =
   "";
@@ -93,19 +95,15 @@ let resultOfStatics = (statics: staticInfo): jsResult => {
         statics.errors,
       ),
     );
-  let holes =
-    Array.of_list(
-      List.map(
-        ((pos, info): (int, holeInfo)) =>
-          [|
-            Obj.repr(pos),
-            Obj.repr(
-              makeJsHoleInfo(~goal=info.goal, ~context=contextToJsMap(info.context)),
-            ),
-          |],
-        statics.holes,
+  let holeToJs = ((pos, info): (int, holeInfo)) =>
+    [|
+      Obj.repr(pos),
+      Obj.repr(
+        makeJsHoleInfo(~goal=info.goal, ~context=contextToJsMap(info.context)),
       ),
-    );
+    |];
+  let holes = Array.of_list(List.map(holeToJs, statics.holes));
+  let autoHoles = Array.of_list(List.map(holeToJs, statics.autoHoles));
   /* Inlay hints carry ghost terms (already zonked at the decl boundary).
      Each entry surfaces both a label (collapsed to `…` when every ghost
      resolved, or the values rendering otherwise) and a tooltip (always
@@ -141,7 +139,14 @@ let resultOfStatics = (statics: staticInfo): jsResult => {
         statics.completeBlocks,
       ),
     );
-  makeJsResult(~errors, ~holes, ~inlayHints, ~definitions, ~completeBlocks);
+  let allBlocks =
+    Array.of_list(
+      List.map(
+        (m: meta) => [|m.start, m.end_|],
+        statics.allBlocks,
+      ),
+    );
+  makeJsResult(~errors, ~holes, ~autoHoles, ~inlayHints, ~definitions, ~completeBlocks, ~allBlocks);
 };
 
 /* === Pipeline entry points ===
@@ -154,6 +159,99 @@ let processProgramJs = (jsArr: array(jsObj)): jsResult => {
 };
 
 let printTerm = (t: ml): string => Print.printML(t);
+
+/* Focused verification of a Canonical candidate. Called by the bridge
+   AFTER `processProgramJs` has populated `autoHoleContextsRef`. The
+   candidate is decoded as an OL term and checked at the saved
+   (context, expected) for the auto-hole at `offset`. Returns the list
+   of errors (empty = candidate accepted). */
+let verifyAutoCandidateJs = (offset: int, candidateJs: jsObj): array(jsError) => {
+  let candidate = Decode.decodeOL(candidateJs);
+  let errs = Check.verifyAutoCandidate(offset, candidate);
+  Array.of_list(
+    List.map(
+      (e: Error.error) =>
+        makeJsError(~type_=e.type_, ~message=e.message, ~from=e.from, ~to_=e.to_),
+      errs,
+    ),
+  );
+};
+
+/* Build a Reason context (StringMap of bindings) from a meta-level
+   signature list, the same shape `canonical` and schemas receive. */
+let contextOfSignatureML = (ctxMl: ml): Check.context =>
+  switch (ctxMl.value) {
+  | List(entries) =>
+    List.fold_left(
+      (acc, entry: ml) =>
+        switch (entry.value) {
+        | Tuple([nameT, paramsT, retT]) =>
+          let name =
+            switch (nameT.value) {
+            | Identifier(n) => n
+            | _ => "_"
+            };
+          let params: list((option(string), ol)) =
+            switch (paramsT.value) {
+            | List(ps) =>
+              List.map(
+                (p: ml) =>
+                  switch (p.value) {
+                  | Tuple([pn, pty]) =>
+                    let pname =
+                      switch (pn.value) {
+                      | Identifier(s) => Some(s)
+                      | _ => None
+                      };
+                    (pname, Check.mlToOL(pty));
+                  | _ => (None, Check.olHole)
+                  },
+                ps,
+              )
+            | _ => []
+            };
+          let retOL = Check.mlToOL(retT);
+          StringMap.add(name, Check.OL(Some((params, retOL)), None), acc);
+        | _ => acc
+        },
+      StringMap.empty,
+      entries,
+    )
+  | _ => StringMap.empty
+  };
+
+/* Verify a candidate against a context expressed as a signature list
+   (same shape `canonical` receives meta-side). Used by the bridge's
+   `canonical` callback to verify what the solver returns. */
+let verifyCandidateInContextJs =
+    (ctxJs: jsObj, expectedJs: jsObj, candidateJs: jsObj): array(jsError) => {
+  let ctx = contextOfSignatureML(Decode.decodeML(ctxJs));
+  let expected = Decode.decodeOL(expectedJs);
+  let candidate = Decode.decodeOL(candidateJs);
+  let (info, _) =
+    Check.checkOLTerm(
+      Check.emptyElabState,
+      ctx,
+      Check.Expression(Some(expected)),
+      candidate,
+    );
+  Array.of_list(
+    List.map(
+      (e: Error.error) =>
+        makeJsError(~type_=e.type_, ~message=e.message, ~from=e.from, ~to_=e.to_),
+      info.errors,
+    ),
+  );
+};
+
+/* Bridge registration: install a JS function as the Canonical solver
+   callback that Eval invokes when it encounters `canonical(ctx, goal)`.
+   The callback receives the evaluated ctx and goal as ml ASTs and
+   returns an ml AST (`Ok candidate` or `Error msg`). */
+let setCanonicalCallbackJs = (fn: (jsObj, jsObj) => jsObj): unit =>
+  Eval.setCanonicalCallback((ctx, goal) =>
+    Decode.decodeML(fn(Obj.magic(ctx), Obj.magic(goal)))
+  );
 
 let printProgramJs = (jsArr: array(jsObj)): string => {
   let prog = decodeProgram(jsArr);

@@ -7,7 +7,7 @@ export type Meta = { parens: boolean; start: number; end: number }
 
 export const defaultMeta: Meta = { parens: false, start: -1, end: -1 }
 
-export type HoleKind = 'User' | 'Synthesized'
+export type HoleKind = 'User' | 'Synthesized' | 'Auto'
 export type BinOp = 'Eq' | 'Neq' | 'And' | 'Or'
 
 /* === Object-language terms ===

@@ -80,3 +80,19 @@ vscode-uninstall:
 	else \
 		echo "Not installed: $(VSCODE_EXT_DIR)"; \
 	fi
+
+# Build the Canonical solver from the vendor/Canonical submodule. Produces
+# vendor/Canonical/target/release/canonical-compat — the CLI entrypoint
+# that loads a JSON IR problem and emits an inhabitant. Skips the Lean
+# cdylib (we don't link against the Lean tactic here).
+.PHONY: canonical canonical-init
+canonical-init:
+	git submodule update --init --recursive vendor/Canonical
+
+CANONICAL_BIN := vendor/Canonical/target/release/canonical-compat
+canonical:
+	@if [ ! -d vendor/Canonical/.git ] && [ ! -f vendor/Canonical/.git ]; then \
+		echo "vendor/Canonical not initialized; run 'make canonical-init'"; exit 1; \
+	fi
+	cd vendor/Canonical && cargo build --release --bin canonical-compat
+	@echo "Built: $(CANONICAL_BIN)"

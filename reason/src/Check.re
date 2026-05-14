@@ -139,6 +139,10 @@ type holeInfo = {
 type staticInfo = {
   errors: list(error),
   holes: list((int, holeInfo)),
+  /* `⟐` auto-hole sites: same shape as `holes`, recorded separately so
+     the JS bridge can invoke Canonical only for these. After Canonical
+     returns a candidate, the source is rewritten and re-elaborated. */
+  autoHoles: list((int, holeInfo)),
   /* For each OL-side hole, the expected OL term at registration time —
      kept on the side so we can zonk it at the decl boundary (after any
      unification on metas reachable from the expected). The ml-embedded
@@ -152,6 +156,11 @@ type staticInfo = {
      `postulate` / `construct` keyword) and the bridge filters out
      blocks whose range overlaps a syntax error. */
   completeBlocks: list(meta),
+  /* Every parsed block's source range (regardless of completeness).
+     The bridge uses this to recompute block-level checkmarks after
+     resolving Canonical auto-holes — a block that was incomplete only
+     because of an auto-hole becomes complete once Canonical fills it. */
+  allBlocks: list(meta),
   /* Inlay hints: (offset, hintKind, ghost terms) — anchored just before
      `offset`. Ghost terms carried (not rendered strings) so they can be
      zonked at the decl boundary against the local solutions map; the
@@ -182,7 +191,7 @@ let olHole: ol = mkOL(OLHole(User));
 let mlHole: ml = mkML(Hole(Synthesized));
 let fullHole: fullType = ([], olHole);
 
-let emptyInfo = {errors: [], pendingHoleGoals: [], holes: [], inlayHints: [], definitions: [], inferred: None, mlInferred: None, elaborated: None, elaboratedDecls: [], completeBlocks: [], bindings: StringMap.empty};
+let emptyInfo = {errors: [], pendingHoleGoals: [], holes: [], inlayHints: [], definitions: [], inferred: None, mlInferred: None, elaborated: None, elaboratedDecls: [], completeBlocks: [], bindings: StringMap.empty, autoHoles: [], allBlocks: []};
 
 /* MetaLet definitions in definition order, for eval env construction.
    Set by Meta block processing, read by Construct block. */
@@ -196,6 +205,14 @@ let metaDefsRef: ref(list((string, ml))) = ref([]);
    threading of state but the cross-block scope is most naturally a
    module-local ref, matching the existing `metaDefsRef` pattern. */
 let completenessRef: ref(StringMap.t(bool)) = ref(StringMap.empty);
+
+/* `⟐` auto-hole sites recorded during the program check: maps the
+   source offset of each `⟐` to its (context, expected type) at
+   elaboration time.  Read by the externally-exposed
+   `verifyAutoCandidateJs` so the bridge can present a candidate to the
+   kernel for a focused check (no re-elaboration of the program).
+   Reset per `checkProgram`. */
+let autoHoleContextsRef: ref(IntMap.t((context, ol))) = ref(IntMap.empty);
 
 /* True if a term contains any hole-shaped subterm (user hole,
    synthesized hole, or unsolved meta). */
@@ -246,6 +263,7 @@ let mergeInfos = (i1: staticInfo, i2: staticInfo): staticInfo => {
   errors: i1.errors @ i2.errors,
 
   holes: i1.holes @ i2.holes,
+  autoHoles: i1.autoHoles @ i2.autoHoles,
   pendingHoleGoals: i1.pendingHoleGoals @ i2.pendingHoleGoals,
   inlayHints: i1.inlayHints @ i2.inlayHints,
   definitions: i1.definitions @ i2.definitions,
@@ -254,6 +272,7 @@ let mergeInfos = (i1: staticInfo, i2: staticInfo): staticInfo => {
   elaborated: None,
   elaboratedDecls: i1.elaboratedDecls @ i2.elaboratedDecls,
   completeBlocks: i1.completeBlocks @ i2.completeBlocks,
+  allBlocks: i1.allBlocks @ i2.allBlocks,
   bindings: mergeBindings(i1.bindings, i2.bindings),
 };
 
@@ -798,11 +817,18 @@ let mlBuiltins: context =
       ("snd", Builtin("snd")),
       ("foldl", Builtin("foldl")),
       ("apply", Builtin("apply")),
+      ("append", Builtin("append")),
       /* Monomorphic builtins */
       ("true", ML(MBool)),
       ("false", ML(MBool)),
       ("Ok", Builtin("Ok")),
       ("Error", Builtin("Error")),
+      /* Canonical solver: takes a context (list of signatures, same
+         shape as the outer scope passed to schemas) and an expected
+         type, returns a Result Term. The bridge wires the actual
+         JS-side invocation; without it the call evaluates to
+         Error "canonical not available". */
+      ("canonical", Builtin("canonical")),
     ],
   );
 
@@ -1316,7 +1342,7 @@ and checkOLTerm =
       switch (lookupCtx(ctx, v)) {
       | NotFound =>
         let err = mark("Unbound variable " ++ v, t.meta.start, t.meta.end_);
-        let info = {errors: [err, ...modeErrors], pendingHoleGoals: [], holes: [], inlayHints: [], definitions: [], inferred: None, mlInferred: None, elaborated: Some(t), elaboratedDecls: [], completeBlocks: [], bindings: StringMap.empty};
+        let info = {errors: [err, ...modeErrors], pendingHoleGoals: [], holes: [], inlayHints: [], definitions: [], inferred: None, mlInferred: None, elaborated: Some(t), elaboratedDecls: [], completeBlocks: [], bindings: StringMap.empty, autoHoles: [], allBlocks: []};
         (info, state);
       | Found(Some((params, retType)), defSite)
           when Option.is_some(expected) && List.length(params) > 0 =>
@@ -1393,6 +1419,8 @@ and checkOLTerm =
         let info = {
           errors: modeErrors @ subErrors,
           holes: [],
+          autoHoles: [],
+          allBlocks: [],
           pendingHoleGoals: [],
           inlayHints: hints,
           definitions,
@@ -1417,11 +1445,11 @@ and checkOLTerm =
           | Some(dm) when !t.meta.ghost => [(t.meta, dm)]
           | _ => []
           };
-        let info = {errors: modeErrors @ subErrors, pendingHoleGoals: [], holes: [], inlayHints: coerceHints, definitions, inferred, mlInferred: None, elaborated: Some(elaborated), elaboratedDecls: [], completeBlocks: [], bindings: StringMap.empty};
+        let info = {errors: modeErrors @ subErrors, pendingHoleGoals: [], holes: [], inlayHints: coerceHints, definitions, inferred, mlInferred: None, elaborated: Some(elaborated), elaboratedDecls: [], completeBlocks: [], bindings: StringMap.empty, autoHoles: [], allBlocks: []};
         (info, state');
       }
     | _ =>
-      let info = {errors: modeErrors, pendingHoleGoals: [], holes: [], inlayHints: [], definitions: [], inferred: None, mlInferred: None, elaborated: Some(t), elaboratedDecls: [], completeBlocks: [], bindings: StringMap.empty};
+      let info = {errors: modeErrors, pendingHoleGoals: [], holes: [], inlayHints: [], definitions: [], inferred: None, mlInferred: None, elaborated: Some(t), elaboratedDecls: [], completeBlocks: [], bindings: StringMap.empty, autoHoles: [], allBlocks: []};
       (info, state);
     };
 
@@ -1572,13 +1600,14 @@ and checkOLTerm =
       ({...withErrors(info, modeErrors), elaborated: Some(t)}, finalState);
     }
 
-  | OLHole(_) =>
+  | OLHole(hk) =>
     /* A user `?` and an elaborator-inserted meta are the SAME concept:
        a unification variable. We allocate a fresh meta here and use it
        as the elaborated form. Subsequent type-level propagation (via
        this position's expected type, recorded on the meta) can solve it.
        The original source position is still registered as a user hole
-       so the IDE's holes panel shows it. */
+       so the IDE's holes panel shows it. `⟐` (Auto) additionally records
+       an autoHoles entry so the JS bridge can dispatch to Canonical. */
     switch (mode) {
     | Expression(expected) =>
       let expectedTy =
@@ -1603,12 +1632,23 @@ and checkOLTerm =
         | Some(e) => [(t.meta.start, e)]
         | None => []
         };
+      let autoHoles =
+        switch (hk) {
+        | Auto =>
+          /* Stash the context+expected so the JS bridge can later
+             present a candidate term to a focused checkOLTerm via
+             `verifyAutoCandidateJs(offset, candidateOL)`. */
+          autoHoleContextsRef :=
+            IntMap.add(t.meta.start, (ctx, expectedTy), autoHoleContextsRef^);
+          [(t.meta.start, {goal, context: ctx})];
+        | _ => []
+        };
       let info = {errors: [], pendingHoleGoals: pending, holes: [(t.meta.start, {goal, context: ctx})], inlayHints: [], definitions: [],
-                   inferred: Some(([], expectedTy)), mlInferred: None, elaborated: Some(metaTerm), elaboratedDecls: [], completeBlocks: [], bindings: StringMap.empty};
+                   inferred: Some(([], expectedTy)), mlInferred: None, elaborated: Some(metaTerm), elaboratedDecls: [], completeBlocks: [], bindings: StringMap.empty, autoHoles, allBlocks: []};
       (info, state1);
     | _ =>
       let info = {errors: [mark("Hole in non-expression", t.meta.start, t.meta.end_)],
-                   pendingHoleGoals: [], holes: [], inlayHints: [], definitions: [], inferred: Some(fullHole), mlInferred: None, elaborated: Some(t), elaboratedDecls: [], completeBlocks: [], bindings: StringMap.empty};
+                   pendingHoleGoals: [], holes: [], inlayHints: [], definitions: [], inferred: Some(fullHole), mlInferred: None, elaborated: Some(t), elaboratedDecls: [], completeBlocks: [], bindings: StringMap.empty, autoHoles: [], allBlocks: []};
       (info, state);
     }
 
@@ -1625,11 +1665,11 @@ and checkOLTerm =
         | None => olHole
         };
       let info = {errors: [], pendingHoleGoals: [], holes: [], inlayHints: [], definitions: [],
-                   inferred: Some(([], inferredTy)), mlInferred: None, elaborated: Some(t), elaboratedDecls: [], completeBlocks: [], bindings: StringMap.empty};
+                   inferred: Some(([], inferredTy)), mlInferred: None, elaborated: Some(t), elaboratedDecls: [], completeBlocks: [], bindings: StringMap.empty, autoHoles: [], allBlocks: []};
       (info, state);
     | _ =>
       let info = {errors: [mark("Hole in non-expression", t.meta.start, t.meta.end_)],
-                   pendingHoleGoals: [], holes: [], inlayHints: [], definitions: [], inferred: Some(fullHole), mlInferred: None, elaborated: Some(t), elaboratedDecls: [], completeBlocks: [], bindings: StringMap.empty};
+                   pendingHoleGoals: [], holes: [], inlayHints: [], definitions: [], inferred: Some(fullHole), mlInferred: None, elaborated: Some(t), elaboratedDecls: [], completeBlocks: [], bindings: StringMap.empty, autoHoles: [], allBlocks: []};
       (info, state);
     }
   }
@@ -1723,11 +1763,22 @@ and checkPat = (ctx: context, ty: mlType, t: pat): (context, staticInfo) =>
     }
 
   | PAp(headPat, argPats) =>
-    /* OL pattern: constructor application */
-    if (eqType(ty, MTerm)) {
-      checkOLPatAp(ctx, headPat, argPats)
-    } else {
-      /* Allow OL patterns when type is unknown/any */
+    /* Constructor patterns: dispatch on scrutinee type.
+       - MTerm     → OL constructor pattern (existing checkOLPatAp path).
+       - MResult t → recognise Ok/Error: `Ok x` binds x:t, `Error msg`
+                     binds msg:MString. The runtime pattern matcher
+                     already handles these structurally. */
+    switch (ty) {
+    | MTerm => checkOLPatAp(ctx, headPat, argPats)
+    | MResult(inner) =>
+      switch (headPat.value, argPats) {
+      | (PVar("Ok"), [argPat]) => checkPat(ctx, inner, argPat)
+      | (PVar("Error"), [argPat]) => checkPat(ctx, MString, argPat)
+      | _ =>
+        (ctx, withErrors(emptyInfo,
+          [mark("Result pattern must be `Ok x` or `Error msg`", t.meta.start, t.meta.end_)]))
+      }
+    | _ =>
       (ctx, withErrors(emptyInfo,
         [mark("Constructor pattern but expected " ++ printType(ty), t.meta.start, t.meta.end_)]))
     }
@@ -1815,7 +1866,7 @@ and inferExpr = (ctx: context, t: ml): staticInfo =>
 
   | Hole(_) =>
     {errors: [], pendingHoleGoals: [], holes: [(t.meta.start, {goal: mlHole, context: ctx})], inlayHints: [], definitions: [],
-     inferred: Some(([], olHole)), mlInferred: Some(MTerm), elaborated: None, elaboratedDecls: [], completeBlocks: [], bindings: StringMap.empty}
+     inferred: Some(([], olHole)), mlInferred: Some(MTerm), elaborated: None, elaboratedDecls: [], completeBlocks: [], bindings: StringMap.empty, autoHoles: [], allBlocks: []}
 
   | Ap({value: Identifier("fst"), _}, [arg]) =>
     let argInfo = inferExpr(ctx, arg);
@@ -1841,6 +1892,22 @@ and inferExpr = (ctx: context, t: ml): staticInfo =>
     let headInfo = checkExpr(ctx, MTerm, headArg);
     let argsInfo = checkExpr(ctx, MList(MTerm), argsArg);
     setMlType(mergeInfos(headInfo, argsInfo), MTerm);
+
+  | Ap({value: Identifier("canonical"), _}, [ctxArg, goalArg]) =>
+    /* canonical : List (Term, List (Term, Term), Term) -> Term ->
+       Result Term.  First arg is a context in the same shape as the
+       outer-scope signatures schemas receive; second is the goal. */
+    let ctxInfo = checkExpr(ctx, MList(signatureType), ctxArg);
+    let goalInfo = checkExpr(ctx, MTerm, goalArg);
+    setMlType(mergeInfos(ctxInfo, goalInfo), MResult(MTerm));
+
+  | Ap({value: Identifier("append"), _}, [xsArg, ysArg]) =>
+    /* append : List a -> List a -> List a. Both arguments must agree
+       on element type; we infer the first and check the second. */
+    let xsInfo = inferExpr(ctx, xsArg);
+    let xsTy = getInferredMlType(xsInfo);
+    let ysInfo = checkExpr(ctx, xsTy, ysArg);
+    setMlType(mergeInfos(xsInfo, ysInfo), xsTy);
 
   | Ap({value: Identifier("foldl"), _}, [fArg, initArg, listArg]) =>
     /* Custom typing for foldl: infer init and list types, check f for consistency */
@@ -2003,7 +2070,7 @@ and checkExpr = (ctx: context, expected: mlType, t: ml): staticInfo =>
   | Hole(_) =>
     let goal = mlTypeToTerm(expected);
     {errors: [], pendingHoleGoals: [], holes: [(t.meta.start, {goal, context: ctx})], inlayHints: [], definitions: [],
-     inferred: None, mlInferred: None, elaborated: None, elaboratedDecls: [], completeBlocks: [], bindings: StringMap.empty};
+     inferred: None, mlInferred: None, elaborated: None, elaboratedDecls: [], completeBlocks: [], bindings: StringMap.empty, autoHoles: [], allBlocks: []};
 
   | Fun(pats, body) =>
     switch (pats, expected) {
@@ -2421,7 +2488,11 @@ let checkBlock = (ctx: context, block: block): (staticInfo, context) =>
     let (info, finalCtx) = checkDeclList(ctx, decls);
     let completeBlocks =
       allDeclsComplete(decls) ? [blockMeta] : [];
-    let info = {...info, completeBlocks: info.completeBlocks @ completeBlocks};
+    let info = {
+      ...info,
+      completeBlocks: info.completeBlocks @ completeBlocks,
+      allBlocks: info.allBlocks @ [blockMeta],
+    };
     (withBindings(info, finalCtx), finalCtx);
 
   | Meta(defs) =>
@@ -2463,7 +2534,11 @@ let checkBlock = (ctx: context, block: block): (staticInfo, context) =>
     let info = withErrors(bodyInfo, witnessErrors);
     let completeBlocks =
       allDeclsComplete(decls) ? [blockMeta] : [];
-    let info = {...info, completeBlocks: info.completeBlocks @ completeBlocks};
+    let info = {
+      ...info,
+      completeBlocks: info.completeBlocks @ completeBlocks,
+      allBlocks: info.allBlocks @ [blockMeta],
+    };
     (withBindings(info, finalCtx), finalCtx);
   };
 
@@ -2471,6 +2546,7 @@ let checkProgram = (ctx: context, prog: program): staticInfo => {
   /* Reset per-program state. */
   completenessRef := StringMap.empty;
   metaDefsRef := [];
+  autoHoleContextsRef := IntMap.empty;
   let (info, _) =
     List.fold_left(
       ((accInfo, accCtx), block) => {
@@ -2482,6 +2558,21 @@ let checkProgram = (ctx: context, prog: program): staticInfo => {
     );
   info;
 };
+
+/* Focused check of a Canonical-supplied candidate against the saved
+   (context, expected) for an auto-hole at `offset`. Runs the kernel's
+   checkOLTerm in Expression(Some(expected)) mode with a fresh elabState
+   — no global re-elaboration, no source rewriting. Returns the errors
+   the candidate produced (empty list = type-checks). */
+let verifyAutoCandidate = (offset: int, candidate: ol): list(error) =>
+  switch (IntMap.find_opt(offset, autoHoleContextsRef^)) {
+  | None =>
+    [Error.mark("No auto-hole context recorded at this offset", offset, offset)]
+  | Some((ctx, expected)) =>
+    let (info, _) =
+      checkOLTerm(emptyElabState, ctx, Expression(Some(expected)), candidate);
+    info.errors;
+  };
 
 /* elaborate : Program → (Program, errors)
    Top-level entry that runs the checker and re-emits the program with

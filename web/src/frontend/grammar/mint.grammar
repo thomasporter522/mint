@@ -87,6 +87,7 @@ TypeBinary {
 TypeAtom {
   Identifier
 | Hole
+| Auto
 | Wildcard
 | StringLit
 | LParen CommaSep<ParenInner>? RParen
@@ -113,6 +114,7 @@ BinaryExpr {
 AtomExpr {
   Identifier
 | Hole
+| Auto
 | Wildcard
 | StringLit
 | LParen CommaSep<ParenInner>? RParen
@@ -174,6 +176,7 @@ PatAtom {
   }
 
   Hole { "?" }
+  Auto { "\u{27D0}" }
   Wildcard { "_" }
 
   StringLit { "\"" ![\"]* "\"" }

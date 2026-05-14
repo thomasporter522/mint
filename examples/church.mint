@@ -80,7 +80,10 @@ unit-star : unit
 unit-rec : pi (ap (ap abs-to (ap abs-const unit)) (ap (ap abs-to abs-ident) abs-ident))
 unit-rec-eq (M : U) (star-case : M) : 
   -- eq ap ...
-  ap (dap unit-rec M) unit-star
+  -- ap (ap (ap cast ⟐) (dap unit-rec M)) unit-star
+  eq M M (ap (ap 
+    (ap (ap cast ⟐) (dap unit-rec M))
+     unit-star) star-case) star-case
   -- ... star-case star-case
 
 -- doesn't work because the motive needs to be abstractible

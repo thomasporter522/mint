@@ -96,6 +96,8 @@ export function buildOL(node: SyntaxNode, src: string): OL {
       return mkOL({ kind: 'OLIdentifier', name: text(node, src) }, m)
     case 'Hole':
       return mkOL({ kind: 'OLHole', hk: 'User' }, m)
+    case 'Auto':
+      return mkOL({ kind: 'OLHole', hk: 'Auto' }, m)
     case 'Wildcard':
       return mkOL({ kind: 'OLHole', hk: 'User' }, m)  // Wildcard in OL → hole
     case 'AppInner': {
@@ -477,8 +479,12 @@ function buildMetaDef(node: SyntaxNode, src: string): MetaDef {
 function buildBlock(node: SyntaxNode, src: string): Block | null {
   switch (node.name) {
     case 'Postulate': {
-      const decls = childrenByName(node, 'PostItem')
+      // Grammar allows an optional file-final bare `Decl` (no trailing
+      // Terminator) after the run of PostItems — collect both forms.
+      const items = childrenByName(node, 'PostItem')
         .map(p => firstChildByName(p, 'Decl'))
+      const tail = childrenByName(node, 'Decl')
+      const decls = [...items, ...tail]
         .filter((d): d is SyntaxNode => d !== null)
         .map(d => buildDecl(d, src))
       return { kind: 'Postulate', blockMeta: metaOf(node), decls }
@@ -488,8 +494,10 @@ function buildBlock(node: SyntaxNode, src: string): Block | null {
       const id = firstChildByName(node, 'Identifier')
       const schema = id ? text(id, src) : '_'
       const schemaMeta = id ? metaOf(id) : metaOf(node)
-      const decls = childrenByName(node, 'PostItem')
+      const items = childrenByName(node, 'PostItem')
         .map(p => firstChildByName(p, 'Decl'))
+      const tail = childrenByName(node, 'Decl')
+      const decls = [...items, ...tail]
         .filter((d): d is SyntaxNode => d !== null)
         .map(d => buildDecl(d, src))
       return { kind: 'Construct', schema, schemaMeta, blockMeta: metaOf(node), decls }

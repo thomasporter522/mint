@@ -9,6 +9,7 @@ const mintParser = parser.configure({
       'Postulate_kw Construct_kw Meta_kw By_kw End_kw Schema_kw Coerce_kw Let_kw In_kw Match_kw With_kw Fun_kw If_kw Then_kw Else_kw': t.keyword,
       Identifier: t.variableName,
       Hole: t.punctuation,
+      Auto: t.punctuation,
       StringLit: t.string,
       LineComment: t.lineComment,
       LParen: t.paren,

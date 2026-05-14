@@ -19,6 +19,17 @@ type evalResult =
   | Ok(mlValue)
   | Err(string);
 
+/* Bridge-injected resolver for `canonical(ctx, goal)`. The bridge sets
+   this once at startup; if unset (e.g. running in a context with no
+   `child_process`) calls evaluate to `Error "canonical not available"`.
+   The function receives the evaluated ctx and goal as ml AST values
+   and returns the result as an ml AST value — either
+   `Ap(Identifier "Ok", [candidate])` or
+   `Ap(Identifier "Error", [StringLit msg])`. */
+let canonicalCallbackRef: ref(option((ml, ml) => ml)) = ref(None);
+let setCanonicalCallback = (cb: (ml, ml) => ml): unit =>
+  canonicalCallbackRef := Some(cb);
+
 /* --- Structural equality on ml terms --- */
 
 let rec termEqual = (a: ml, b: ml): bool =>
@@ -123,22 +134,53 @@ let rec matchPat = (bindings: evalEnv, p: pat, value: mlValue): option(evalEnv) 
     switch (value) {
     | Val({value: Ap(vF, vArgs), _})
         when List.length(argPats) == List.length(vArgs) =>
-      switch (matchPat(bindings, headPat, Val(vF))) {
-      | None => None
-      | Some(b) =>
-        List.fold_left2(
-          (acc, p, v) =>
-            switch (acc) {
-            | None => None
-            | Some(b) => matchPat(b, p, Val(v))
-            },
-          Some(b),
-          argPats,
-          vArgs,
-        )
+      /* When the head pattern is an Identifier-shaped PVar (e.g. `Ok x`,
+         `Error msg`), treat it as a constructor check — match only if
+         the value's head identifier has the same name, and do NOT bind
+         the name. Otherwise PVar would match any 1-ary application,
+         making `Ok x` and `Error msg` indistinguishable. */
+      switch (headPat.value, vF.value) {
+      | (PVar(name), Identifier(vname)) when isConstructorName(name) =>
+        if (name != vname) {
+          None;
+        } else {
+          List.fold_left2(
+            (acc, p, v) =>
+              switch (acc) {
+              | None => None
+              | Some(b) => matchPat(b, p, Val(v))
+              },
+            Some(bindings),
+            argPats,
+            vArgs,
+          );
+        }
+      | _ =>
+        switch (matchPat(bindings, headPat, Val(vF))) {
+        | None => None
+        | Some(b) =>
+          List.fold_left2(
+            (acc, p, v) =>
+              switch (acc) {
+              | None => None
+              | Some(b) => matchPat(b, p, Val(v))
+              },
+            Some(b),
+            argPats,
+            vArgs,
+          )
+        }
       }
     | _ => None
     }
+  }
+/* Identifiers that should be matched as constructors in PAp head
+   position rather than bound as fresh variables.  Mirrors the
+   meta-language builtins that act as value constructors. */
+and isConstructorName = (name: string): bool =>
+  switch (name) {
+  | "Ok" | "Error" | "true" | "false" => true
+  | _ => false
   };
 
 /* --- Expression evaluation --- */
@@ -306,6 +348,39 @@ and evalApp = (env: evalEnv, fVal: mlValue, args: list(ml)): evalResult =>
       | Ok(Val({value: List(items), _})) =>
         Ok(Val(mk(Ap(termOf(headVal), items))))
       | Ok(_) => Err("apply: second argument must be a list")
+      }
+    }
+  /* append xs ys — list concatenation. Both args must be lists; we
+     don't enforce element-type agreement at runtime (the typechecker
+     already did). */
+  | (Val({value: Identifier("append"), _}), [xsArg, ysArg]) =>
+    switch (evalExpr(env, xsArg)) {
+    | Err(_) as e => e
+    | Ok(Val({value: List(xs), _})) =>
+      switch (evalExpr(env, ysArg)) {
+      | Err(_) as e => e
+      | Ok(Val({value: List(ys), _})) => Ok(Val(mk(List(xs @ ys))))
+      | Ok(_) => Err("append: second argument must be a list")
+      }
+    | Ok(_) => Err("append: first argument must be a list")
+    }
+  /* canonical ctx goal — invoke the bridge-registered solver callback
+     and lift its returned (Ok|Error) ml term into mlValue. */
+  | (Val({value: Identifier("canonical"), _}), [ctxArg, goalArg]) =>
+    switch (evalExpr(env, ctxArg)) {
+    | Err(_) as e => e
+    | Ok(ctxVal) =>
+      switch (evalExpr(env, goalArg)) {
+      | Err(_) as e => e
+      | Ok(goalVal) =>
+        switch (canonicalCallbackRef^) {
+        | None =>
+          Ok(Val(mk(Ap(mk(Identifier("Error")),
+                       [mk(StringLit("canonical not available"))]))))
+        | Some(cb) =>
+          let result = cb(termOf(ctxVal), termOf(goalVal));
+          Ok(Val(result));
+        }
       }
     }
   /* foldl f init list — built-in left fold (curried: f acc item) */

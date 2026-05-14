@@ -392,7 +392,7 @@ lnot (l : level) : to (Ul l) (Ul (lmax l lz))
 lnot-eq (l : level) (p : Ul l) : eq (ap lnot p) (to p void)
 construct by abstraction
 true-neq-false-abs : to (eq true false) void
-true-neq-false-abs-eq (p : eq true false) : eq void void (ap true-neq-false-abs p)
+true-neq-false-abs-eq (p : eq true false) : eq void void (ap true-neq-false-abs p) 
   (ap (ap cast (ap (ap trans (ap sym is-true-true)) (ap (ap trans (ap (ap cong-ap refl) p)) is-true-false))) trivial)
 construct by definition
 true-neq-false : ap (lnot) (eq true false)

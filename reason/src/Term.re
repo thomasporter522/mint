@@ -13,6 +13,7 @@ type meta = {
 type holeKind =
   | User        /* ? written in source */
   | Synthesized /* inserted by the builder */
+  | Auto        /* ⟐ — request a Canonical solver invocation */
 
 type binOp =
   | Eq

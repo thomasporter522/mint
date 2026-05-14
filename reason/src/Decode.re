@@ -54,6 +54,7 @@ let decodeHoleKind = (s: string): holeKind =>
   switch (s) {
   | "User" => User
   | "Synthesized" => Synthesized
+  | "Auto" => Auto
   | _ => Synthesized
   };
 

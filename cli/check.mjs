@@ -4,13 +4,15 @@
    the same `processCode` the web app and tests use, so syntax errors and
    kernel errors surface uniformly. */
 
-import { processCode, printTerm } from '../web/src/frontend/reason-bridge.ts'
+import { processCode, processCodeWithCanonical, printTerm } from '../web/src/frontend/reason-bridge.ts'
 import { readFileSync } from 'fs'
 import { resolve } from 'path'
 
-const file = process.argv[2]
+const args = process.argv.slice(2)
+const useCanonical = args.includes('--canonical')
+const file = args.find((a) => !a.startsWith('--'))
 if (!file) {
-  console.error('Usage: mint-check <file.mint>')
+  console.error('Usage: mint-check [--canonical] <file.mint>')
   process.exit(1)
 }
 
@@ -23,7 +25,9 @@ try {
   process.exit(1)
 }
 
-const { errors, holes } = processCode(code)
+const result = useCanonical ? processCodeWithCanonical(code) : processCode(code)
+const { errors, holes } = result
+const autoResults = useCanonical ? result.autoResults : new Map()
 
 function offsetToLineCol(code, offset) {
   if (offset < 0) return null
@@ -53,6 +57,18 @@ for (const hole of holes) {
   }
   for (const [, term] of info.context) {
     console.log(`  ${printTerm(term)}`)
+  }
+}
+
+for (const [off, res] of autoResults) {
+  const pos = offsetToLineCol(code, off)
+  const where = pos ? `${filePath}:${pos.line}:${pos.col}` : filePath
+  if (res.candidate == null) {
+    console.log(`\x1b[36m${where}: ⟐ no canonical solution\x1b[0m`)
+  } else if (res.ok) {
+    console.log(`\x1b[36m${where}: ⟐ → ${res.candidate}\x1b[0m`)
+  } else {
+    console.log(`\x1b[33m${where}: ⟐ candidate (rejected): ${res.candidate}\x1b[0m`)
   }
 }
 

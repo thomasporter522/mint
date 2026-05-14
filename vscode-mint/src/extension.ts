@@ -3,7 +3,7 @@ import * as vscode from 'vscode'
 // CLI, and this extension all use the same canonical processCode.
 // Esbuild bundles it (along with the Lezer parser and the Melange-compiled
 // OCaml output) into dist/extension.js at build time.
-import { processCode, printTerm } from '../../web/src/frontend/reason-bridge'
+import { processCode, processCodeWithCanonical, printTerm } from '../../web/src/frontend/reason-bridge'
 
 const MINT_LANGUAGE = 'mint'
 
@@ -33,6 +33,12 @@ const definitionsByDoc = new Map<string, [number, number, number, number][]>()
 // Created once at activation; applied via setDecorations after each check.
 let completeDecorationType: vscode.TextEditorDecorationType
 const completeBlocksByDoc = new Map<string, [number, number][]>()
+
+// Per-doc Canonical auto-results: source-offset of `⟐` → resolved
+// candidate (or null + ok=false on no-solution / verify-failure).
+// Read by the HoverProvider so hovering the ⟐ shows the inhabitant.
+type AutoRes = { offset: number; candidate: string | null; ok: boolean }
+const autoResultsByDoc = new Map<string, AutoRes[]>()
 
 export function activate(context: vscode.ExtensionContext): void {
   diagnostics = vscode.languages.createDiagnosticCollection(MINT_LANGUAGE)
@@ -97,6 +103,38 @@ export function activate(context: vscode.ExtensionContext): void {
   )
 
   context.subscriptions.push(
+    vscode.languages.registerHoverProvider(MINT_LANGUAGE, {
+      provideHover(document, position) {
+        const offset = document.offsetAt(position)
+        const text = document.getText()
+        /* `⟐` is one UTF-16 code unit; hover anywhere on it. */
+        if (offset >= text.length || text.charAt(offset) !== '⟐') {
+          if (offset > 0 && text.charAt(offset - 1) === '⟐') {
+            // continue — cursor just past the char also counts
+          } else {
+            return null
+          }
+        }
+        const at = text.charAt(offset) === '⟐' ? offset : offset - 1
+        const auto = (autoResultsByDoc.get(document.uri.toString()) ?? []).find(
+          (r) => r.offset === at,
+        )
+        if (!auto) return new vscode.Hover('⟐ — Canonical not yet run')
+        const md = new vscode.MarkdownString()
+        if (auto.candidate == null) {
+          md.appendMarkdown('⟐ — no Canonical solution')
+        } else if (auto.ok) {
+          md.appendCodeblock(auto.candidate, 'mint')
+        } else {
+          md.appendMarkdown('⟐ candidate **rejected**')
+          md.appendCodeblock(auto.candidate, 'mint')
+        }
+        return new vscode.Hover(md, rangeFromOffsets(document, at, at + 1))
+      },
+    }),
+  )
+
+  context.subscriptions.push(
     vscode.languages.registerDefinitionProvider(MINT_LANGUAGE, {
       provideDefinition(document, position) {
         const offset = document.offsetAt(position)
@@ -139,9 +177,12 @@ function refresh(document: vscode.TextDocument): void {
   if (document.languageId !== MINT_LANGUAGE) return
 
   const code = document.getText()
-  let result: ReturnType<typeof processCode>
+  let result: ReturnType<typeof processCodeWithCanonical>
   try {
-    result = processCode(code)
+    /* processCodeWithCanonical: same statics as processCode, plus an
+       `autoResults` map driving the ⟐ hover. If Canonical isn't built
+       or has no solution, autoResults entries surface that. */
+    result = processCodeWithCanonical(code)
   } catch (e) {
     // The engine is not supposed to throw; if it does, surface it
     // visibly rather than silently dropping diagnostics.
@@ -155,6 +196,7 @@ function refresh(document: vscode.TextDocument): void {
     inlayHintsByDoc.set(document.uri.toString(), [])
     definitionsByDoc.set(document.uri.toString(), [])
     completeBlocksByDoc.set(document.uri.toString(), [])
+    autoResultsByDoc.set(document.uri.toString(), [])
     inlayHintsChanged.fire()
     applyCompleteDecorations(vscode.window.visibleTextEditors)
     return
@@ -191,6 +233,10 @@ function refresh(document: vscode.TextDocument): void {
   inlayHintsByDoc.set(document.uri.toString(), result.inlayHints)
   definitionsByDoc.set(document.uri.toString(), result.definitions)
   completeBlocksByDoc.set(document.uri.toString(), result.completeBlocks)
+  autoResultsByDoc.set(
+    document.uri.toString(),
+    Array.from(result.autoResults.values()),
+  )
   inlayHintsChanged.fire()
   applyCompleteDecorations(vscode.window.visibleTextEditors)
 }

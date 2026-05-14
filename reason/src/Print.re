@@ -14,6 +14,7 @@ let rec printOL = (t: ol): string => {
     switch (t.value) {
     | OLHole(User) => "?"
     | OLHole(Synthesized) => ""
+    | OLHole(Auto) => "\xE2\x9F\x90"  /* U+27D0 ⟐ as raw UTF-8 bytes */
     | OLMeta(_) => "?"  /* user never sees meta IDs */
     | OLIdentifier(v) => v
     | OLAp(f, args) =>
@@ -27,6 +28,7 @@ let rec debugOL = (t: ol): string => {
   switch (t.value) {
   | OLHole(User) => "Hole"
   | OLHole(Synthesized) => "Hole_"
+  | OLHole(Auto) => "Auto"
   | OLMeta(id) => "Meta(" ++ string_of_int(id) ++ ")"
   | OLIdentifier(v) => "Id(" ++ v ++ ")"
   | OLAp(f, args) =>
@@ -81,6 +83,7 @@ let rec printML = (t: ml): string => {
     | Shard(text) => text
     | Hole(User) => "?"
     | Hole(Synthesized) => ""
+    | Hole(Auto) => "\xE2\x9F\x90"
     | Identifier(v) => v
     | StringLit(s) => "\"" ++ s ++ "\""
     | Tuple(items) =>
@@ -134,6 +137,7 @@ let rec debugML = (t: ml): string => {
   | Shard(_) => "Shard"
   | Hole(User) => "Hole"
   | Hole(Synthesized) => "Hole_"
+  | Hole(Auto) => "Auto"
   | Identifier(v) => "Id(" ++ v ++ ")"
   | StringLit(s) => "Str(" ++ s ++ ")"
   | Tuple(items) =>
