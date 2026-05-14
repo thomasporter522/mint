@@ -505,19 +505,18 @@ let subsume =
   switch (expected, inferredOut) {
   | (Some(exp), Some(inf)) =>
     let (s, conflict) = unify(state, ctx, exp, inf);
-    /* Even on failure, keep the post-unify state so any metas
-       committed before the mismatch stay solved (eager semantics).
-       The displayed pair comes from unify itself — exactly the two
-       subterms it gave up on — so the message is honest: the things
-       we print really are inconsistent. */
+    /* Keep the post-unify state on failure so metas committed before
+       the mismatch stay solved. The message reports the top-level
+       expected and inferred types — not unify's drilled-down conflict
+       subterms — zonked against the final state. */
     switch (conflict) {
     | None => ([], s)
-    | Some((cExp, cInf)) =>
+    | Some(_) =>
       ([mark(
          "Inconsistency (expected "
-         ++ printOL(cExp)
+         ++ printOL(zonk(s.solutions, exp))
          ++ ", got "
-         ++ printOL(cInf)
+         ++ printOL(zonk(s.solutions, inf))
          ++ ")",
          from, to_,
        )], s)

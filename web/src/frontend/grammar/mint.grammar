@@ -1,4 +1,4 @@
-@top Document { (Block | End_kw)* }
+@top Document { Block* }
 
 /* Standalone-expression mode for evalCode / checkSchemaCode / parseAndPrint
    on bare ML fragments. Allows top-level juxtaposition application that
@@ -35,8 +35,8 @@ TopBinaryExpr {
 
 Block { Postulate | Meta | Construct }
 
-Postulate { Postulate_kw (Terminator | PostItem)+ }
-Construct { Construct_kw By_kw Identifier (Terminator | PostItem)+ }
+Postulate { Postulate_kw (Terminator | PostItem)+ Decl? }
+Construct { Construct_kw By_kw Identifier (Terminator | PostItem)+ Decl? }
 Meta      { Meta_kw      (Terminator | MetaItem)+ }
 
 PostItem { Decl Terminator }

@@ -6,11 +6,19 @@ lz : level
 ls (l : level) : level
 lmax (l1 l2 : level) : level
 Ul (l : level) : Ul (ls l)
-level-eq (l1 l2 : level) : sort
-lmax-refl (l : level) : level-eq l l
-lmax-sym (l1 l2 : level) (eq : level-eq l1 l2) : level-eq l2 l1
-lmax-idem (l : level) : level-eq (lmax l l) l
--- level-coerce (l1 : level) (l2 : level) (eq : level-eq l1 l2) (e : Ul l1) : Ul l2
+level-leq (l1 l2 : level) : sort
+level-leq-refl (l : level) : level-leq l l
+level-leq-trans (l1 l2 l3 : level) (leq1 : level-leq l1 l2) (leq2 : level-leq l2 l3) : level-leq l1 l3
+level-leq-lz (l : level) : level-leq lz l
+level-leq-ls (l : level) : level-leq l (ls l)
+level-leq-ls-cong (l1 l2 : level) (leq : level-leq l1 l2) : level-leq (ls l1) (ls l2)
+level-leq-lmax-1 (l1 l2 : level) : level-leq l1 (lmax l1 l2)
+level-leq-lmax-2 (l1 l2 : level) : level-leq l2 (lmax l1 l2)
+level-leq-lmax-eq-1 (l1 l2 : level) (leq : level-leq l1 l2) : level-leq (lmax l1 l2) l2 
+level-leq-lmax-eq-2 (l1 l2 : level) (leq : level-leq l2 l1) : level-leq (lmax l1 l2) l1
+-- level-eq (l1 l2 : level) : sort
+-- level-eq-leq (l1 l2 : level) (leq1 : level-leq l1 l2) (leq2 : level-leq l2 l1) : level-eq l1 l2
+level-coerce (l1 : level) (l2 : level) (eq : level-leq l1 l2) (e : Ul l1) : Ul l2
 -- function types
 to (l1 l2 : level) (A : Ul l1) (B : Ul l2) : Ul (lmax l1 l2)
 ap (l1 l2 : level) (A : Ul l1) (B : Ul l2) (f : to A B) (a : A) : B
@@ -23,7 +31,6 @@ cast (l : level) (A B : Ul l) : to (eq A B) (to A B)
 -- todo: use a unified eq eliminator
 sym (l : level) (A B : Ul l) (a : A) (b : B) : to (eq a b) (eq b a)
 trans (l : level) (A B C : Ul l) (a : A) (b : B) (c : C) : to (eq a b) (to (eq b c) (eq a c))
-Ul-cong (l1 l2 : level) (my-eq : level-eq l1 l2) : (eq ? (Ul (ls l1)) (Ul (ls l2)) (Ul l1) (Ul l2))
 
 cong-ap (l1 l2 : level)
   (A : Ul l1) (B : Ul l2)
@@ -297,15 +304,15 @@ false : bool
 bool-case (lM : level) (M : Ul lM) (true-case false-case : M) : to bool M
 bool-case-true (lM : level) (M : Ul lM) (true-case false-case : M) : eq (ap (bool-case true-case false-case) true) true-case
 bool-case-false (lM : level) (M : Ul lM) (true-case false-case : M) : eq (ap (bool-case true-case false-case) false) false-case
-construct by enum
-triple : Ul (lmax lz (lmax lz lz))
-a : triple
-b : triple
-c : triple
-triple-case (lM : level) (M : Ul lM) (a-case b-case c-case : M) : to triple M
-triple-case-a (lM : level) (M : Ul lM) (a-case b-case c-case : M) : eq (ap (triple-case a-case b-case c-case) a) a-case
-triple-case-b (lM : level) (M : Ul lM) (a-case b-case c-case : M) : eq (ap (triple-case a-case b-case c-case) b) b-case
-triple-case-c (lM : level) (M : Ul lM) (a-case b-case c-case : M) : eq (ap (triple-case a-case b-case c-case) c) c-case
+-- construct by enum
+-- triple : Ul (lmax lz (lmax lz lz))
+-- a : triple
+-- b : triple
+-- c : triple
+-- triple-case (lM : level) (M : Ul lM) (a-case b-case c-case : M) : to triple M
+-- triple-case-a (lM : level) (M : Ul lM) (a-case b-case c-case : M) : eq (ap (triple-case a-case b-case c-case) a) a-case
+-- triple-case-b (lM : level) (M : Ul lM) (a-case b-case c-case : M) : eq (ap (triple-case a-case b-case c-case) b) b-case
+-- triple-case-c (lM : level) (M : Ul lM) (a-case b-case c-case : M) : eq (ap (triple-case a-case b-case c-case) c) c-case
 meta
     schema cases = fun outer => fun block => match block with
     | (name, [], (to _ lM T M)) :: eq-decls =>
@@ -375,11 +382,11 @@ construct by cases
 is-true : to bool (Ul lz) 
 is-true-true : eq (ap is-true true) unit
 is-true-false : eq (ap is-true false) void
-construct by cases
-rotate : to triple triple 
-rotate-a : eq (ap rotate a) b
-rotate-b : eq (ap rotate b) c
-rotate-c : eq (ap rotate c) a
+-- construct by cases
+-- rotate : to triple triple 
+-- rotate-a : eq (ap rotate a) b
+-- rotate-b : eq (ap rotate b) c
+-- rotate-c : eq (ap rotate c) a
 construct by abstraction
 lnot (l : level) : to (Ul l) (Ul (lmax l lz))
 lnot-eq (l : level) (p : Ul l) : eq (ap lnot p) (to p void)
@@ -390,7 +397,58 @@ true-neq-false-abs-eq (p : eq true false) : eq void void (ap true-neq-false-abs 
 construct by definition
 true-neq-false : ap (lnot) (eq true false)
 true-neq-false-eq : eq true-neq-false (ap (ap cast (ap sym lnot-eq)) true-neq-false-abs)
+postulate
+-- W A B: well-founded trees with node shapes A and child-arity B : A -> Type.
+-- sup a f: a node of shape a with children f : (B a) -> W A B.
+w (lA lB : level) (A : Ul lA) (B : to A (Ul lB)) : Ul (lmax lA lB)
+sup (lA lB : level) (A : Ul lA) (B : to A (Ul lB))
+  (a : A) (f : to (ap B a) (w A B)) : w A B
+-- non-dependent eliminator. The step's codomain
+--   (a : A) |- (B a -> W A B) -> (B a -> M) -> M
+-- is built with combinator-to / combinator-constant so it is a closed
+-- `to A (Ul _)` family.
+w-case (lA lB lM : level) (A : Ul lA) (B : to A (Ul lB)) (M : Ul lM)
+  (step : pi A
+    (ap (ap (combinator-to)
+            (ap (ap (combinator-to) B) (ap (combinator-constant) (w A B))))
+        (ap (ap (combinator-to)
+                (ap (ap (combinator-to) B) (ap (combinator-constant) M)))
+            (ap (combinator-constant) M))))
+  : to (w A B) M
+-- w-app step a: step "applied at a" in pre-unfolded function form. The
+-- kernel does not reduce `ap` on combinators, so (dap step a) is only
+-- propositionally a 2-arg function; w-app is the coerced form taken
+-- as a primitive.
+w-app (lA lB lM : level) (A : Ul lA) (B : to A (Ul lB)) (M : Ul lM)
+  (step : pi A
+    (ap (ap (combinator-to)
+            (ap (ap (combinator-to) B) (ap (combinator-constant) (w A B))))
+        (ap (ap (combinator-to)
+                (ap (ap (combinator-to) B) (ap (combinator-constant) M)))
+            (ap (combinator-constant) M))))
+  (a : A)
+  : to (to (ap B a) (w A B)) (to (to (ap B a) M) M)
+w-case-sup (lA lB lM : level) (A : Ul lA) (B : to A (Ul lB)) (M : Ul lM)
+  (step : pi A
+    (ap (ap (combinator-to)
+            (ap (ap (combinator-to) B) (ap (combinator-constant) (w A B))))
+        (ap (ap (combinator-to)
+                (ap (ap (combinator-to) B) (ap (combinator-constant) M)))
+            (ap (combinator-constant) M))))
+  (a : A) (f : to (ap B a) (w A B))
+  : eq (ap (w-case step) (sup a f))
+       (ap (ap (w-app step a) f)
+           (ap (ap (combinator-ap) (ap (combinator-constant) (w-case step))) f))
+meta
+-- todo: induction
+
+
+construct by induction
+N : Ul lz 
+zero : N 
+suc : to N N 
+N-rec : ?
+
 -- construct by quotient
--- Z : Ul lz 
+-- Z : Ul lz
 -- class : to ()
-end
