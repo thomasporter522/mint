@@ -1,0 +1,3 @@
+[submodule "vendor/Canonical"]
+	path = vendor/Canonical
+	url = https://github.com/chasenorman/Canonical.git
