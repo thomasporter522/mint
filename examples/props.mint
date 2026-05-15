@@ -20,15 +20,16 @@ meta
     schema magic =
         fun ctx => fun s =>
         match s with
-        | [(_, args, t)] =>
+        | [(_, args, t, _)] =>
             let empty-params : (List (Term, Term)) = [] in
+            let empty-tags : (List Tag) = [] in
             let arg-sigs : (List Signature) =
               (foldl
-                (fun acc => fun p => ((fst p), empty-params, (snd p)) :: acc)
+                (fun acc => fun p => ((fst p), empty-params, (snd p), empty-tags) :: acc)
                 [] args) in
             match (canonical (append arg-sigs ctx) t) with
             | Ok w => (Ok [w])
-            | Error msg => (Error msg)
+            | Error msg => (Error "Magic machine broke")
             end
         | _ => (Error "Single line only")
         end

@@ -600,15 +600,24 @@ let mkGhost = (v: cOL): ol => {value: v, meta: asGhost(defaultMeta)};
    surviving OLMeta(_) subterms are unsolved metavariables and render as
    "?". OLHole(_) cases (synthesized or user-written holes that ended up
    in a ghost slot) also render as "?" — the user never sees meta IDs. */
-let rec printGhost = (t: ol): string =>
+let rec printGhost = (t: ol): string => {
+  /* Wrap parens-less Ap children so the rendering is unambiguous —
+     same reason as printOL's pchild. */
+  let pchild = (s: ol): string => {
+    switch (s.value) {
+    | OLAp(_, _) when !s.meta.parens => "(" ++ printGhost(s) ++ ")"
+    | _ => printGhost(s)
+    }
+  };
   switch (t.value) {
   | OLHole(_) | OLMeta(_) => "?"
   | OLIdentifier(s) => s
   | OLAp(f, args) =>
     let inside =
-      printGhost(f) ++ " " ++ String.concat(" ", List.map(printGhost, args));
+      pchild(f) ++ " " ++ String.concat(" ", List.map(pchild, args));
     t.meta.parens ? "(" ++ inside ++ ")" : inside;
   };
+};
 
 /* Top-level rendering of one ghost term in an inlay-hint sequence.
    Unlike printGhost, this always wraps compound (OLAp) results in
@@ -832,6 +841,7 @@ let mlBuiltins: context =
       ("snd", Builtin("snd")),
       ("foldl", Builtin("foldl")),
       ("apply", Builtin("apply")),
+      ("decompose", Builtin("decompose")),
       ("append", Builtin("append")),
       /* Monomorphic builtins */
       ("true", ML(MBool)),
@@ -1058,6 +1068,23 @@ let rec substituteAndGhost = (contents: ol, t: ol): ol =>
   | _ => {...t, meta: {...t.meta, ghost: true}}
   };
 
+/* Count occurrences of the sentinel identifier in a procedure's output.
+   The coerce contract: the procedure receives the subject as a sentinel-
+   tagged value and must embed it exactly once in its result. Zero
+   occurrences means the wrapping discarded the user's term (a proof of
+   anything, not a coercion); more than one means it duplicated it
+   (suspect, and breaks the inlay-hint box rendering). Either case is
+   a procedure misuse — we fail the coerce and let the inconsistency
+   surface unwrapped. */
+let rec countSentinel = (t: ol): int =>
+  switch (t.value) {
+  | OLIdentifier(n) when n == coerceSentinelName => 1
+  | OLAp(f, args) =>
+    countSentinel(f)
+    + List.fold_left((acc, a) => acc + countSentinel(a), 0, args)
+  | _ => 0
+  };
+
 /* Same shape walk but only substitutes — for tooltip rendering, where
    we want the wrapping shown with the subject replaced by a placeholder
    (box) rather than duplicated. No ghost flagging. */
@@ -1137,7 +1164,7 @@ and tryCoercions =
   | [] => None
   | [(_idx, _name, body), ...rest] =>
     let mlCtx = StringMap.union((_, _, v) => Some(v), ctx, mlBuiltins);
-    let evalEnv =
+    let rawEnv =
       StringMap.fold(
         (name, binding, acc) =>
           switch (binding) {
@@ -1150,6 +1177,18 @@ and tryCoercions =
           },
         mlCtx, StringMap.empty,
       );
+    /* Mutual recursion: rewire each closure's envRef to point at the
+       final, complete env so that the body can resolve sibling
+       metalets (and itself). Same trick the schema path uses. */
+    Eval.StringMap.iter(
+      (_, v) =>
+        switch (v) {
+        | Eval.Closure(envRef, _, _) => envRef := rawEnv
+        | _ => ()
+        },
+      rawEnv,
+    );
+    let evalEnv = rawEnv;
     switch (Eval.evalExpr(evalEnv, body)) {
     | Err(_) => tryCoercions(state, ctx, expected, found, contents, rest)
     | Ok(procVal) =>
@@ -1165,39 +1204,48 @@ and tryCoercions =
         meta: defaultMeta,
       };
       switch (Eval.runCoerce(procVal, outerSigs, zExp, zFound, sentinel)) {
-      | CoerceFailed(_) => tryCoercions(state, ctx, expected, found, contents, rest)
+      | CoerceFailed(_msg) =>
+        tryCoercions(state, ctx, expected, found, contents, rest);
       | Coerced(mlResult) =>
-        /* Convert the procedure's ML result back to OL, substitute the
-           real contents back into the sentinel position, mark the rest
-           ghost, then re-check at the expected type. */
+        /* Convert the procedure's ML result back to OL. The procedure
+           must embed the sentinel-tagged subject exactly once; anything
+           else (dropped or duplicated) is a procedure misuse and counts
+           as the coerce failing — fall through to the next candidate
+           and ultimately surface the original Inconsistency unwrapped. */
         let rawOL = mlToOL(mlResult);
-        let coercedInner = substituteAndGhost(zContents, rawOL);
-        /* Force parens at the root so when this replaces the user's
-           subterm as an argument it doesn't flatten into the parent's
-           spine on print/round-trip. */
-        let coerced: ol = {
-          ...coercedInner,
-          meta: {...coercedInner.meta, parens: true},
-        };
-        let stateDec = {...state, coerceDepth: state.coerceDepth - 1};
-        let metasBefore = stateDec.nextMetaId;
-        let (info, newState) =
-          checkOLTerm(stateDec, ctx, Expression(Some(expected)), coerced);
-        if (info.errors == []) {
-          let final =
-            switch (info.elaborated) {
-            | Some(t) => t
-            | None => coerced
-            };
-          /* Anchor the `°` sigil just before the user's subterm; tooltip
-             shows the wrapping with the subject replaced by a `□` box,
-             so the user's source text isn't duplicated. */
-          let boxOL: ol = {
-            value: OLIdentifier(boxChar),
-            meta: defaultMeta,
+        if (countSentinel(rawOL) != 1) {
+          tryCoercions(state, ctx, expected, found, contents, rest);
+        } else {
+          let coercedInner = substituteAndGhost(zContents, rawOL);
+          /* Force parens at the root so when this replaces the user's
+             subterm as an argument it doesn't flatten into the parent's
+             spine on print/round-trip. */
+          let coerced: ol = {
+            ...coercedInner,
+            meta: {...coercedInner.meta, parens: true},
           };
-          let tooltipTree = substituteOnly(boxOL, rawOL);
-          let hint = (zContents.meta.start, Coerce, [tooltipTree]);
+          let stateDec = {...state, coerceDepth: state.coerceDepth - 1};
+          let metasBefore = stateDec.nextMetaId;
+          let (info, newState) =
+            checkOLTerm(stateDec, ctx, Expression(Some(expected)), coerced);
+          if (info.errors == []) {
+            let final =
+              switch (info.elaborated) {
+              | Some(t) => t
+              | None => coerced
+              };
+            /* Anchor the `°` sigil just before the user's subterm; the
+               tooltip shows the wrapping with the subject replaced by a
+               `□` box, so the user's source text isn't duplicated. Since
+               the procedure embedded the sentinel exactly once (checked
+               above), substituteOnly lands the box at exactly that
+               position — no source-span guessing needed. */
+            let boxOL: ol = {
+              value: OLIdentifier(boxChar),
+              meta: defaultMeta,
+            };
+            let tooltipTree = substituteOnly(boxOL, rawOL);
+            let hint = (zContents.meta.start, Coerce, [tooltipTree]);
           /* Record the meta IDs allocated by the wrapping's re-check so
              a "Coercion not fully solved" warning fires at the subject
              if any stays unsolved at the decl boundary. */
@@ -1214,9 +1262,10 @@ and tryCoercions =
                   coerceInsertions:
                     newState.coerceInsertions @ [(zContents.meta, wrappingMetaIds)],
                 };
-          Some((newState, final, info.inlayHints @ [hint]));
-        } else {
-          tryCoercions(state, ctx, expected, found, contents, rest);
+            Some((newState, final, info.inlayHints @ [hint]));
+          } else {
+            tryCoercions(state, ctx, expected, found, contents, rest);
+          };
         };
       };
     };
@@ -1932,6 +1981,15 @@ and inferExpr = (ctx: context, t: ml): staticInfo =>
     let argsInfo = checkExpr(ctx, MList(MTerm), argsArg);
     setMlType(mergeInfos(headInfo, argsInfo), MTerm);
 
+  | Ap({value: Identifier("decompose"), _}, [arg]) =>
+    /* decompose : Term -> (Term, List Term). Inverse of `apply`: returns
+       (head, args) for an Ap, or (term, []) for any atomic OL value.
+       Lets a procedure inspect arbitrary terms structurally — needed to
+       walk a rule's LHS against a target term without baking specific
+       postulate names into the matcher. */
+    let argInfo = checkExpr(ctx, MTerm, arg);
+    setMlType(argInfo, MTuple([MTerm, MList(MTerm)]));
+
   | Ap({value: Identifier("canonical"), _}, [ctxArg, goalArg]) =>
     /* canonical : List (Term, List (Term, Term), Term) -> Term ->
        Result Term.  First arg is a context in the same shape as the
@@ -2007,19 +2065,30 @@ and inferExpr = (ctx: context, t: ml): staticInfo =>
     }
 
   | Let(b, body) =>
-    switch (b.annotation) {
-    | Some(annotTy) =>
-      let exprInfo = checkExpr(ctx, annotTy, b.rhs);
-      let newCtx = StringMap.add(b.name, ML(annotTy), ctx);
-      let bodyInfo = inferExpr(newCtx, body);
-      mergeInfos(exprInfo, bodyInfo);
-    | None =>
-      let exprInfo = inferExpr(ctx, b.rhs);
-      let exprTy = getInferredMlType(exprInfo);
-      let newCtx = StringMap.add(b.name, ML(exprTy), ctx);
-      let bodyInfo = inferExpr(newCtx, body);
-      mergeInfos(exprInfo, bodyInfo);
-    }
+    /* Carry through the body's inferred mlType so that callers like
+       `inferExpr.Match` see `(Term, Term)` (or whatever the body
+       computed) instead of defaulting to `MTerm` after `mergeInfos`
+       drops it. Without this, `let x = … in (a, b)` infers `MTerm` and
+       a subsequent match arm at the same body type gets type-checked
+       at `MTerm`, producing spurious "Expected Term, got (Term, Term)"
+       errors. */
+    let info =
+      switch (b.annotation) {
+      | Some(annotTy) =>
+        let exprInfo = checkExpr(ctx, annotTy, b.rhs);
+        let newCtx = StringMap.add(b.name, ML(annotTy), ctx);
+        let bodyInfo = inferExpr(newCtx, body);
+        let merged = mergeInfos(exprInfo, bodyInfo);
+        {...merged, mlInferred: bodyInfo.mlInferred};
+      | None =>
+        let exprInfo = inferExpr(ctx, b.rhs);
+        let exprTy = getInferredMlType(exprInfo);
+        let newCtx = StringMap.add(b.name, ML(exprTy), ctx);
+        let bodyInfo = inferExpr(newCtx, body);
+        let merged = mergeInfos(exprInfo, bodyInfo);
+        {...merged, mlInferred: bodyInfo.mlInferred};
+      };
+    info;
 
   | Match(scrut, branches) =>
     let scrutInfo = inferExpr(ctx, scrut);
@@ -2304,7 +2373,13 @@ and processMetaDefs =
   | [LetDef(b), ...rest] =>
     let (bodyInfo, rhsTy) =
       switch (b.annotation) {
-      | Some(ty) => (checkExpr(accCtx, ty, b.rhs), ty)
+      | Some(ty) =>
+        /* Annotated → bind the name BEFORE checking rhs so the
+           definition can recursively reference itself with its declared
+           type. (The unannotated branch leans on inferExpr's Fun
+           handler silently dropping body-side errors instead.) */
+        let recCtx = StringMap.add(b.name, MetaLet(b.rhs, ty), accCtx);
+        (checkExpr(recCtx, ty, b.rhs), ty);
       | None =>
         let info = inferExpr(accCtx, b.rhs);
         (info, getInferredMlType(info));

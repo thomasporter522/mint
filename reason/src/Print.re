@@ -10,6 +10,16 @@ let printBinOp =
 /* --- OL printers --- */
 
 let rec printOL = (t: ol): string => {
+  /* When an Ap's head or arg is itself a parens-less Ap, the result
+     re-parses with a different shape (`f (g x) y` → 3 args vs.
+     `f g x y` → 4 args). Wrap such children so the print round-trips
+     and the displayed structure is unambiguous. */
+  let pchild = (s: ol): string => {
+    switch (s.value) {
+    | OLAp(_, _) when !s.meta.parens => "(" ++ printOL(s) ++ ")"
+    | _ => printOL(s)
+    }
+  };
   let inner =
     switch (t.value) {
     | OLHole(User) => "?"
@@ -18,7 +28,7 @@ let rec printOL = (t: ol): string => {
     | OLMeta(_) => "?"  /* user never sees meta IDs */
     | OLIdentifier(v) => v
     | OLAp(f, args) =>
-      printOL(f) ++ " " ++ String.concat(" ", List.map(printOL, args))
+      pchild(f) ++ " " ++ String.concat(" ", List.map(pchild, args))
     };
   t.meta.parens ? "(" ++ inner ++ ")" : inner;
 };

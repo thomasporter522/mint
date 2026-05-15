@@ -11,11 +11,11 @@ Mint's design is centered around the virtue of _objectivity_. That is, the seman
 
 ## Future Directions
 
-- (?) Move to typed abstract binding trees rather than typed abstract syntax trees.
 - Elaboration should be persisted in the buffer (maybe folded and gray), not just ghostly.
+- Separate what is elided (irrelevant/uniquely determined) from what's merely ghostly (the result of elaboration).
 - Inserted code can be hierarchically marked for progressive unfolding.  
 - User-written construct-block completion procedures.
-- User-written conversion and normalization procedures.
+- User-written normalization procedures.
 - A module-like system for reusable, nested hypothetical reasoning.
 
 ## Minor TODOs
@@ -23,10 +23,6 @@ Mint's design is centered around the virtue of _objectivity_. That is, the seman
 - ML features: multi-pattern `fun`, destructuring `let`. 
 - Interdependent signatures, e.g. `postulate \ A : B \ B : A`. 
 - Go to definition for schemas. 
-
-## Bugs
-
-- Unification conflicts should be localized to the hole, not the contracticting unification site.
 
 ## Issues
 

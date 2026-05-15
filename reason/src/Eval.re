@@ -36,6 +36,7 @@ let rec termEqual = (a: ml, b: ml): bool =>
   switch (a.value, b.value) {
   | (Identifier(x), Identifier(y)) => x == y
   | (StringLit(x), StringLit(y)) => x == y
+  | (TagLit(x), TagLit(y)) => x == y
   | (Ap(f1, args1), Ap(f2, args2)) =>
     termEqual(f1, f2)
     && List.length(args1) == List.length(args2)
@@ -134,13 +135,16 @@ let rec matchPat = (bindings: evalEnv, p: pat, value: mlValue): option(evalEnv) 
     switch (value) {
     | Val({value: Ap(vF, vArgs), _})
         when List.length(argPats) == List.length(vArgs) =>
-      /* When the head pattern is an Identifier-shaped PVar (e.g. `Ok x`,
-         `Error msg`), treat it as a constructor check — match only if
-         the value's head identifier has the same name, and do NOT bind
-         the name. Otherwise PVar would match any 1-ary application,
-         making `Ok x` and `Error msg` indistinguishable. */
+      /* A PVar in head position of a PAp pattern is a constructor
+         reference (`Ok x`, `(abs-to _)`, `(ap _ _ f a)`): it asserts
+         the value's head identifier is literally that name, and never
+         binds. Without this, every PAp would match every Ap of the
+         right arity, making `Ok x` and `Error msg` indistinguishable
+         and OL postulate patterns like `(abs-to _)` always succeed
+         vacuously. Non-PVar heads (e.g. nested PAp) fall through to
+         generic matching. */
       switch (headPat.value, vF.value) {
-      | (PVar(name), Identifier(vname)) when isConstructorName(name) =>
+      | (PVar(name), Identifier(vname)) =>
         if (name != vname) {
           None;
         } else {
@@ -173,14 +177,6 @@ let rec matchPat = (bindings: evalEnv, p: pat, value: mlValue): option(evalEnv) 
       }
     | _ => None
     }
-  }
-/* Identifiers that should be matched as constructors in PAp head
-   position rather than bound as fresh variables.  Mirrors the
-   meta-language builtins that act as value constructors. */
-and isConstructorName = (name: string): bool =>
-  switch (name) {
-  | "Ok" | "Error" | "true" | "false" => true
-  | _ => false
   };
 
 /* --- Expression evaluation --- */
@@ -339,6 +335,21 @@ and evalApp = (env: evalEnv, fVal: mlValue, args: list(ml)): evalResult =>
     | Err(_) as e => e
     | Ok(Val({value: Tuple([_, second, ..._]), _})) => Ok(Val(second))
     | Ok(_) => Err("snd: argument is not a tuple")
+    }
+  /* decompose t — view a term as (head, args). For an Ap returns the
+     literal pair; for any atomic OL value (Identifier, Hole, Meta)
+     returns (t, []). Lets a procedure walk arbitrary terms structurally
+     without baking in a fixed pattern at write-time. */
+  | (Val({value: Identifier("decompose"), _}), [arg]) =>
+    switch (evalExpr(env, arg)) {
+    | Err(_) as e => e
+    | Ok(Val({value: Ap(f, args), _}) as v) =>
+      let parens = termOf(v).meta.parens;
+      let tup = mk(Tuple([f, mk(List(args))]));
+      Ok(Val({...tup, meta: {...tup.meta, parens}}));
+    | Ok(Val(t)) =>
+      Ok(Val(mk(Tuple([t, mk(List([]))]))))
+    | Ok(_) => Err("decompose: argument is not a term")
     }
   /* apply head args — build Ap(head-term, args) with variadic arity */
   | (Val({value: Identifier("apply"), _}), [headArg, argsArg]) =>

@@ -196,8 +196,11 @@ describe('eval: pattern matching', () => {
     expect(evalOk('match [(a, b)] with | [(x, y)] => (y, x) end')).toBe('(b, a)');
   });
 
-  it('application pattern matches OL terms', () => {
-    expect(evalOk('match (f a b) with | (g x y) => [g, x, y] end')).toBe('[f, a, b]');
+  it('application pattern matches OL terms by head name', () => {
+    /* PVar in PAp head position is a constructor reference: matches
+       only if the value's head identifier has the same name, and never
+       binds. A mismatched head name → non-exhaustive match. */
+    expect(evalOk('match (f a b) with | (f x y) => [f, x, y] end')).toBe('[f, a, b]');
   });
 
   it('string pattern matches string', () => {
