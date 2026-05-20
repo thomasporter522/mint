@@ -13,8 +13,8 @@ ap-S (x : D) (y : D) (z : D) : eq D D (ap (ap (ap S x) y) z) (ap (ap x z) (ap y 
 ap-cong (f : D) (g : D) (x : D) (e : eq D D f g) : eq D D (ap f x) (ap g x)
 meta
 schema definition =
-  fun s => match s with
-  | [(f, [], ret), (f_eq, [], eq ret ret f body)]
+  fun outer => fun s => match s with
+  | [(f, [], ret, _), (f_eq, [], eq ret ret f body, _)]
       => (Ok [body, (refl ret body)])
   | _ => (Error "invalid definition")
   end
@@ -22,8 +22,7 @@ construct by definition
 I : D
 I-eq : eq D D I (ap (ap S K) K)
 meta
-schema arg-definition = fun s => match s with | [(f, params, ret), (f_eq, params, eq ret ret applied body)] => if applied == (foldl (fun acc => fun p => match p with | (x, t) => (acc x) end) f params) then (Ok [body, (refl ret body)]) else (Error "LHS mismatch") end | _ => (Error "invalid arg-definition") end
+schema arg-definition = fun outer => fun s => match s with | [(f, params, ret, _), (f_eq, params, eq ret ret applied body, _)] => if applied == (foldl (fun acc => fun p => match p with | (x, t) => (acc x) end) f params) then (Ok [body, (refl ret body)]) else (Error "LHS mismatch") end | _ => (Error "invalid arg-definition") end
 construct by arg-definition
 ap-I (x : D) : eq D D (ap I x) x
 ap-I-pf (x : D) : eq (eq D D (ap I x) x) (eq D D (ap I x) x) (ap-I x) (trans D (ap I x) (ap (ap (ap S K) K) x) x (ap-cong I (ap (ap S K) K) x I-eq) (trans D (ap (ap (ap S K) K) x) (ap (ap K x) (ap K x)) x (ap-S K K x) (ap-K x (ap K x))))
-end

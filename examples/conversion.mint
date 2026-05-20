@@ -9,9 +9,9 @@ refl (l : level) (A : Ul l) (a : A) : eq l A A a a
 cast (l : level) (A : Ul l) (B : Ul l) (e : eq (ls l) (Ul l) (Ul l) A B) (a : A) : B
 meta
 schema definition =
-  fun s => match s with
-  | [(f, [], ret),
-     (f_eq, [], eq l ret ret f body)]
+  fun outer => fun s => match s with
+  | [(f, [], ret, _),
+     (f_eq, [], eq l ret ret f body, _)]
       => (Ok [body, (refl l ret body)])
   | _ => (Error "invalid definition")
   end
@@ -23,4 +23,3 @@ U1-eq : eq (ls (ls (ls lz))) (Ul (ls (ls lz))) (Ul (ls (ls lz))) U1 (Ul (ls lz))
 construct by definition
 U : U1
 U-eq : eq (ls (ls lz)) U1 U1 U (Ul lz)
-end

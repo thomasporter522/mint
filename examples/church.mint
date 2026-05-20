@@ -62,105 +62,165 @@ abs-eq-eq (X : U) (A : to X U) (B : to X U)
   : eq (ap (ap (ap (abs-eq) A) B) x) (eq (ap A x) (ap B x))
 #reduction abs-eq-eq
 
-meta 
-    schema void-schema = 
-        fun ctx => fun s => 
-          (Ok [(pi U (abs-ident)), abs-ident])
-construct by void-schema
-void : U
-void-rec : to void (pi U (abs-ident))
 meta
-    -- Tag membership: does this binding's tag list carry #reduction?
+    -- True iff this binding's tag list carries #reduction.
     has-reduction : ((List Tag) -> Bool) = fun tags =>
       (foldl (fun acc => fun t => acc || (t == #reduction)) false tags)
-    -- Is a specific OL name available in ctx AND tagged #reduction?
-    rule-enabled : (Term -> ((List Signature) -> Bool)) = fun name => fun ctx =>
-      (foldl (fun acc => fun entry =>
-        if acc then acc else
-        match entry with
-        | (n, _, _, tags) =>
-          if (n == name) then (has-reduction tags) else false end
+    -- List membership by ==.
+    member : (Term -> ((List Term) -> Bool)) = fun x => fun xs =>
+      (foldl (fun acc => fun e => acc || (e == x)) false xs)
+    -- Assoc-list lookup.
+    lookup : (Term -> ((List (Term, Term)) -> (Result Term))) = fun k => fun xs =>
+      (foldl (fun acc => fun pair =>
+        match acc with
+        | Ok _ => acc
+        | Error _ =>
+          match pair with
+          | (key, val) => if (key == k) then (Ok val) else acc end
+          end
         end
+      ) (Error "not found") xs)
+    -- Reverse a list of terms.
+    reverse-terms : ((List Term) -> (List Term)) = fun xs =>
+      (foldl (fun acc => fun x => x :: acc) [] xs)
+    -- Names from a list of (name, type) param tuples.
+    param-names : ((List (Term, Term)) -> (List Term)) = fun params =>
+      (foldl (fun acc => fun p =>
+        match p with
+        | (n, _) => (append acc [n])
         end
-      ) false ctx)
-    -- Single-rule trials. Each matches the rule's specific outer shape;
-    -- on match, returns (rhs-with-substitution, rule-applied-proof).
-    -- The proof is `(name X… vals…)` with metas for type-args.
-    try-ident : (Term -> (Result (Term, Term))) = fun term =>
-      match term with
-      | (ap _ _ (abs-ident _) x) =>
-        (Ok (x, (abs-ident-eq ? x)))
-      | _ => (Error "no")
+      ) [] params)
+    -- For each binder, retrieve its bound value (or ? if unbound).
+    fill-args : ((List Term) -> ((List (Term, Term)) -> (List Term))) = fun binders => fun bindings =>
+      (foldl (fun acc => fun b =>
+        match (lookup b bindings) with
+        | Ok v => (append acc [v])
+        | Error _ => (append acc [?])
+        end
+      ) [] binders)
+    -- Match a pattern term against a target. Identifiers listed in
+    -- `binders` bind to subterms (with consistency checks on repeats);
+    -- other identifiers must match literally. Ap recurses, aligning args
+    -- at the END so the target may carry leading implicit type args
+    -- that the pattern elides.
+    match-term : ((List Term) -> ((List (Term, Term)) -> (Term -> (Term -> (Result (List (Term, Term))))))) =
+      fun binders => fun bindings => fun pat => fun term =>
+        let pp = (decompose pat) in
+        let ph = (fst pp) in
+        let pa = (snd pp) in
+        match pa with
+        | [] =>
+          if (member ph binders) then
+            match (lookup ph bindings) with
+            | Ok existing =>
+              if (existing == term) then (Ok bindings) else (Error "binder conflict") end
+            | Error _ => (Ok (append bindings [(ph, term)]))
+            end
+          else
+            if (pat == term) then (Ok bindings) else (Error "atom mismatch") end
+          end
+        | _ :: _ =>
+          let tp = (decompose term) in
+          let th = (fst tp) in
+          let ta = (snd tp) in
+          match ta with
+          | [] => (Error "expected ap, got atom")
+          | _ :: _ =>
+            match (match-term binders bindings ph th) with
+            | Ok b1 => (align-match binders b1 (reverse-terms pa) (reverse-terms ta))
+            | Error msg => (Error msg)
+            end
+          end
+        end
+    -- Walk reversed pattern/target arg lists in parallel. Pattern empty
+    -- = success (any leading target args are skipped implicits). Target
+    -- empty with pattern non-empty = failure.
+    align-match : ((List Term) -> ((List (Term, Term)) -> ((List Term) -> ((List Term) -> (Result (List (Term, Term))))))) =
+      fun binders => fun bindings => fun rps => fun rts =>
+        match rps with
+        | [] => (Ok bindings)
+        | p :: ps =>
+          match rts with
+          | [] => (Error "pattern wider than term")
+          | t :: ts =>
+            match (match-term binders bindings p t) with
+            | Ok b1 => (align-match binders b1 ps ts)
+            | Error msg => (Error msg)
+            end
+          end
+        end
+    -- Substitute bindings into a term: binder identifiers get replaced
+    -- by their bound values; everything else recurses structurally.
+    subst-list : ((List (Term, Term)) -> ((List Term) -> (List Term))) = fun bindings => fun ts =>
+      (foldl (fun acc => fun t => (append acc [(subst bindings t)])) [] ts)
+    subst : ((List (Term, Term)) -> (Term -> Term)) = fun bindings => fun t =>
+      let p = (decompose t) in
+      let h = (fst p) in
+      let args = (snd p) in
+      match args with
+      | [] =>
+        match (lookup h bindings) with
+        | Ok v => v
+        | Error _ => t
+        end
+      | _ :: _ =>
+        (apply (subst bindings h) (subst-list bindings args))
       end
-    try-const : (Term -> (Result (Term, Term))) = fun term =>
-      match term with
-      | (ap _ _ (ap _ _ (abs-const _ _) ia) oa) =>
-        (Ok (ia, (abs-const-eq ? ? oa ia)))
-      | _ => (Error "no")
-      end
-    try-apf : (Term -> (Result (Term, Term))) = fun term =>
-      match term with
-      | (ap _ _ (ap _ _ (ap _ _ (abs-ap _ _ _) f) a) x) =>
-        (Ok ((ap ? ? (ap ? ? f x) (ap ? ? a x)), (abs-ap-eq ? ? ? f a x)))
-      | _ => (Error "no")
-      end
-    try-to-rule : (Term -> (Result (Term, Term))) = fun term =>
-      match term with
-      | (ap _ _ (ap _ _ (ap _ _ (abs-to _) A) B) x) =>
-        (Ok ((to (ap ? ? A x) (ap ? ? B x)), (abs-to-eq ? A B x)))
-      | _ => (Error "no")
-      end
-    try-eq-rule : (Term -> (Result (Term, Term))) = fun term =>
-      match term with
-      | (ap _ _ (ap _ _ (ap _ _ (abs-eq _) A) B) x) =>
-        (Ok ((eq ? ? (ap ? ? A x) (ap ? ? B x)), (abs-eq-eq ? A B x)))
-      | _ => (Error "no")
-      end
-    -- Try every #reduction-tagged rule at the top of `term`; first hit wins.
+    -- Try one context entry as a rewrite rule. Recognises retTypes
+    -- shaped `eq A B LHS RHS` (the equational form); matches the target
+    -- against LHS, substitutes the bindings into RHS, and builds the
+    -- proof as `(rule-name binder1 binder2 …)`.
+    try-rule : ((Term, (List (Term, Term)), Term, (List Tag)) -> (Term -> (Result (Term, Term)))) =
+      fun sig => fun term =>
+        match sig with
+        | (name, params, retType, _) =>
+          let binders = (param-names params) in
+          let rp = (decompose retType) in
+          let rh = (fst rp) in
+          let ra = (snd rp) in
+          if (rh == eq) then
+            match ra with
+            | [_, _, lhs, rhs] =>
+              match (match-term binders [] lhs term) with
+              | Ok bindings =>
+                let reduced = (subst bindings rhs) in
+                let proof = (apply name (fill-args binders bindings)) in
+                (Ok (reduced, proof))
+              | Error msg => (Error msg)
+              end
+            | _ => (Error "retType is not 4-arg eq")
+            end
+          else (Error "retType head is not eq") end
+        end
+    -- Iterate context's #reduction-tagged entries, returning the first
+    -- one that fires on `term`. Generic — no knowledge of any specific
+    -- rule's identity.
     try-top : ((List Signature) -> (Term -> (Result (Term, Term)))) = fun ctx => fun term =>
-      let step1 =
-        if (rule-enabled abs-ident-eq ctx) then (try-ident term) else (Error "off") end in
-      let step2 = match step1 with
-        | Ok _ => step1
+      (foldl (fun acc => fun entry =>
+        match acc with
+        | Ok _ => acc
         | Error _ =>
-          if (rule-enabled abs-const-eq ctx) then (try-const term) else step1 end
-        end in
-      let step3 = match step2 with
-        | Ok _ => step2
-        | Error _ =>
-          if (rule-enabled abs-ap-eq ctx) then (try-apf term) else step2 end
-        end in
-      let step4 = match step3 with
-        | Ok _ => step3
-        | Error _ =>
-          if (rule-enabled abs-to-eq ctx) then (try-to-rule term) else step3 end
-        end in
-      match step4 with
-      | Ok _ => step4
-      | Error _ =>
-        if (rule-enabled abs-eq-eq ctx) then (try-eq-rule term) else step4 end
-      end
-    -- Recursive normalising reducer. Returns (normal-form,
-    -- proof : eq term normal-form). Innermost-first; after subterms
-    -- settle, try a top-level rule; if one fires, recurse on the result.
+          match entry with
+          | (_, _, _, tags) =>
+            if (has-reduction tags) then (try-rule entry term) else acc end
+          end
+        end
+      ) (Error "no rule fired") ctx)
+    -- Recursive beta-reducer. Structural recursion uses cong-ap for the
+    -- ap application primitive and cong-to for the to function-type
+    -- former; everything else refls out. After subterms settle, try a
+    -- rule at the top and recurse on its rhs. Returns
+    -- (normal-form, eq term normal-form).
     beta-reduce : ((List Signature) -> (Term -> (Term, Term))) = fun ctx => fun term =>
       let sub = match term with
         | (ap A B f a) =>
           let fr = (beta-reduce ctx f) in
           let ar = (beta-reduce ctx a) in
-          let f2 = (fst fr) in
-          let fp = (snd fr) in
-          let a2 = (fst ar) in
-          let aproof = (snd ar) in
-          ((ap A B f2 a2), (ap (ap cong-ap fp) aproof))
+          ((ap A B (fst fr) (fst ar)), (ap (ap cong-ap (snd fr)) (snd ar)))
         | (to A B) =>
           let ar = (beta-reduce ctx A) in
           let br = (beta-reduce ctx B) in
-          let A2 = (fst ar) in
-          let Apf = (snd ar) in
-          let B2 = (fst br) in
-          let Bpf = (snd br) in
-          ((to A2 B2), (cong-to Apf Bpf))
+          ((to (fst ar) (fst br)), (cong-to (snd ar) (snd br)))
         | _ => (term, (refl ? term))
         end in
       let st = (fst sub) in
@@ -176,17 +236,24 @@ meta
         (final, (ap (ap trans chain1) final-proof))
       | Error _ => (st, sp)
       end
-    -- Coerce hook: reduce BOTH sides to a (hopefully common) normal
-    -- form, then chain `eq found nf` with `sym (eq expected nf)` to
-    -- build `eq found expected`. The verify pass unifies — if the two
-    -- normal forms agree (or are unifiable up to metas), the cast
-    -- type-checks.
+    -- Reduce both sides to (hopefully shared) normal forms; chain
+    -- `eq found nf` with `sym (eq expected nf)` to get `eq found
+    -- expected`; wrap in cast.
     coerce beta = fun ctx => fun expected => fun found => fun contents =>
       let fr = (beta-reduce ctx found) in
       let er = (beta-reduce ctx expected) in
       let full = (ap (ap trans (snd fr)) (ap sym (snd er))) in
-      (Ok (ap (ap cast full) contents))
-    schema unit-schema =
+      (Ok (ap (ap cast full) contents)) 
+
+meta
+    schema void-schema = 
+        fun ctx => fun s => 
+          (Ok [(pi U (abs-ident)), abs-ident])
+
+construct by void-schema
+void : U
+void-rec : to void (pi U (abs-ident))meta 
+  schema unit-schema =
         fun ctx => fun s => 
           match s with 
           | [_, (_,_,_,_), _, _] =>

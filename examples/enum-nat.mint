@@ -40,10 +40,10 @@ n0 = zero
 n1 = (succ zero)
 n2 = (succ (succ zero))
 
-schema enum = fun s => match s with
+schema enum = fun outer => fun s => match s with
   -- 0 constructors: Enum 0 (empty)
-  | [(type_name, [], U),
-     (case_name, [(mvar, U), (scrut_var, type_name)], mvar)]
+  | [(type_name, [], U, _),
+     (case_name, [(mvar, U), (scrut_var, type_name)], mvar, _)]
     => (Ok [(Enum n0), (enum-absurd mvar scrut_var)])
 
   -- 1 constructor: Enum 1
@@ -51,10 +51,10 @@ schema enum = fun s => match s with
   -- unit-case M tc scrut = enum-elim 1 M (vcons M 0 tc (vnil M)) scrut
   -- unit-case-trivial: enum-elim(1, M, vcons(tc, vnil), ezero 0) = tc
   --   by enum-beta-zero
-  | [(type_name, [], U),
-     (ctor_name, [], type_name),
-     (case_name, [(mvar, U), (tc_var, mvar), (scrut_var, type_name)], mvar),
-     (eq_name, [(mvar2, U), (tc_var2, mvar2)], _)]
+  | [(type_name, [], U, _),
+     (ctor_name, [], type_name, _),
+     (case_name, [(mvar, U), (tc_var, mvar), (scrut_var, type_name)], mvar, _),
+     (eq_name, [(mvar2, U), (tc_var2, mvar2)], _, _)]
     => (Ok [
       (Enum n1),
       (ezero n0),
@@ -74,12 +74,12 @@ schema enum = fun s => match s with
   --   enum-elim(2, M, vcons(tc, vcons(fc, vnil)), esucc 1 (ezero 0))
   --   = enum-elim(1, M, vcons(fc, vnil), ezero 0)  [by enum-beta-succ]
   --   = fc  [by enum-beta-zero]
-  | [(type_name, [], U),
-     (true_name, [], type_name),
-     (false_name, [], type_name),
-     (case_name, [(mvar, U), (tc_var, mvar), (fc_var, mvar), (scrut_var, type_name)], mvar),
-     (eq_true, [(mvar2, U), (tc2, mvar2), (fc2, mvar2)], _),
-     (eq_false, [(mvar3, U), (tc3, mvar3), (fc3, mvar3)], _)]
+  | [(type_name, [], U, _),
+     (true_name, [], type_name, _),
+     (false_name, [], type_name, _),
+     (case_name, [(mvar, U), (tc_var, mvar), (fc_var, mvar), (scrut_var, type_name)], mvar, _),
+     (eq_true, [(mvar2, U), (tc2, mvar2), (fc2, mvar2)], _, _),
+     (eq_false, [(mvar3, U), (tc3, mvar3), (fc3, mvar3)], _, _)]
     => (Ok [
       (Enum n2),
       (ezero n1),
@@ -111,4 +111,3 @@ false : bool
 bool-case (M : U) (true-case : M) (false-case : M) (scrutinee : bool) : M
 bool-case-true (M : U) (true-case : M) (false-case : M) : eq M M (bool-case M true-case false-case true) true-case
 bool-case-false (M : U) (true-case : M) (false-case : M) : eq M M (bool-case M true-case false-case false) false-case
-end

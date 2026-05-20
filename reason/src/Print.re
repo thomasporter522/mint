@@ -90,7 +90,6 @@ let rec debugPat = (t: pat): string => {
 let rec printML = (t: ml): string => {
   let inner =
     switch (t.value) {
-    | Shard(text) => text
     | Hole(User) => "?"
     | Hole(Synthesized) => ""
     | Hole(Auto) => "\xE2\x9F\x90"
@@ -137,7 +136,6 @@ let rec printML = (t: ml): string => {
           })
       ++ " = " ++ printML(b.rhs)
       ++ " in " ++ printML(body)
-    | BuilderError => "<BUILDER ERROR>"
     };
   t.meta.parens ? "(" ++ inner ++ ")" : inner;
 };
@@ -145,7 +143,6 @@ let rec printML = (t: ml): string => {
 let rec debugML = (t: ml): string => {
   let p = t.meta.parens ? "P" : "";
   switch (t.value) {
-  | Shard(_) => "Shard"
   | Hole(User) => "Hole"
   | Hole(Synthesized) => "Hole_"
   | Hole(Auto) => "Auto"
@@ -173,7 +170,6 @@ let rec debugML = (t: ml): string => {
     "Let(" ++ b.name ++ "," ++ debugML(b.rhs) ++ "," ++ debugML(body) ++ ")"
   | If(c, t, e) =>
     "If(" ++ debugML(c) ++ "," ++ debugML(t) ++ "," ++ debugML(e) ++ ")"
-  | BuilderError => "ERR"
   };
 };
 

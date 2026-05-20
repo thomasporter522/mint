@@ -35,17 +35,17 @@ bool-elim (M : U) (yes-case : M) (no-case : M) (b : El bool-c) : M
 bool-yes-beta (M : U) (yes-case : M) (no-case : M) : eq M M (bool-elim M yes-case no-case yes-val) yes-case
 bool-no-beta (M : U) (yes-case : M) (no-case : M) : eq M M (bool-elim M yes-case no-case no-val) no-case
 meta
-schema enum = fun s => match s with
+schema enum = fun outer => fun s => match s with
   -- 0 constructors: map to El void-c
-  | [(type_name, [], U),
-     (case_name, [(mvar, U), (scrut_var, type_name)], mvar)]
+  | [(type_name, [], U, _),
+     (case_name, [(mvar, U), (scrut_var, type_name)], mvar, _)]
     => (Ok [(El void-c), (void-elim mvar scrut_var)])
 
   -- 1 constructor: map to El unit-c
-  | [(type_name, [], U),
-     (ctor_name, [], type_name),
-     (case_name, [(mvar, U), (tc_var, mvar), (scrut_var, type_name)], mvar),
-     (eq_name, [(mvar2, U), (tc_var2, mvar2)], _)]
+  | [(type_name, [], U, _),
+     (ctor_name, [], type_name, _),
+     (case_name, [(mvar, U), (tc_var, mvar), (scrut_var, type_name)], mvar, _),
+     (eq_name, [(mvar2, U), (tc_var2, mvar2)], _, _)]
     => (Ok [
       (El unit-c),
       unit-val,
@@ -54,12 +54,12 @@ schema enum = fun s => match s with
     ])
 
   -- 2 constructors: map to El bool-c
-  | [(type_name, [], U),
-     (true_name, [], type_name),
-     (false_name, [], type_name),
-     (case_name, [(mvar, U), (tc_var, mvar), (fc_var, mvar), (scrut_var, type_name)], mvar),
-     (eq_true, [(mvar2, U), (tc2, mvar2), (fc2, mvar2)], _),
-     (eq_false, [(mvar3, U), (tc3, mvar3), (fc3, mvar3)], _)]
+  | [(type_name, [], U, _),
+     (true_name, [], type_name, _),
+     (false_name, [], type_name, _),
+     (case_name, [(mvar, U), (tc_var, mvar), (fc_var, mvar), (scrut_var, type_name)], mvar, _),
+     (eq_true, [(mvar2, U), (tc2, mvar2), (fc2, mvar2)], _, _),
+     (eq_false, [(mvar3, U), (tc3, mvar3), (fc3, mvar3)], _, _)]
     => (Ok [
       (El bool-c),
       yes-val,
@@ -86,4 +86,3 @@ false : bool
 bool-case (M : U) (true-case : M) (false-case : M) (scrutinee : bool) : M
 bool-case-true (M : U) (true-case : M) (false-case : M) : eq M M (bool-case M true-case false-case true) true-case
 bool-case-false (M : U) (true-case : M) (false-case : M) : eq M M (bool-case M true-case false-case false) false-case
-end

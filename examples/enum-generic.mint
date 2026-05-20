@@ -67,10 +67,10 @@ meta
 -- Let me see what I can do...
 
 -- For now, let me just test: can I build the TYPE generically?
-schema enum = fun s => match s with
+schema enum = fun outer => fun s => match s with
   -- 0 constructors: Void
-  | [(type_name, [], U),
-     (case_name, [(mvar, U), (scrut_var, type_name)], mvar)]
+  | [(type_name, [], U, _),
+     (case_name, [(mvar, U), (scrut_var, type_name)], mvar, _)]
     => (Ok [Void, (absurd mvar scrut_var)])
 
   -- Generic N >= 1: try to handle uniformly
@@ -79,4 +79,3 @@ schema enum = fun s => match s with
 construct by enum
 falsity : U
 falsity-case (M : U) (scrutinee : falsity) : M
-end

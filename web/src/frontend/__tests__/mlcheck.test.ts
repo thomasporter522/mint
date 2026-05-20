@@ -93,7 +93,7 @@ describe('ML type checker: pattern matching', () => {
   });
 
   it('accepts match with tuple patterns in list', () => {
-    ok('fun outer => fun s => match s with | [(name, params, ret)] => (Ok []) | _ => (Error "bad") end');
+    ok('fun outer => fun s => match s with | [(name, params, ret, _)] => (Ok []) | _ => (Error "bad") end');
   });
 
   it('accepts match with multiple branches', () => {
@@ -116,15 +116,15 @@ describe('ML type checker: pattern matching', () => {
 
 describe('ML type checker: OL patterns', () => {
   it('accepts OL constructor pattern with meta-variables', () => {
-    ok('fun outer => fun s => match s with | [(name, [(x, t)], ret)] => (Ok [ret]) | _ => (Error "bad") end');
+    ok('fun outer => fun s => match s with | [(name, [(x, t)], ret, _)] => (Ok [ret]) | _ => (Error "bad") end');
   });
 
   it('binds meta-variables for use in body', () => {
-    ok('fun outer => fun s => match s with | [(name, [(x, t)], ret)] => (Ok [t]) | _ => (Error "bad") end');
+    ok('fun outer => fun s => match s with | [(name, [(x, t)], ret, _)] => (Ok [t]) | _ => (Error "bad") end');
   });
 
   it('binds meta-variables from OL application patterns', () => {
-    ok('fun outer => fun s => match s with | [(name, [(x, eq t body)], _)] => (Ok [body, t]) | _ => (Error "bad") end');
+    ok('fun outer => fun s => match s with | [(name, [(x, eq t body)], _, _)] => (Ok [body, t]) | _ => (Error "bad") end');
   });
 });
 
@@ -168,8 +168,8 @@ describe('ML type checker: full schema example', () => {
   it('type-checks the definition schema', () => {
     const code = [
       'fun outer => fun s => match s with',
-      '| [(f, params, ret),',
-      '   (f_eq, eq_params, eq ret ret (f params) body)]',
+      '| [(f, params, ret, _),',
+      '   (f_eq, eq_params, eq ret ret (f params) body, _)]',
       '    => (Ok [body, (refl ret body)])',
       '| _ =>',
       '  (Error "invalid definition")',
@@ -193,17 +193,17 @@ describe('ML type checker: full schema example', () => {
 
 describe('ML type checker: x binding', () => {
   it('x in pattern is usable as x in body', () => {
-    ok('fun outer => fun s => match s with | [(name, params, ret)] => (Ok [ret]) | _ => (Error "bad") end');
+    ok('fun outer => fun s => match s with | [(name, params, ret, _)] => (Ok [ret]) | _ => (Error "bad") end');
   });
 
   it('bare x (no ?) in body does NOT reference x binding', () => {
     // In standalone mode (olNames=None), bare identifiers are permissive
     // So this passes — but ret resolves as an OL term, not the pattern-bound ret
-    ok('fun outer => fun s => match s with | [(name, params, ret)] => (Ok [ret]) | _ => (Error "bad") end');
+    ok('fun outer => fun s => match s with | [(name, params, ret, _)] => (Ok [ret]) | _ => (Error "bad") end');
   });
 
   it('repeated x in pattern acts as equality constraint', () => {
-    ok('fun outer => fun s => match s with | [(n, p, ret), (n2, p2, eq ret ret f body)] => (Ok [body]) | _ => (Error "bad") end');
+    ok('fun outer => fun s => match s with | [(n, p, ret, _), (n2, p2, eq ret ret f body, _)] => (Ok [body]) | _ => (Error "bad") end');
   });
 
   it('bare ? is a wildcard, not a named binding', () => {
@@ -212,14 +212,14 @@ describe('ML type checker: x binding', () => {
 
   it('name component has type Term', () => {
     // name binds at Term (first component of signature triple — the OL identifier)
-    ok('fun outer => fun s => match s with | [(name, params, ret)] => (Ok [name]) | _ => (Error "bad") end');
+    ok('fun outer => fun s => match s with | [(name, params, ret, _)] => (Ok [name]) | _ => (Error "bad") end');
   });
 
   it('params component has type List (String, Term), not List Term', () => {
     // params : List (String, Term), so Ok params fails (Ok wants List Term)
-    fails('fun outer => fun s => match s with | [(name, params, ret)] => (Ok params) | _ => (Error "bad") end', 'Expected List Term');
+    fails('fun outer => fun s => match s with | [(name, params, ret, _)] => (Ok params) | _ => (Error "bad") end', 'Expected List Term');
     // And using params where String is expected also fails
-    fails('fun outer => fun s => match s with | [(name, params, ret)] => (Error params) | _ => (Error "bad") end', 'Expected String');
+    fails('fun outer => fun s => match s with | [(name, params, ret, _)] => (Error params) | _ => (Error "bad") end', 'Expected String');
   });
 });
 
@@ -229,7 +229,7 @@ describe('ML type checker: x binding', () => {
 
 describe('ML type checker: signature type', () => {
   it('3-tuple pattern matches signature', () => {
-    ok('fun outer => fun s => match s with | [(name, params, ret)] => (Ok [ret]) | _ => (Error "bad") end');
+    ok('fun outer => fun s => match s with | [(name, params, ret, _)] => (Ok [ret]) | _ => (Error "bad") end');
   });
 
   it('old 2-tuple pattern fails on signature', () => {
@@ -238,11 +238,11 @@ describe('ML type checker: signature type', () => {
   });
 
   it('nested param destructuring works', () => {
-    ok('fun outer => fun s => match s with | [(name, [(pname, pty)], ret)] => (Ok [pty]) | _ => (Error "bad") end');
+    ok('fun outer => fun s => match s with | [(name, [(pname, pty)], ret, _)] => (Ok [pty]) | _ => (Error "bad") end');
   });
 
   it('empty params list pattern works', () => {
-    ok('fun outer => fun s => match s with | [(name, [], ret)] => (Ok [ret]) | _ => (Error "bad") end');
+    ok('fun outer => fun s => match s with | [(name, [], ret, _)] => (Ok [ret]) | _ => (Error "bad") end');
   });
 });
 
@@ -261,7 +261,7 @@ describe('ML type checker: Term is not a wildcard', () => {
   });
 
   it('pair where Term expected is rejected', () => {
-    fails('fun outer => fun s => match s with | [(name, params, ret)] => (Ok [(name, ret)]) | _ => (Error "bad") end', 'Expected Term');
+    fails('fun outer => fun s => match s with | [(name, params, ret, _)] => (Ok [(name, ret)]) | _ => (Error "bad") end', 'Expected Term');
   });
 
   it('bool where Term expected is rejected', () => {
@@ -277,23 +277,23 @@ describe('ML type checker: Term is not a wildcard', () => {
   });
 
   it('Term where List expected is rejected', () => {
-    fails('fun outer => fun s => match s with | [(n, p, r)] => (Ok r) | _ => (Error "bad") end', 'Expected List');
+    fails('fun outer => fun s => match s with | [(n, p, r, _)] => (Ok r) | _ => (Error "bad") end', 'Expected List');
   });
 
   it('fst on pair returns the left type, not Term', () => {
     // fst (name, params) returns Term (name's type), not a wildcard
     // Using it as a list element in Ok is fine since name : Term
-    ok('fun outer => fun s => match s with | [(name, params, ret)] => (Ok [fst (name, ret)]) | _ => (Error "bad") end');
+    ok('fun outer => fun s => match s with | [(name, params, ret, _)] => (Ok [fst (name, ret)]) | _ => (Error "bad") end');
   });
 
   it('snd on pair returns the right type, not Term', () => {
-    ok('fun outer => fun s => match s with | [(name, params, ret)] => (Ok [snd (name, ret)]) | _ => (Error "bad") end');
+    ok('fun outer => fun s => match s with | [(name, params, ret, _)] => (Ok [snd (name, ret)]) | _ => (Error "bad") end');
   });
 
   it('fst of pair with list left returns List, not Term', () => {
     // fst (params, name) where params : List (Term, Term) returns List (Term, Term)
     // Using that as a Term element in Ok should fail
-    fails('fun outer => fun s => match s with | [(name, params, ret)] => (Ok [fst (params, name)]) | _ => (Error "bad") end', 'Expected Term');
+    fails('fun outer => fun s => match s with | [(name, params, ret, _)] => (Ok [fst (params, name)]) | _ => (Error "bad") end', 'Expected Term');
   });
 
   it('let binding preserves inferred type', () => {

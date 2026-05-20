@@ -31,4 +31,3 @@ ap (l1 l2 : level) (A : Ul l1) (B : Ul l2) (f : to A B) (a : A) : B
 -- let (l1 l2 : level) (A : Ul l1) (B : Ul l2) [x : A] (def : A) (body[x] : B) : B
 -- zeta (l1 l2 : level) (A : Ul l1) (B : Ul l2) [x : A] (def : A) (body[x] : B) :
     -- eq (let l1 l2 A B x def body[x]) body[def]
-end

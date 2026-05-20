@@ -1,7 +1,7 @@
 -- Church-encoded enums via untyped combinatory logic (Approach A)
 --
 -- Postulates: combinatory logic domain D with K/S/ap,
--- coerce/embed retraction between D and any type in U,
+-- coerce-d/embed retraction between D and any type in U,
 -- plus standard congruence lemmas.
 --
 -- Key idea: enum types are witnessed by D.
@@ -20,12 +20,12 @@ S : D
 ap (f : D) (a : D) : D
 ap-K (x : D) (y : D) : eq D D (ap (ap K x) y) x
 ap-S (x : D) (y : D) (z : D) : eq D D (ap (ap (ap S x) y) z) (ap (ap x z) (ap y z))
-coerce (A : U) (d : D) : A
+coerce-d (A : U) (d : D) : A
 embed (A : U) (a : A) : D
-retract (A : U) (a : A) : eq A A (coerce A (embed A a)) a
+retract (A : U) (a : A) : eq A A (coerce-d A (embed A a)) a
 embed-D (x : D) : eq D D (embed D x) x
 ap-cong (f : D) (g : D) (x : D) (e : eq D D f g) : eq D D (ap f x) (ap g x)
-coerce-cong (A : U) (x : D) (y : D) (e : eq D D x y) : eq A A (coerce A x) (coerce A y)
+coerce-d-cong (A : U) (x : D) (y : D) (e : eq D D x y) : eq A A (coerce-d A x) (coerce-d A y)
 meta
 -- Proof helpers: reusable SK-reduction lemmas
 -- K-selector: ap(ap(embed D K) x) y = x
@@ -68,26 +68,26 @@ i-select-proof = fun x =>
       (ap-K x (ap K x))))
 
 -- Generic enum schema: dispatches on number of constructors
-schema enum = fun s => match s with
-  -- 0 constructors (falsity): type = D, case = coerce
-  | [(type_name, [], U),
-     (case_name, [(mvar, U), (scrut_var, type_name)], mvar)]
-    => (Ok [D, (coerce mvar scrut_var)])
+schema enum = fun outer => fun s => match s with
+  -- 0 constructors (falsity): type = D, case = coerce-d
+  | [(type_name, [], U, _),
+     (case_name, [(mvar, U), (scrut_var, type_name)], mvar, _)]
+    => (Ok [D, (coerce-d mvar scrut_var)])
 
-  -- 1 constructor (unit): ctor = I, case = coerce(ap(embed scrutinee)(embed arg))
-  | [(type_name, [], U),
-     (ctor_name, [], type_name),
-     (case_name, [(mvar, U), (tc_var, mvar), (scrut_var, type_name)], mvar),
-     (eq_name, [(mvar2, U), (tc_var2, mvar2)], _)]
+  -- 1 constructor (unit): ctor = I, case = coerce-d(ap(embed scrutinee)(embed arg))
+  | [(type_name, [], U, _),
+     (ctor_name, [], type_name, _),
+     (case_name, [(mvar, U), (tc_var, mvar), (scrut_var, type_name)], mvar, _),
+     (eq_name, [(mvar2, U), (tc_var2, mvar2)], _, _)]
     => (Ok [
       D,
       (ap (ap S K) K),
-      (coerce mvar (ap (embed D scrut_var) (embed mvar tc_var))),
+      (coerce-d mvar (ap (embed D scrut_var) (embed mvar tc_var))),
       (trans mvar
-        (coerce mvar (ap (embed D (ap (ap S K) K)) (embed mvar2 tc_var2)))
-        (coerce mvar (embed mvar2 tc_var2))
+        (coerce-d mvar (ap (embed D (ap (ap S K) K)) (embed mvar2 tc_var2)))
+        (coerce-d mvar (embed mvar2 tc_var2))
         tc_var2
-        (coerce-cong mvar
+        (coerce-d-cong mvar
           (ap (embed D (ap (ap S K) K)) (embed mvar2 tc_var2))
           (embed mvar2 tc_var2)
           (i-select-proof (embed mvar2 tc_var2)))
@@ -95,31 +95,31 @@ schema enum = fun s => match s with
     ])
 
   -- 2 constructors (bool): true = K, false = SK
-  | [(type_name, [], U),
-     (true_name, [], type_name),
-     (false_name, [], type_name),
-     (case_name, [(mvar, U), (tc_var, mvar), (fc_var, mvar), (scrut_var, type_name)], mvar),
-     (eq_true, [(mvar2, U), (tc2, mvar2), (fc2, mvar2)], _),
-     (eq_false, [(mvar3, U), (tc3, mvar3), (fc3, mvar3)], _)]
+  | [(type_name, [], U, _),
+     (true_name, [], type_name, _),
+     (false_name, [], type_name, _),
+     (case_name, [(mvar, U), (tc_var, mvar), (fc_var, mvar), (scrut_var, type_name)], mvar, _),
+     (eq_true, [(mvar2, U), (tc2, mvar2), (fc2, mvar2)], _, _),
+     (eq_false, [(mvar3, U), (tc3, mvar3), (fc3, mvar3)], _, _)]
     => (Ok [
       D,
       K,
       (ap S K),
-      (coerce mvar (ap (ap (embed D scrut_var) (embed mvar tc_var)) (embed mvar fc_var))),
+      (coerce-d mvar (ap (ap (embed D scrut_var) (embed mvar tc_var)) (embed mvar fc_var))),
       (trans mvar2
-        (coerce mvar2 (ap (ap (embed D K) (embed mvar2 tc2)) (embed mvar2 fc2)))
-        (coerce mvar2 (embed mvar2 tc2))
+        (coerce-d mvar2 (ap (ap (embed D K) (embed mvar2 tc2)) (embed mvar2 fc2)))
+        (coerce-d mvar2 (embed mvar2 tc2))
         tc2
-        (coerce-cong mvar2
+        (coerce-d-cong mvar2
           (ap (ap (embed D K) (embed mvar2 tc2)) (embed mvar2 fc2))
           (embed mvar2 tc2)
           (k-select-proof (embed mvar2 tc2) (embed mvar2 fc2)))
         (retract mvar2 tc2)),
       (trans mvar3
-        (coerce mvar3 (ap (ap (embed D (ap S K)) (embed mvar3 tc3)) (embed mvar3 fc3)))
-        (coerce mvar3 (embed mvar3 fc3))
+        (coerce-d mvar3 (ap (ap (embed D (ap S K)) (embed mvar3 tc3)) (embed mvar3 fc3)))
+        (coerce-d mvar3 (embed mvar3 fc3))
         fc3
-        (coerce-cong mvar3
+        (coerce-d-cong mvar3
           (ap (ap (embed D (ap S K)) (embed mvar3 tc3)) (embed mvar3 fc3))
           (embed mvar3 fc3)
           (sk-select-proof (embed mvar3 tc3) (embed mvar3 fc3)))
@@ -143,4 +143,3 @@ false : bool
 bool-case (M : U) (true-case : M) (false-case : M) (scrutinee : bool) : M
 bool-case-true (M : U) (true-case : M) (false-case : M) : eq M M (bool-case M true-case false-case true) true-case
 bool-case-false (M : U) (true-case : M) (false-case : M) : eq M M (bool-case M true-case false-case false) false-case
-end

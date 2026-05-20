@@ -83,8 +83,8 @@ abs = fun x => fun e => fun A => fun B =>
 -- (eq B B (ap A B f x) body) where f is the first decl's name and x is the
 -- equation's bound parameter. Nonlinear occurrences of f and x in the
 -- pattern check structural equality.
-schema abstraction = fun s => match s with
-  | [(f, [], (to A B)), (_, [(x, _)], (eq _ _ (ap _ _ f x) body))] =>
+schema abstraction = fun outer => fun s => match s with
+  | [(f, [], (to A B), _), (_, [(x, _)], (eq _ _ (ap _ _ f x) body), _)] =>
       let result = (abs x body A B) in
       (Ok [(fst result), (snd result)])
   | _ => (Error "abstraction: expected (f : to A B) and (f-beta (x : A) : eq B B (ap A B f x) body)")
@@ -99,4 +99,3 @@ triple-beta (n : N) : eq N N (ap N N triple n) (ap N N (ap N (to N N) plus n) (a
 construct by abstraction
 aptwice : to (to N N) N
 aptwice-beta (f : to N N) : eq N N (ap (to N N) N aptwice f) (ap N N f (ap N N f zero))
-end

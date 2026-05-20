@@ -39,11 +39,11 @@ polyK-beta (M : U) : eq (Arr M (Arr M M)) (Arr M (Arr M M)) (inst2 M polyK) (K M
 polyFlipK : ForallArr2
 polyFlipK-beta (M : U) : eq (Arr M (Arr M M)) (Arr M (Arr M M)) (inst2 M polyFlipK) (flip-K M M)
 meta
-schema enum = fun s => match s with
+schema enum = fun outer => fun s => match s with
   -- 0 constructors (falsity)
   -- Witnesses: falsity = ForallArr0, falsity-case = inst0
-  | [(type_name, [], U),
-     (case_name, [(mvar, U), (scrut_var, type_name)], mvar)]
+  | [(type_name, [], U, _),
+     (case_name, [(mvar, U), (scrut_var, type_name)], mvar, _)]
     => (Ok [ForallArr0, (inst0 mvar scrut_var)])
 
   -- 1 constructor (unit)
@@ -54,10 +54,10 @@ schema enum = fun s => match s with
   --   unit-case-trivial M tc : unit-case M tc trivial = tc
   --     i.e. app(inst1 M polyId, tc) = tc
   --     by trans: app(inst1 M polyId, tc) = app(I M, tc) = tc
-  | [(type_name, [], U),
-     (ctor_name, [], type_name),
-     (case_name, [(mvar, U), (tc_var, mvar), (scrut_var, type_name)], mvar),
-     (eq_name, [(mvar2, U), (tc_var2, mvar2)], _)]
+  | [(type_name, [], U, _),
+     (ctor_name, [], type_name, _),
+     (case_name, [(mvar, U), (tc_var, mvar), (scrut_var, type_name)], mvar, _),
+     (eq_name, [(mvar2, U), (tc_var2, mvar2)], _, _)]
     => (Ok [
       ForallArr1,
       polyId,
@@ -82,12 +82,12 @@ schema enum = fun s => match s with
   --       = app(app(K M M, tc), fc)        [by polyK-beta on inst2]
   --       = tc                              [by K-beta]
   --   bool-case-false similarly via polyFlipK-beta + flip-K-beta
-  | [(type_name, [], U),
-     (true_name, [], type_name),
-     (false_name, [], type_name),
-     (case_name, [(mvar, U), (tc_var, mvar), (fc_var, mvar), (scrut_var, type_name)], mvar),
-     (eq_true, [(mvar2, U), (tc2, mvar2), (fc2, mvar2)], _),
-     (eq_false, [(mvar3, U), (tc3, mvar3), (fc3, mvar3)], _)]
+  | [(type_name, [], U, _),
+     (true_name, [], type_name, _),
+     (false_name, [], type_name, _),
+     (case_name, [(mvar, U), (tc_var, mvar), (fc_var, mvar), (scrut_var, type_name)], mvar, _),
+     (eq_true, [(mvar2, U), (tc2, mvar2), (fc2, mvar2)], _, _),
+     (eq_false, [(mvar3, U), (tc3, mvar3), (fc3, mvar3)], _, _)]
     => (Ok [
       ForallArr2,
       polyK,
@@ -132,4 +132,3 @@ false : bool
 bool-case (M : U) (true-case : M) (false-case : M) (scrutinee : bool) : M
 bool-case-true (M : U) (true-case : M) (false-case : M) : eq M M (bool-case M true-case false-case true) true-case
 bool-case-false (M : U) (true-case : M) (false-case : M) : eq M M (bool-case M true-case false-case false) false-case
-end

@@ -16,6 +16,7 @@ Mint's design is centered around the virtue of _objectivity_. That is, the seman
 - Inserted code can be hierarchically marked for progressive unfolding.  
 - User-written construct-block completion procedures.
 - User-written normalization procedures.
+- User-defined syntax (unicode, mixfix?)
 - A module-like system for reusable, nested hypothetical reasoning.
 
 ## Minor TODOs
@@ -28,3 +29,11 @@ Mint's design is centered around the virtue of _objectivity_. That is, the seman
 
 - Unreadable inconsistency messages when parameters are explicit
      - Pretty print can greedily, iteratively, recursively remove arguments until it doesn't typecheck
+
+## Future case studies
+- Natural number game
+- Mathematics in Lean, Avigad
+- Gauge types
+- Quotient Inductive Types from HoTT
+- PLFA/Software Foundations
+- POPLMark

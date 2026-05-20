@@ -1,11 +1,25 @@
+/* What kind of ghost a synthesized subterm is. Inlay-hint extraction
+   walks the elaborated AST and renders each ghost subtree according to
+   its kind:
+     Implicit — an arg slot the elaborator filled in (e.g. the missing
+       universe args of `(ap f a)`). Maximal leading runs of these
+       inside an Ap collapse to a single `…` anchored at the head's end.
+     Coerce — a synthesized wrapping inserted around a user subterm.
+       The whole wrapping subtree is Coerce-ghost; the user's subject
+       sits inside it as non-ghost. Renders as `°` at the subject with
+       the wrapping as the hover tooltip.
+   Holding the ghost classification in the term itself means there is
+   no parallel diagnostic side table: hints and "not fully solved"
+   warnings are pure functions of the final elaborated term. */
+type ghostKind =
+  | Implicit
+  | Coerce;
+
 type meta = {
   parens: bool,
   start: int,
   end_: int,
-  /* True if this subterm was synthesized by elaboration rather than
-     written by the user. Inlay-hint extraction walks the elaborated AST
-     and renders ghost subterms at their parent's surrounding positions. */
-  ghost: bool,
+  ghost: option(ghostKind),
 };
 
 /* --- Small enums --- */
@@ -65,7 +79,6 @@ type decl = {
    Parsed from annotation syntax by the builder. */
 type mlType =
   | MTerm
-  | MSort
   | MBool
   | MString
   | MTag                                     /* `#name` tag value */
@@ -93,7 +106,6 @@ and pat = {
    that mirror the OL constructors but take ml subterms, since ML
    expressions can mix OL identifiers with ML-bound variables. */
 type cML =
-  | Shard(string)                             /* parse artifact: unrecognized text */
   | Hole(holeKind)
   | Identifier(string)                        /* x — could be OL or ML, resolved by checker */
   | StringLit(string)
@@ -108,7 +120,6 @@ type cML =
   | Match(ml, list((pat, ml)))               /* match scrut with | p => e end */
   | If(ml, ml, ml)                           /* if cond then t else e end */
   | Let(binding, ml)                         /* let name : T = e in body */
-  | BuilderError                             /* parse artifact */
 and ml = {
   value: cML,
   meta,
@@ -157,10 +168,17 @@ type program = list(block);
 
 /* === Helpers === */
 
-let defaultMeta = {parens: false, start: (-1), end_: (-1), ghost: false};
+let defaultMeta = {parens: false, start: (-1), end_: (-1), ghost: None};
 
-/* Mark any subterm as ghost (synthesized by elaboration). */
-let asGhost = (m: meta): meta => {...m, ghost: true};
+/* Mark any subterm as ghost with the given kind. */
+let asGhost = (k: ghostKind, m: meta): meta => {...m, ghost: Some(k)};
+
+/* Predicate convenience — most call sites just ask "is this synthesized?" */
+let isGhost = (m: meta): bool =>
+  switch (m.ghost) {
+  | Some(_) => true
+  | None => false
+  };
 
 let mkOL = (t: cOL): ol => {value: t, meta: defaultMeta};
 let mkML = (t: cML): ml => {value: t, meta: defaultMeta};

@@ -8,4 +8,3 @@ N : U level-zero
 zero : N
 point (l : level) (A : U l) (a : A) : U (level-suc l)
 point-zero : point level-zero N zero
-end

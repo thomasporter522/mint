@@ -87,8 +87,8 @@ dabs-ident-eq (l : level)
 meta
   schema definition =
     fun outer => fun s => match s with
-    | [(a, _, _),
-       (a_eq, _, eq _ _ _ _ _ body)]
+    | [(a, _, _, _),
+       (a_eq, _, eq _ _ _ _ _ body, _)]
         => (Ok [body, (refl)])
     | _ => (Error "invalid definition")
     end

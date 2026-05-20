@@ -127,23 +127,24 @@ describe('parentheses', () => {
 
 describe('postulate blocks', () => {
   it('parses postulate with one declaration', () => {
-    expect(pp('postulate\nx : T\nend')).toBe('postulate\nx : T\nend\n');
+    expect(pp('postulate\nx : T')).toBe('postulate\nx : T\n');
   });
 
   it('parses postulate with multiple declarations', () => {
-    expect(pp('postulate\nx : T\ny : S\nend')).toBe('postulate\nx : T\ny : S\nend\n');
+    expect(pp('postulate\nx : T\ny : S')).toBe('postulate\nx : T\ny : S\n');
   });
 
   it('parses postulate with function declaration', () => {
     // The outer parens around the LHS (f (a : T)) are silly and the
     // printer drops them on round-trip.
-    expect(pp('postulate\n(f (a : T)) : S\nend')).toBe('postulate\nf (a : T) : S\nend\n');
+    expect(pp('postulate\n(f (a : T)) : S')).toBe('postulate\nf (a : T) : S\n');
   });
 
   it('parses nested postulate blocks', () => {
-    const result = pp('postulate\nx : T\npostulate\ny : S\nend\nend');
+    const result = pp('postulate\nx : T\npostulate\ny : S');
     expect(result).toContain('postulate');
-    expect(result).toContain('end');
+    // Block stops at the next block keyword — no explicit terminator.
+    expect((result.match(/postulate/g) || []).length).toBe(2);
   });
 });
 
@@ -170,19 +171,18 @@ describe('edge cases', () => {
   });
 
   it('postulate with application in type position', () => {
-    // Outer parens around the type expression are silly after `:` —
-    // dropped on round-trip.
-    expect(pp('postulate\nx : (f a)\nend')).toBe('postulate\nx : f a\nend\n');
+    // Parens around (f a) are part of the user's source and preserved
+    // by the printer for round-trip stability.
+    expect(pp('postulate\nx : (f a)')).toBe('postulate\nx : (f a)\n');
   });
 
   it('preserves structure through round-trip', () => {
-    const complex = 'postulate\n(arrow (A : Sort) (B : Sort)) : Sort\n(pi (A : Sort) (B : (arrow A Sort))) : Sort\nend';
+    const complex = 'postulate\n(arrow (A : Sort) (B : Sort)) : Sort\n(pi (A : Sort) (B : (arrow A Sort))) : Sort';
     const result = pp(complex);
     expect(result).toContain('arrow');
     expect(result).toContain('pi');
     expect(result).toContain('Sort');
     expect(result).toContain('postulate');
-    expect(result).toContain('end');
   });
 });
 

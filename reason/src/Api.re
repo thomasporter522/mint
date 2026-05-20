@@ -114,7 +114,7 @@ let resultOfStatics = (statics: staticInfo): jsResult => {
         ((pos, kind, ghosts): (int, Check.hintKind, list(ol))) =>
           [|
             Obj.repr(pos),
-            Obj.repr(Check.renderHintLabel(kind, ghosts)),
+            Obj.repr(Check.renderHintLabel(kind)),
             Obj.repr(Check.renderHintValues(ghosts)),
           |],
         statics.inlayHints,

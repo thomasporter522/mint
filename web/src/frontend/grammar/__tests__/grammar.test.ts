@@ -16,7 +16,7 @@ function findErrors(code: string): { count: number; tree: string } {
 
 describe('Lezer grammar smoke', () => {
   it('parses a tiny postulate block', () => {
-    const code = 'postulate\nsort : sort\nend'
+    const code = 'postulate\nsort : sort'
     const t = tree(code)
     expect(t).not.toMatch(/⚠/)  // no error nodes
     expect(t).toMatch(/Document/)
@@ -25,17 +25,17 @@ describe('Lezer grammar smoke', () => {
   })
 
   it('parses multiple decls separated by newlines', () => {
-    const code = 'postulate\nSort : Sort\nU : Sort\nend'
+    const code = 'postulate\nSort : Sort\nU : Sort'
     expect(tree(code)).toMatch(/Document/)
   })
 
   it('parses a function-style decl with params', () => {
-    const code = 'postulate\nU : Sort\n(eq (A : U) (B : U)) : U\nend'
+    const code = 'postulate\nU : Sort\n(eq (A : U) (B : U)) : U'
     expect(tree(code)).toMatch(/Document/)
   })
 
   it('parses a meta block with a let', () => {
-    const code = 'postulate\nU : Sort\nmeta\nfoo = 42\nend'
+    const code = 'postulate\nU : Sort\nmeta\nfoo = 42'
     expect(tree(code)).toMatch(/Document/)
   })
 })

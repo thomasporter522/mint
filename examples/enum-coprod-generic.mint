@@ -99,22 +99,22 @@ build-proofs : (Term -> ((List Term) -> ((List Term) -> (List Term)))) = fun mva
   end
 
 schema enum = fun outer => fun s => match s with
-  | [(type-name, [], U),
-     (case-name, [(mvar, U), (scrut, type-name)], mvar)]
+  | [(type-name, [], U, _),
+     (case-name, [(mvar, U), (scrut, type-name)], mvar, _)]
     => (Ok [Void, (absurd mvar scrut)])
-  | [(type-name, [], U),
-     (ctor, [], type-name),
-     (case-name, [(mvar, U), (tc, mvar), (scrut, type-name)], mvar),
-     (eq-name, [(mvar2, U), (tc2, mvar2)], _)]
+  | [(type-name, [], U, _),
+     (ctor, [], type-name, _),
+     (case-name, [(mvar, U), (tc, mvar), (scrut, type-name)], mvar, _),
+     (eq-name, [(mvar2, U), (tc2, mvar2)], _, _)]
     => (Ok [Unit, star, (unit-rec mvar tc scrut), (unit-comp mvar2 tc2)])
-  | (type-name, [], U) :: all-rest =>
+  | (type-name, [], U, _) :: all-rest =>
     -- Find case params: scan for first entry with non-empty params.
     -- Seed with [(star, star)] to establish List (Term, Term) element type.
     let found-params = (foldl (fun acc => fun entry =>
       if (fst acc) == true then acc
       else match entry with
-        | (_, [], _) => acc
-        | (_, params, _) => (true, params)
+        | (_, [], _, _) => acc
+        | (_, params, _, _) => (true, params)
         end
       end
     ) (false, [(star, star)]) all-rest) in
@@ -159,7 +159,6 @@ no : mybool
 mybool-case (M : U) (yes-case : M) (no-case : M) (scrutinee : mybool) : M
 mybool-case-yes (M : U) (yes-case : M) (no-case : M) : eq M M (mybool-case M yes-case no-case yes) yes-case
 mybool-case-no (M : U) (yes-case : M) (no-case : M) : eq M M (mybool-case M yes-case no-case no) no-case
-end
 
 construct by enum
 triple : U
@@ -170,4 +169,3 @@ triple-case (M : U) (a-case : M) (b-case : M) (c-case : M) (scrutinee : triple) 
 triple-case-a (M : U) (a-case : M) (b-case : M) (c-case : M) : eq M M (triple-case M a-case b-case c-case a) a-case
 triple-case-b (M : U) (a-case : M) (b-case : M) (c-case : M) : eq M M (triple-case M a-case b-case c-case b) b-case
 triple-case-c (M : U) (a-case : M) (b-case : M) (c-case : M) : eq M M (triple-case M a-case b-case c-case c) c-case
-end

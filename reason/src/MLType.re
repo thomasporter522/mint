@@ -2,7 +2,6 @@
 
 type mlType = Term.mlType =
   | MTerm
-  | MSort
   | MBool
   | MString
   | MTag
@@ -14,7 +13,6 @@ type mlType = Term.mlType =
 let rec printType =
   fun
   | MTerm => "Term"
-  | MSort => "Sort"
   | MBool => "Bool"
   | MString => "String"
   | MTag => "Tag"
@@ -24,13 +22,12 @@ let rec printType =
   | MArrow(a, b) => printTypeAtom(a) ++ " -> " ++ printTypeAtom(b)
 and printTypeAtom =
   fun
-  | (MTerm | MSort | MBool | MString | MTag | MTuple(_)) as t => printType(t)
+  | (MTerm | MBool | MString | MTag | MTuple(_)) as t => printType(t)
   | t => "(" ++ printType(t) ++ ")";
 
 let rec eqType = (a: mlType, b: mlType): bool =>
   switch (a, b) {
   | (MTerm, MTerm)
-  | (MSort, MSort)
   | (MBool, MBool)
   | (MString, MString)
   | (MTag, MTag) => true

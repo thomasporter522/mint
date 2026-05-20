@@ -6,4 +6,3 @@ D : U
 x : D
 y : eq D D x ?
 z : eq D D x badvar
-end

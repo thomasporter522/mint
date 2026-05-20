@@ -26,17 +26,16 @@ import type { holeInfo } from './reason-bridge.ts'
    Melange variant tag order. Stable as long as the Reason enum doesn't
    get reordered. */
 const TAG = {
-  Shard: 0,
-  Hole: 1,
-  Identifier: 2,
-  StringLit: 3,
-  TagLit: 4,
-  Tuple: 5,
-  Asc: 6,
-  BinOp: 7,
-  Ap: 8,
-  List: 9,
-  Cons: 10,
+  Hole: 0,
+  Identifier: 1,
+  StringLit: 2,
+  TagLit: 3,
+  Tuple: 4,
+  Asc: 5,
+  BinOp: 6,
+  Ap: 7,
+  List: 8,
+  Cons: 9,
 } as const
 
 type MlNode = { value: any; meta: any }
@@ -198,8 +197,8 @@ export function buildIRProblem(info: holeInfo): IRType {
 
 /* Build an IR problem from a meta-level signature list (same shape
    schemas receive as their outer scope: `List (Term, List (Term, Term),
-   Term)`). Used by the `canonical` builtin to ingest a user-assembled
-   context. */
+   Term, List Tag)`). Used by the `canonical` builtin to ingest a
+   user-assembled context. */
 export function buildIRFromSignatures(ctxML: MlNode, goalML: MlNode): IRType {
   const params: (IRType | null)[] = []
   const paramVars: IRVar[] = []
@@ -208,8 +207,8 @@ export function buildIRFromSignatures(ctxML: MlNode, goalML: MlNode): IRType {
     for (const entry of entries) {
       if (!entry.value || entry.value.TAG !== TAG.Tuple) continue
       const items = mlListToArray<MlNode>(entry.value._0)
-      if (items.length !== 3) continue
-      const [nameT, paramsT, retT] = items
+      if (items.length !== 4) continue
+      const [nameT, paramsT, retT /* , _tagsT */] = items
       const name =
         nameT.value && nameT.value.TAG === TAG.Identifier ? nameT.value._0 : '_'
       const psList =

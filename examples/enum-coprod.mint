@@ -47,20 +47,20 @@ either-inl (A : U) (B : U) (M : U) (f : Arr A M) (g : Arr B M) (a : A) : eq M M 
 either-inr (A : U) (B : U) (M : U) (f : Arr A M) (g : Arr B M) (b : B) : eq M M (either A B M f g (inr A B b)) (app B M g b)
 app-cong (A : U) (B : U) (f : Arr A B) (g : Arr A B) (x : A) (e : eq (Arr A B) (Arr A B) f g) : eq B B (app A B f x) (app A B g x)
 meta
-schema enum = fun s => match s with
+schema enum = fun outer => fun s => match s with
   -- 0 constructors: Void
-  | [(type_name, [], U),
-     (case_name, [(mvar, U), (scrut_var, type_name)], mvar)]
+  | [(type_name, [], U, _),
+     (case_name, [(mvar, U), (scrut_var, type_name)], mvar, _)]
     => (Ok [Void, (absurd mvar scrut_var)])
 
   -- 1 constructor: Unit
   -- trivial = star
   -- unit-case M tc scrut = unit-rec M tc scrut
   -- unit-case-trivial = unit-comp M tc
-  | [(type_name, [], U),
-     (ctor_name, [], type_name),
-     (case_name, [(mvar, U), (tc_var, mvar), (scrut_var, type_name)], mvar),
-     (eq_name, [(mvar2, U), (tc_var2, mvar2)], _)]
+  | [(type_name, [], U, _),
+     (ctor_name, [], type_name, _),
+     (case_name, [(mvar, U), (tc_var, mvar), (scrut_var, type_name)], mvar, _),
+     (eq_name, [(mvar2, U), (tc_var2, mvar2)], _, _)]
     => (Ok [
       Unit,
       star,
@@ -77,12 +77,12 @@ schema enum = fun s => match s with
   --   either(... , inl Unit Unit star)
   --   = app(const Unit M tc, star)     [by either-inl]
   --   = tc                              [by const-beta]
-  | [(type_name, [], U),
-     (true_name, [], type_name),
-     (false_name, [], type_name),
-     (case_name, [(mvar, U), (tc_var, mvar), (fc_var, mvar), (scrut_var, type_name)], mvar),
-     (eq_true, [(mvar2, U), (tc2, mvar2), (fc2, mvar2)], _),
-     (eq_false, [(mvar3, U), (tc3, mvar3), (fc3, mvar3)], _)]
+  | [(type_name, [], U, _),
+     (true_name, [], type_name, _),
+     (false_name, [], type_name, _),
+     (case_name, [(mvar, U), (tc_var, mvar), (fc_var, mvar), (scrut_var, type_name)], mvar, _),
+     (eq_true, [(mvar2, U), (tc2, mvar2), (fc2, mvar2)], _, _),
+     (eq_false, [(mvar3, U), (tc3, mvar3), (fc3, mvar3)], _, _)]
     => (Ok [
       (Either Unit Unit),
       (inl Unit Unit star),
@@ -119,4 +119,3 @@ false : bool
 bool-case (M : U) (true-case : M) (false-case : M) (scrutinee : bool) : M
 bool-case-true (M : U) (true-case : M) (false-case : M) : eq M M (bool-case M true-case false-case true) true-case
 bool-case-false (M : U) (true-case : M) (false-case : M) : eq M M (bool-case M true-case false-case false) false-case
-end

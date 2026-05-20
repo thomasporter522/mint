@@ -46,7 +46,6 @@ export type Decl = {
 
 export type MLType =
   | { kind: 'MTerm' }
-  | { kind: 'MSort' }
   | { kind: 'MBool' }
   | { kind: 'MString' }
   | { kind: 'MList'; elem: MLType }
@@ -84,7 +83,6 @@ export type CML =
   | { kind: 'Match'; scrut: ML; arms: { pat: Pat; body: ML }[] }
   | { kind: 'If'; cond: ML; then_: ML; else_: ML }
   | { kind: 'Let'; binding: Binding; body: ML }
-  | { kind: 'BuilderError' }
 
 export type ML = { value: CML; meta: Meta }
 

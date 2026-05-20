@@ -27,27 +27,27 @@ let getKind = (j: jsObj): string => _str(j, "kind");
 
 let getMeta = (j: jsObj): meta => {
   let m = _obj(j, "meta");
-  {parens: _bool(m, "parens"), start: _int(m, "start"), end_: _int(m, "end"), ghost: false};
+  {parens: _bool(m, "parens"), start: _int(m, "start"), end_: _int(m, "end"), ghost: None};
 };
 
 let getBindingMeta = (j: jsObj): meta => {
   let m = _obj(j, "bindingMeta");
-  {parens: _bool(m, "parens"), start: _int(m, "start"), end_: _int(m, "end"), ghost: false};
+  {parens: _bool(m, "parens"), start: _int(m, "start"), end_: _int(m, "end"), ghost: None};
 };
 
 let getDeclMeta = (j: jsObj): meta => {
   let m = _obj(j, "declMeta");
-  {parens: _bool(m, "parens"), start: _int(m, "start"), end_: _int(m, "end"), ghost: false};
+  {parens: _bool(m, "parens"), start: _int(m, "start"), end_: _int(m, "end"), ghost: None};
 };
 
 let getParamMeta = (j: jsObj): meta => {
   let m = _obj(j, "paramMeta");
-  {parens: _bool(m, "parens"), start: _int(m, "start"), end_: _int(m, "end"), ghost: false};
+  {parens: _bool(m, "parens"), start: _int(m, "start"), end_: _int(m, "end"), ghost: None};
 };
 
 let getNameMeta = (j: jsObj): meta => {
   let m = _obj(j, "nameMeta");
-  {parens: _bool(m, "parens"), start: _int(m, "start"), end_: _int(m, "end"), ghost: false};
+  {parens: _bool(m, "parens"), start: _int(m, "start"), end_: _int(m, "end"), ghost: None};
 };
 
 let decodeHoleKind = (s: string): holeKind =>
@@ -108,7 +108,6 @@ let decodeDecl = (j: jsObj): decl => {
 let rec mlToType = (t: ml): option(mlType) =>
   switch (t.value) {
   | Identifier("Term") => Some(MTerm)
-  | Identifier("Sort") => Some(MSort)
   | Identifier("Bool") => Some(MBool)
   | Identifier("String") => Some(MString)
   | Identifier("Tag") => Some(MTag)
@@ -225,7 +224,6 @@ let rec decodeML = (j: jsObj): ml => {
       )
     | "Let" =>
       Let(decodeBinding(_obj(v, "binding")), decodeML(_obj(v, "body")))
-    | "BuilderError" => BuilderError
     | _ => Hole(Synthesized)
     };
   {value, meta};
@@ -260,7 +258,7 @@ let decodeMetaDef = (j: jsObj): metaDef => {
       parens: _bool(m, "parens"),
       start: _int(m, "start"),
       end_: _int(m, "end"),
-      ghost: false,
+      ghost: None,
     };
     NewtagDef(_str(j, "tag"), meta);
   | _ =>
@@ -279,7 +277,7 @@ let decodeTagLine = (j: jsObj): tagLine => {
     parens: _bool(m, "parens"),
     start: _int(m, "start"),
     end_: _int(m, "end"),
-    ghost: false,
+    ghost: None,
   };
   {tag: _str(j, "tag"), target: _str(j, "target"), lineMeta: meta};
 };
@@ -294,7 +292,7 @@ let decodeBlock = (j: jsObj): block => {
       parens: _bool(m, "parens"),
       start: _int(m, "start"),
       end_: _int(m, "end"),
-      ghost: false,
+      ghost: None,
     };
   };
   let readTagLines = (): list(tagLine) =>
