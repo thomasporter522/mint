@@ -17,8 +17,11 @@ trans (A B C : U) (a : A) (b : B) (c : C) : to (eq a b) (to (eq b c) (eq a c))
 meta 
 newtag #reduction
 
-postulate
+postulate 
+cast-eq (A B : U) (e : eq A B) (a : A) : eq (ap (ap cast e) a) a
+#reduction cast-eq 
 
+postulate
 cong-ap (A B : U)
   (f : to A B) (g : to A B)
   (a : A) (b : A) 
@@ -236,37 +239,69 @@ meta
         (final, (ap (ap trans chain1) final-proof))
       | Error _ => (st, sp)
       end
+    -- Structural consistency: like ==, but a hole on either side is
+    -- compatible with anything. Lets us bail on coerce candidates whose
+    -- normal forms clash at a concrete head (the trans/cast wrap would
+    -- be ill-typed and cascade into nested coerce attempts during
+    -- verify) while still admitting cases where the heads agree modulo
+    -- metas the kernel will solve via unification.
+    consistent : (Term -> (Term -> Bool)) = fun a => fun b =>
+      let pa = (decompose a) in
+      let pb = (decompose b) in
+      let ha = (fst pa) in
+      let hb = (fst pb) in
+      if (ha == ?) then true else
+      if (hb == ?) then true else
+      if (ha == hb) then (consistent-list (snd pa) (snd pb))
+      else false end end end
+    consistent-list : ((List Term) -> ((List Term) -> Bool)) = fun xs => fun ys =>
+      match xs with
+      | [] =>
+        match ys with
+        | [] => true
+        | _ :: _ => false
+        end
+      | x :: xt =>
+        match ys with
+        | [] => false
+        | y :: yt =>
+          if (consistent x y) then (consistent-list xt yt) else false end
+        end
+      end
     -- Reduce both sides to (hopefully shared) normal forms; chain
     -- `eq found nf` with `sym (eq expected nf)` to get `eq found
-    -- expected`; wrap in cast.
+    -- expected`; wrap in cast. Gated on `consistent` so a guaranteed
+    -- structural clash bails immediately; admissible cases proceed and
+    -- the kernel's verify pass runs unification on the wrap.
     coerce beta = fun ctx => fun expected => fun found => fun contents =>
       let fr = (beta-reduce ctx found) in
       let er = (beta-reduce ctx expected) in
-      let full = (ap (ap trans (snd fr)) (ap sym (snd er))) in
-      (Ok (ap (ap cast full) contents)) 
+      if (consistent (fst fr) (fst er)) then
+        let full = (ap (ap trans (snd fr)) (ap sym (snd er))) in
+        (Ok (ap (ap cast full) contents))
+      else (Error "beta normal forms inconsistent") end
 
 meta
-    schema void-schema = 
-        fun ctx => fun s => 
-          (Ok [(pi U (abs-ident)), abs-ident])
+  schema void-schema = 
+    fun ctx => fun s => 
+      (Ok [(pi U (abs-ident)), abs-ident])
 
 construct by void-schema
 void : U
 void-rec : to void (pi U (abs-ident))meta 
   schema unit-schema =
-        fun ctx => fun s => 
-          match s with 
+        fun ctx => fun s =>
+          match s with
           | [_, (_,_,_,_), _, _] =>
           (Ok [
-            ?,
+            (pi U (ap (ap abs-to abs-ident) abs-ident)),
             ?,
             ?,
             ?
             ])
           | _ => (Error "invalid")
           end
--- construct by unit-schema
-postulate
+construct by unit-schema
 unit : U
 unit-star : unit
 unit-rec : pi (ap (ap abs-to (ap abs-const unit)) (ap (ap abs-to abs-ident) abs-ident))
@@ -274,12 +309,3 @@ unit-rec-eq (M : U) (star-case : M) :
   eq M M (ap (ap 
     (dap unit-rec M)
      unit-star) star-case) star-case
-
-    -- (ap (ap cast ?) (dap unit-rec M))
-    
--- doesn't work because the motive needs to be abstractible
--- construct by unit-schema
--- unit : U
--- unit-star : unit
--- unit-rec (M : U) : to unit (to M M)
--- unit-rec-eq (M : U) (star-case : M) : eq (ap (ap (unit-rec M) unit-star) star-case) star-case

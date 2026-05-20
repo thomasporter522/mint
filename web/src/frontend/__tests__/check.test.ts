@@ -2894,3 +2894,105 @@ describe('elaboration idempotence', () => {
     );
   });
 });
+
+/* ------------------------------------------------------------------ */
+/*  Regression: termination safeguards                                 */
+/*  Each test here pins a bug we discovered the hard way (OOM / stack  */
+/*  overflow / infinite loop). The kernel must terminate on every      */
+/*  input — wrong answers are recoverable, hangs are not.              */
+/* ------------------------------------------------------------------ */
+
+describe('regression: kernel must always terminate', () => {
+  it('identity coerce procedure does not loop on an irreducible mismatch', () => {
+    /* A `(Ok contents)` coerce returns its subject unchanged. If the
+       expected/inferred mismatch survives, the verify pass produces
+       the same term, fails the same way, and re-triggers this very
+       coerce. Without a depth bound the recursion never bottoms out.
+       Test that the kernel either bounds the recursion or detects the
+       no-op and falls through. Either way: it must terminate and
+       report the Inconsistency rather than blow the stack. */
+    const code = [
+      'postulate',
+      'U : U',
+      'to (A B : U) : U',
+      'ap (A B : U) (f : to A B) (a : A) : B',
+      'eq (A B : U) (a : A) (b : B) : U',
+      'refl (A : U) (a : A) : eq A A a a',
+      'meta',
+      '  coerce id-coerce = fun ctx => fun expected => fun found => fun contents =>',
+      '    (Ok contents)',
+      'meta',
+      '  schema bad = fun ctx => fun s =>',
+      '    (Ok [?, (refl ? x)])',
+      'construct by bad',
+      'some-type : U',
+      'some-eq (M : U) (x : M) : eq M M (ap some-type x) x',
+    ].join('\n');
+    let result: any;
+    expect(() => { result = processCode(code); }).not.toThrow();
+    /* Must produce errors — the witness genuinely doesn't fit. The
+       check is that we GET errors, not that we hang. */
+    expect(result.errors.length).toBeGreaterThan(0);
+  }, 10000);
+
+  it('block-terminator `end` is not accepted at top level', () => {
+    /* `end` still closes `match` / `if` expressions, but is NOT a
+       postulate/meta/construct block terminator. Old code with trailing
+       `\nend` should be a parse error, not silently accepted. */
+    const r = processCode('postulate\nx : T\nend');
+    expect(r.errors.some((e: any) => e.type === 'syntax')).toBe(true);
+  });
+
+  it('schema can destructure signatures as 4-tuples (with the tag list)', () => {
+    /* Signatures are `(name, params, retType, tags)`. A schema that
+       names all four positions matches; one that uses 3-tuple shape
+       gets a type error. Pins the shape so changes don't drift the
+       AST / canonical / Decode sites apart silently. */
+    const ok = processCode([
+      'postulate',
+      'Sort : Sort',
+      'x : Sort',
+      'meta',
+      '  schema four = fun outer => fun s => match s with',
+      '    | [(_, _, _, _)] => (Ok [x])',
+      '    | _ => (Error "bad")',
+      '    end',
+      'construct by four',
+      'y : Sort',
+    ].join('\n'));
+    expect(ok.errors).toEqual([]);
+
+    const bad = processCode([
+      'postulate',
+      'Sort : Sort',
+      'x : Sort',
+      'meta',
+      '  schema three = fun outer => fun s => match s with',
+      '    | [(_, _, _)] => (Ok [x])',
+      '    | _ => (Error "bad")',
+      '    end',
+      'construct by three',
+      'y : Sort',
+    ].join('\n'));
+    expect(bad.errors.length).toBeGreaterThan(0);
+  });
+
+  it('annotated metalets in the same block are mutually recursive', () => {
+    /* The `processMetaDefs` pre-pass registers every annotated name so
+       definitions earlier in the block can reference definitions
+       declared later. Pre-refactor, only the current-def name was in
+       scope, so a forward reference broke with "Unbound variable." */
+    const r = processCode([
+      'postulate',
+      'Sort : Sort',
+      'meta',
+      '  even : (Term -> Bool) = fun n =>',
+      '    if n == n then (odd n) else false end',
+      '  odd : (Term -> Bool) = fun n =>',
+      '    if n == n then (even n) else true end',
+    ].join('\n'));
+    /* No "Unbound variable" — both names are in scope of each other. */
+    expect(r.errors.filter((e: any) => /Unbound variable (even|odd)/.test(e.message)))
+      .toEqual([]);
+  });
+});

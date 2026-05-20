@@ -25,11 +25,6 @@ Mint's design is centered around the virtue of _objectivity_. That is, the seman
 - Interdependent signatures, e.g. `postulate \ A : B \ B : A`. 
 - Go to definition for schemas. 
 
-## Issues
-
-- Unreadable inconsistency messages when parameters are explicit
-     - Pretty print can greedily, iteratively, recursively remove arguments until it doesn't typecheck
-
 ## Future case studies
 - Natural number game
 - Mathematics in Lean, Avigad

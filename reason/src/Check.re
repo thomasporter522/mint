@@ -48,12 +48,24 @@ type elabState = {
      `Ul ?l` and B has type `Ul l` propagates to `?l := l`). */
   metaTypes: IntMap.t(ol),
   nextMetaId: int,
+  /* Recursion safety net for coerce attempts. A meta-level coerce
+     procedure that produces an ill-typed wrap re-triggers coerce on
+     the wrap's sub-positions during verify, which can recurse without
+     bound. Decremented each time tryCoercions re-enters checkOLTerm.
+     When this hits 0, subsume stops offering coerce and the original
+     mismatch surfaces as a normal Inconsistency. This is a tripwire
+     for pathological procedures, not a precision dial — legitimate
+     coerces resolve in 1–2 levels. */
+  coerceDepth: int,
 };
+
+let maxCoerceDepth = 200;
 
 let emptyElabState: elabState = {
   solutions: IntMap.empty,
   metaTypes: IntMap.empty,
   nextMetaId: 0,
+  coerceDepth: maxCoerceDepth,
 };
 
 /* Allocate a fresh meta as an Implicit-ghost subterm at the given
@@ -1119,7 +1131,7 @@ let rec subsume =
       let coerceCandidates = collectCoerceBindings(ctx);
       let canCoerce =
         switch (subterm) {
-        | Some(_) when coerceCandidates != [] => true
+        | Some(_) when coerceCandidates != [] && s.coerceDepth > 0 => true
         | _ => false
         };
       if (canCoerce) {
@@ -1224,8 +1236,16 @@ and tryCoercions =
             ...coercedInner,
             meta: {...coercedInner.meta, parens: true},
           };
+          /* Verify re-elaborates the procedure's wrap. Decrement first
+             so any coerce that subsume triggers from inside the verify
+             pass operates on a smaller budget; a runaway procedure
+             exhausts it after maxCoerceDepth nestings. Restore depth
+             on the way out — sibling coerces at the same level should
+             each see the entry budget, not the post-recursion one. */
+          let verifyState = {...state, coerceDepth: state.coerceDepth - 1};
           let (info, newState) =
-            checkOLTerm(state, ctx, Expression(Some(expected)), coerced);
+            checkOLTerm(verifyState, ctx, Expression(Some(expected)), coerced);
+          let newState = {...newState, coerceDepth: state.coerceDepth};
           if (info.errors == []) {
             let final =
               switch (info.elaborated) {
