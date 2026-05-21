@@ -804,9 +804,13 @@ let mlBuiltins: context =
 /* Rebuild each OL-side hole's ml goal from its pending ol expected,
    zonked against the final per-decl solutions. Holes whose offset isn't
    in pendingHoleGoals (e.g. ML-side `Hole` registrations) are left
-   alone. After this pass, pendingHoleGoals is cleared. */
+   alone. After this pass, pendingHoleGoals is cleared. The strip
+   callback compacts each goal the same way inlay hint payloads get
+   compacted — re-elaborating with leading args removed and keeping a
+   strip iff the elaborator recovers the original term. Without this
+   the hover-goal for `?` slots would carry every inferable implicit. */
 let resolveHoleGoals =
-    (sols: IntMap.t(ol), info: staticInfo): staticInfo => {
+    (strip: ol => ol, sols: IntMap.t(ol), info: staticInfo): staticInfo => {
   let pendingMap =
     List.fold_left(
       (acc, (pos, olGoal)) => IntMap.add(pos, olGoal, acc),
@@ -818,7 +822,7 @@ let resolveHoleGoals =
       ((pos, hi: holeInfo)) =>
         switch (IntMap.find_opt(pos, pendingMap)) {
         | Some(olGoal) =>
-          (pos, {...hi, goal: embedOL(zonk(sols, olGoal))})
+          (pos, {...hi, goal: embedOL(strip(zonk(sols, olGoal)))})
         | None => (pos, hi)
         },
       info.holes,
@@ -855,11 +859,6 @@ let extractDiagnostics =
     : (list((int, hintKind, list(ol))), list(error)) => {
   let hints = ref([]);
   let warns = ref([]);
-  let isUnsolvedMeta = (t: ol): bool =>
-    switch (zonk(sols, t).value) {
-    | OLMeta(_) => true
-    | _ => false
-    };
   let rec containsUnsolved = (t: ol): bool => {
     let t = follow(sols, t);
     switch (t.value) {
@@ -958,7 +957,7 @@ let extractDiagnostics =
         let (lead, rest) = splitLeading([], args);
         if (lead != []) {
           hints := hints^ @ [(f.meta.end_, ImplicitArgs, List.map(g => strip(zonk(sols, g)), lead))];
-          if (List.exists(isUnsolvedMeta, lead)) {
+          if (List.exists(containsUnsolved, lead)) {
             warns :=
               warns^
               @ [
@@ -1127,7 +1126,17 @@ let rec subsume =
        subterms — zonked against the final state. */
     switch (conflict) {
     | None => ([], s, None)
-    | Some(_) =>
+    | Some((cExp, cInf)) =>
+      /* Report the pair that actually disagreed, not subsume's
+         entry-level (exp, inf). Unify drills into Ap heads/args and
+         into meta types; the returned pair is the deepest level at
+         which unification failed. The entry-level pair can zonk to
+         identical strings (e.g. `B` vs `B`) when the real
+         disagreement is between their *types* (e.g. `U` vs `sto X U`
+         in a meta-type check), which makes the error unreadable.
+         Showing the conflict pair preserves context for head/arg
+         mismatches too — unify already returns the outer Ap pair on
+         head conflict and the sub-arg pair on arg conflict. */
       let coerceCandidates = collectCoerceBindings(ctx);
       let canCoerce =
         switch (subterm) {
@@ -1141,9 +1150,9 @@ let rec subsume =
         | None =>
           ([mark(
              "Inconsistency (expected "
-             ++ printOL(zonk(s.solutions, exp))
+             ++ printOL(zonk(s.solutions, cExp))
              ++ ", got "
-             ++ printOL(zonk(s.solutions, inf))
+             ++ printOL(zonk(s.solutions, cInf))
              ++ ")",
              from, to_,
            )], s, None)
@@ -1151,9 +1160,9 @@ let rec subsume =
       } else {
         ([mark(
            "Inconsistency (expected "
-           ++ printOL(zonk(s.solutions, exp))
+           ++ printOL(zonk(s.solutions, cExp))
            ++ ", got "
-           ++ printOL(zonk(s.solutions, inf))
+           ++ printOL(zonk(s.solutions, cInf))
            ++ ")",
            from, to_,
          )], s, None);
@@ -1326,7 +1335,8 @@ and checkDeclLine = (ctx: context, d: decl): staticInfo => {
     | None => d.retType
     };
   let merged = mergeInfos(paramInfo, retInfo);
-  let resolved = resolveHoleGoals(finalState.solutions, merged);
+  let strip = stripImplicits(finalState.solutions, paramCtx);
+  let resolved = resolveHoleGoals(strip, finalState.solutions, merged);
   /* Build the EXTERNAL binding: param types and retType use their
      elaborated forms, fully zonked, with surviving (unsolved) metas
      replaced by synthesized holes — so this decl's local meta IDs
@@ -1346,9 +1356,9 @@ and checkDeclLine = (ctx: context, d: decl): staticInfo => {
   /* Inlay hints and "not fully solved" warnings come from one pure
      walk over the decl's elaborated paramTypes and retType. The ghost
      markers in the term carry the full diagnostic structure — no side
-     state to consult. `stripImplicits` compacts each hint's payload
-     before rendering by removing args the elaborator can re-infer. */
-  let strip = stripImplicits(finalState.solutions, paramCtx);
+     state to consult. `strip` (already constructed above for hole
+     goals) compacts each hint's payload before rendering by removing
+     args the elaborator can re-infer. */
   let extractFromTerm = (t: ol) =>
     extractDiagnostics(strip, finalState.solutions, t);
   let (paramHints, paramWarns) =
@@ -2291,15 +2301,21 @@ and stripImplicits = (sols: IntMap.t(ol), ctx: context, t: ol): ol => {
         let (info, state) =
           checkOLTerm(emptyElabState, ctx, Expression(None), stripCheck);
         if (info.errors != []) {
+          print_endline("DBG strip k=" ++ string_of_int(k) ++ " on " ++ printOL(target) ++ " FAILED (errors: " ++ string_of_int(List.length(info.errors)) ++ ")");
+          List.iter((e: Error.error) => print_endline("  err: " ++ e.message), info.errors);
           None;
         } else {
           switch (info.elaborated) {
-          | None => None
+          | None =>
+            print_endline("DBG strip k=" ++ string_of_int(k) ++ " on " ++ printOL(target) ++ " FAILED (no elab)");
+            None;
           | Some(elab) =>
             let elabZonked = zonk(state.solutions, elab);
             if (equalForStrip(target, elabZonked)) {
+              print_endline("DBG strip k=" ++ string_of_int(k) ++ " on " ++ printOL(target) ++ " OK -> " ++ printOL({...t, value: OLAp(f, kept)}));
               Some(kept);
             } else {
+              print_endline("DBG strip k=" ++ string_of_int(k) ++ " on " ++ printOL(target) ++ " FAILED (not equal): elab=" ++ printOL(elabZonked));
               None;
             };
           };
@@ -2620,7 +2636,8 @@ let runConstructSchema =
                  don't cross witness boundaries. */
               let (witnessInfo, witnessState) =
                 checkOLTerm(emptyElabState, witnessCtx, Expression(Some(expectedType)), witnessOL);
-              let witnessInfo = resolveHoleGoals(witnessState.solutions, witnessInfo);
+              let witnessStrip = stripImplicits(witnessState.solutions, witnessCtx);
+              let witnessInfo = resolveHoleGoals(witnessStrip, witnessState.solutions, witnessInfo);
               /* The "elaborated witness" — what the user-written ML term
                  actually denotes after elaboration: implicits inserted,
                  metas solved. This is what later decls should see when

@@ -88,6 +88,15 @@ let rec debugPat = (t: pat): string => {
 /* --- ML printers --- */
 
 let rec printML = (t: ml): string => {
+  /* Mirrors printOL's pchild: a nested Ap with parens=false needs an
+     explicit wrap, otherwise `eq A B (f x) (g y)` prints as
+     `eq A B f x g y` and reads as one flat 6-arg application. */
+  let pchild = (s: ml): string => {
+    switch (s.value) {
+    | Ap(_, _) when !s.meta.parens => "(" ++ printML(s) ++ ")"
+    | _ => printML(s)
+    }
+  };
   let inner =
     switch (t.value) {
     | Hole(User) => "?"
@@ -109,7 +118,7 @@ let rec printML = (t: ml): string => {
     | Ap({value: Identifier("="), _}, [l, r]) =>
       printML(l) ++ " = " ++ printML(r)
     | Ap(f, args) =>
-      printML(f) ++ " " ++ String.concat(" ", List.map(printML, args))
+      pchild(f) ++ " " ++ String.concat(" ", List.map(pchild, args))
     | List(items) =>
       "[" ++ String.concat(", ", List.map(printML, items)) ++ "]"
     | Cons(head, tail) =>
