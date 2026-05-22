@@ -249,7 +249,22 @@ meta
     -- normalise (e.g. a rule on `sap A B (lto X Y) x` only fires once
     -- the lto-headed sub-term is rewritten by lto-eq into `to (sap A x)`).
     head-reduce : ((List Signature) -> (Term -> (Term, Term))) = fun ctx => fun t =>
-        (top-loop ctx t)
+        let (t1, p1) = (top-loop ctx t) in
+        let d = (decompose t1) in
+        let (h, args) = d in
+        match args with
+        | [] => (t1, p1)
+        | _ :: _ =>
+            let (args-reduced, args-proofs) = (head-reduce-args ctx args) in
+            if (all-refl args-proofs) then (t1, p1) else
+            match (apply-cong h args-proofs) with
+            | Ok cong-proof =>
+                let t2 = (apply h args-reduced) in
+                let (t3, p3) = (head-reduce ctx t2) in
+                (t3, (trans p1 (trans cong-proof p3)))
+            | Error _ => (t1, p1)
+            end end
+        end
 
     -- Build an eq-proof between two argument lists by zipping convert
     -- over them. Order of cong applications follows the order in which
