@@ -81,17 +81,70 @@ meta
     member : (Term -> ((List Term) -> Bool)) = fun x => fun xs =>
         (foldl (fun acc => fun e => acc || (e == x)) false xs)
 
+    -- Collect every binder identifier appearing in a term subtree.
+    -- Used when target = ? to mark all pat-side binders as hole-matched.
+    collect-binders : ((List Term) -> (Term -> (List Term))) = fun binders => fun t =>
+        let p = (decompose t) in
+        let (h, args) = p in
+        let here = if (member h binders) then [h] else [] end in
+        match args with
+        | [] => here
+        | _ :: _ =>
+            (append here
+                (foldl (fun acc => fun a =>
+                    (append acc (collect-binders binders a))) [] args))
+        end
+
+    -- Replace an existing binding's value (if present) -- needed when a
+    -- hole-matched binder later gets a concrete binding from another LHS
+    -- occurrence: the concrete value overrides the previously-bound ?.
+    update-binding : (Term -> (Term -> ((List (Term, Term)) -> (List (Term, Term))))) =
+        fun key => fun val => fun bindings =>
+            (foldl (fun acc => fun pair =>
+                match pair with
+                | (k, _) =>
+                    if (k == key) then (append acc [(k, val)])
+                    else (append acc [pair]) end
+                end) [] bindings)
+
+    -- Insert OR update: if key is already bound, replace its value.
+    bind-or-update : (Term -> (Term -> ((List (Term, Term)) -> (List (Term, Term))))) =
+        fun key => fun val => fun bindings =>
+            match (lookup key bindings) with
+            | Ok _ => (update-binding key val bindings)
+            | Error _ => (append bindings [(key, val)])
+            end
+
+    -- For each binder, bind to ? unless already bound to something.
+    bind-each-to-hole : ((List Term) -> ((List (Term, Term)) -> (List (Term, Term)))) =
+        fun binders-to-bind => fun bindings =>
+            (foldl (fun acc => fun b =>
+                match (lookup b acc) with
+                | Ok _ => acc
+                | Error _ => (append acc [(b, ?)])
+                end) bindings binders-to-bind)
+
     -- Try to match `pat` against `term`. Identifiers in `binders` are
     -- treated as pattern variables; everything else must match literally
     -- (or recurse). For Ap, we right-align so the pattern may elide
     -- leading implicit type arguments that the target carries.
+    --
+    -- Hole-aware: when target is a ? (OL hole), the pattern still
+    -- matches; every binder occurring in the pat-subtree is bound to
+    -- ? (unless already constrained by a non-hole occurrence elsewhere).
+    -- This lets rules fire against partially-unknown targets, with the
+    -- RHS getting ? wherever the pattern wanted concrete content but
+    -- the target had nothing.
     match-term : ((List Term) -> ((List (Term, Term)) -> (Term -> (Term -> (Result (List (Term, Term))))))) =
         fun binders => fun bindings => fun pat => fun term =>
-            -- Hole in pattern (`?`) acts as a wildcard. This shows up
-            -- when a rule's LHS has impl-inserted metas -- after
-            -- embedding the metas surface as holes, and they should
-            -- match whatever the target has in that slot.
-            if (pat == ?) then (Ok bindings) else
+            -- Pattern-side ? is a wildcard (impl-inserted metas show up
+            -- this way after embedding).
+            if (is-hole pat) then (Ok bindings) else
+            -- Target-side ? matches anything; bind every pat-binder in
+            -- this subtree to ? (unless concretely bound elsewhere).
+            if (is-hole term) then
+                (Ok (bind-each-to-hole (collect-binders binders pat) bindings))
+            else
             let pp = (decompose pat) in
             let (ph, pa) = pp in
             match pa with
@@ -99,7 +152,13 @@ meta
                 if (member ph binders) then
                     match (lookup ph bindings) with
                     | Ok existing =>
-                        if (existing == term) then (Ok bindings) else (Error "binder conflict") end
+                        -- Allow ? -> concrete override (previously-hole
+                        -- binding is weakest), and accept equal repeats.
+                        if (is-hole existing) then
+                            (Ok (bind-or-update ph term bindings))
+                        else
+                            if (existing == term) then (Ok bindings) else (Error "binder conflict") end
+                        end
                     | Error _ => (Ok (append bindings [(ph, term)]))
                     end
                 else
@@ -116,7 +175,7 @@ meta
                     | Error msg => (Error msg)
                     end
                 end
-            end end
+            end end end
 
     -- Walk the (reversed) pattern/target arg lists in parallel; surplus
     -- target args on the LEFT are skipped (those are the leading
@@ -133,7 +192,7 @@ meta
                     -- args at its start while the target is in as-written
                     -- form (no impls). Succeed iff the leftover pattern args
                     -- are all wildcards.
-                    if (p == ?) then (align-match binders bindings ps []) else (Error "pattern wider than term") end
+                    if (is-hole p) then (align-match binders bindings ps []) else (Error "pattern wider than term") end
                 | t :: ts =>
                     match (match-term binders bindings p t) with
                     | Ok b1 => (align-match binders b1 ps ts)
@@ -309,73 +368,62 @@ meta
     -- children, we only `top-loop` (not full head-reduce) because the
     -- children are already in NF. If top-loop fires, the result has
     -- a new shape; THEN we recurse fully.
+    -- TEMP: top-only. Deep variants are too slow on lap-eq-shape terms.
     head-reduce : ((List Signature) -> (Term -> (Term, Term))) = fun ctx => fun t =>
-        let (t1, p1) = (top-loop ctx t) in
-        let d = (decompose t1) in
-        let (h, args) = d in
-        match args with
-        | [] => (t1, p1)
-        | _ :: _ =>
-            let (args-reduced, args-proofs) = (head-reduce-args ctx args) in
-            if (all-refl args-proofs) then (t1, p1) else
-            match (apply-cong h args-proofs) with
-            | Ok cong-proof =>
-                let t2 = (apply h args-reduced) in
-                -- Children are NF: only top-loop on t2 (no deep recurse).
-                let (t2-top, top-p) = (top-loop ctx t2) in
-                if (t2-top == t2) then
-                    -- top didn't fire; t2 is fully normalized.
-                    (t2, (trans p1 cong-proof))
-                else
-                    -- top fired; t2-top has fresh shape that may need
-                    -- another deep pass.
-                    let (t-final, rest-p) = (head-reduce ctx t2-top) in
-                    (t-final, (trans p1 (trans cong-proof (trans top-p rest-p))))
-                end
-            | Error _ => (t1, p1)
-            end end
+        (top-loop ctx t)
+
+    -- Meta-instantiation map: List of (Meta-as-term, solution). The
+    -- convert procedure threads this through every recursive call,
+    -- adding bindings when one side is a meta and the other is concrete,
+    -- and substituting on lookup. The map is local to one top-level
+    -- convert invocation -- it doesn't push solutions back to the
+    -- elaborator's meta context (that would need kernel support).
+
+    -- Resolve metas in t via mmap: if t (or t's head when t is an Ap)
+    -- is a known meta, substitute its solution; recurse through Ap args.
+    resolve-meta : ((List (Term, Term)) -> (Term -> Term)) = fun mmap => fun t =>
+        if (is-meta t) then
+            match (lookup t mmap) with
+            | Ok v => (resolve-meta mmap v)
+            | Error _ => t
+            end
+        else
+            let p = (decompose t) in
+            let (h, args) = p in
+            match args with
+            | [] => t
+            | _ :: _ =>
+                let h-r = (resolve-meta mmap h) in
+                let args-r =
+                    (foldl (fun acc => fun a =>
+                        (append acc [(resolve-meta mmap a)])) [] args) in
+                (apply h-r args-r)
+            end
         end
 
-    -- Build an eq-proof between two argument lists by zipping convert
-    -- over them. Order of cong applications follows the order in which
-    -- the congruence postulate takes its proof args (which is the same
-    -- as the order of the term's children).
-    -- Compare two arg lists pairwise, right-aligned. When lengths
-    -- differ, the longer list's LEADING extras are treated as impls
-    -- (bridged by refl against the corresponding wildcard on the
-    -- shorter side). This handles the gap between elaborated terms
-    -- (which carry impls) and meta-language-substituted terms (which
-    -- usually don't).
-    --
-    -- We reverse both, consume pairs from the front, and when one
-    -- runs out the OTHER's remaining items get paired with `?` so
-    -- convert's wildcard branch generates refls. The output proof
-    -- list is in original (un-reversed) order.
-    convert-list : ((List Signature) -> ((List Term) -> ((List Term) -> (Result (List Term))))) =
-        fun ctx => fun xs => fun ys =>
-            (convert-list-rev ctx (reverse-terms xs) (reverse-terms ys) [])
+    -- Compare two arg lists pairwise, right-aligned. Returns
+    -- (proofs, updated-mmap).
+    convert-list : ((List Signature) -> ((List (Term, Term)) -> ((List Term) -> ((List Term) -> (Result ((List Term), (List (Term, Term)))))))) =
+        fun ctx => fun mmap => fun xs => fun ys =>
+            (convert-list-rev ctx mmap (reverse-terms xs) (reverse-terms ys) [])
 
-    -- Helper: walks reversed xs, ys; accumulates proofs in `acc` in
-    -- the correct (un-reversed) order. Args are already normalized
-    -- (head-reduce-args normalized them in the parent's head-reduce),
-    -- so we use convert-norm -- saves re-reducing already-normal terms.
-    convert-list-rev : ((List Signature) -> ((List Term) -> ((List Term) -> ((List Term) -> (Result (List Term)))))) =
-        fun ctx => fun rxs => fun rys => fun acc =>
+    convert-list-rev : ((List Signature) -> ((List (Term, Term)) -> ((List Term) -> ((List Term) -> ((List Term) -> (Result ((List Term), (List (Term, Term))))))))) =
+        fun ctx => fun mmap => fun rxs => fun rys => fun acc =>
             match (rxs, rys) with
-            | ([], []) => (Ok acc)
+            | ([], []) => (Ok (acc, mmap))
             | (x :: xt, y :: yt) =>
-                match (convert-norm ctx x y) with
-                | Ok p => (convert-list-rev ctx xt yt (p :: acc))
+                match (convert-norm ctx mmap x y) with
+                | Ok (p, mmap2) => (convert-list-rev ctx mmap2 xt yt (p :: acc))
                 | Error msg => (Error msg)
                 end
             | ([], y :: yt) =>
-                match (convert-norm ctx ? y) with
-                | Ok p => (convert-list-rev ctx [] yt (p :: acc))
+                match (convert-norm ctx mmap ? y) with
+                | Ok (p, mmap2) => (convert-list-rev ctx mmap2 [] yt (p :: acc))
                 | Error msg => (Error msg)
                 end
             | (x :: xt, []) =>
-                match (convert-norm ctx x ?) with
-                | Ok p => (convert-list-rev ctx xt [] (p :: acc))
+                match (convert-norm ctx mmap x ?) with
+                | Ok (p, mmap2) => (convert-list-rev ctx mmap2 xt [] (p :: acc))
                 | Error msg => (Error msg)
                 end
             end
@@ -425,53 +473,86 @@ meta
             (Error "no congruence rule for this head")
         end end end end end
 
-    -- Compare two ALREADY-normalized terms. Skips the head-reduce step
-    -- because head-reduce on the parent already normalized children.
-    -- This is what convert-list/convert-norm recursively call.
-    convert-norm : ((List Signature) -> (Term -> (Term -> (Result Term)))) =
-        fun ctx => fun t1r => fun t2r =>
-            if (t1r == ?) then (Ok (refl t2r)) else
-            if (t2r == ?) then (Ok (refl t1r)) else
-            if (t1r == t2r) then (Ok (refl t1r)) else
+    -- Compare two ALREADY-normalized terms with a meta-map. Returns
+    -- (proof, updated-mmap). Special cases:
+    --   - Either side is an OL hole `?`: refl (caller's responsibility
+    --     to know that holes are wildcards in this position).
+    --   - One side is an unsolved meta and the other is anything:
+    --     instantiate the meta -> other, record in mmap, return refl other.
+    --   - Both sides equal as written: refl, no map change.
+    --   - Otherwise: decompose, recurse on args, build cong proof.
+    convert-norm : ((List Signature) -> ((List (Term, Term)) -> (Term -> (Term -> (Result (Term, (List (Term, Term)))))))) =
+        fun ctx => fun mmap => fun t1r => fun t2r =>
+            -- Substitute solved metas before comparing.
+            let t1r = (resolve-meta mmap t1r) in
+            let t2r = (resolve-meta mmap t2r) in
+            if (is-hole t1r) then (Ok ((refl t2r), mmap)) else
+            if (is-hole t2r) then (Ok ((refl t1r), mmap)) else
+            if (is-meta t1r) then
+                if (is-meta t2r) then
+                    -- both metas: skip binding (would risk cycles) and
+                    -- treat as refl.
+                    if (t1r == t2r) then (Ok ((refl t1r), mmap))
+                    else (Ok ((refl t2r), mmap)) end
+                else
+                    (Ok ((refl t2r), (append mmap [(t1r, t2r)])))
+                end
+            else
+            if (is-meta t2r) then
+                (Ok ((refl t1r), (append mmap [(t2r, t1r)])))
+            else
+            if (t1r == t2r) then (Ok ((refl t1r), mmap)) else
             let d1 = (decompose t1r) in
             let d2 = (decompose t2r) in
             let (h1, a1) = d1 in
             let (h2, a2) = d2 in
-            if (h1 == ?) then (Ok (refl t2r)) else
-            if (h2 == ?) then (Ok (refl t1r)) else
+            if (is-hole h1) then (Ok ((refl t2r), mmap)) else
+            if (is-hole h2) then (Ok ((refl t1r), mmap)) else
             if (h1 == h2) then
-                match (convert-list ctx a1 a2) with
-                | Ok proofs =>
+                match (convert-list ctx mmap a1 a2) with
+                | Ok (proofs, mmap2) =>
                     match (apply-cong h1 proofs) with
-                    | Ok mid => (Ok mid)
+                    | Ok mid => (Ok (mid, mmap2))
                     | Error msg => (Error msg)
                     end
                 | Error msg => (Error msg)
                 end
             else (Error "head constructors disagree")
-            end end end end end end
+            end end end end end end end end
 
     -- Top-level convert: head-reduce both, then compare as normalized.
-    convert : ((List Signature) -> (Term -> (Term -> (Result Term)))) =
-        fun ctx => fun t1 => fun t2 =>
-            if (t1 == ?) then (Ok (refl t2)) else
-            if (t2 == ?) then (Ok (refl t1)) else
-            if (t1 == t2) then (Ok (refl t1)) else
+    -- Returns (proof, mmap); the outer coerce discards mmap.
+    convert : ((List Signature) -> ((List (Term, Term)) -> (Term -> (Term -> (Result (Term, (List (Term, Term)))))))) =
+        fun ctx => fun mmap => fun t1 => fun t2 =>
+            let t1 = (resolve-meta mmap t1) in
+            let t2 = (resolve-meta mmap t2) in
+            if (is-hole t1) then (Ok ((refl t2), mmap)) else
+            if (is-hole t2) then (Ok ((refl t1), mmap)) else
+            if (is-meta t1) then
+                if (is-meta t2) then
+                    if (t1 == t2) then (Ok ((refl t1), mmap))
+                    else (Ok ((refl t2), mmap)) end
+                else
+                    (Ok ((refl t2), (append mmap [(t1, t2)])))
+                end
+            else
+            if (is-meta t2) then
+                (Ok ((refl t1), (append mmap [(t2, t1)])))
+            else
+            if (t1 == t2) then (Ok ((refl t1), mmap)) else
             let (t1r, p1) = (head-reduce ctx t1) in
             let (t2r, p2) = (head-reduce ctx t2) in
-            match (convert-norm ctx t1r t2r) with
-            | Ok mid => (Ok (trans p1 (trans mid (sym p2))))
+            match (convert-norm ctx mmap t1r t2r) with
+            | Ok (mid, mmap2) => (Ok ((trans p1 (trans mid (sym p2))), mmap2))
             | Error msg => (Error msg)
             end
-            end end end
+            end end end end end
 
-    -- Install as a coerce procedure. When the elaborator detects a
-    -- type mismatch in a value position, convert is called on the
-    -- expected and found types; on success the user's value is wrapped
-    -- in `cast proof value`.
+    -- Install as a coerce procedure. Starts with an empty meta-map; any
+    -- solutions discovered during this call are discarded after.
     coerce beta = fun ctx => fun expected => fun found => fun contents =>
-        match (convert ctx found expected) with
-        | Ok proof => (Ok (cast proof contents))
+        match (convert ctx [] found expected) with
+        | Ok (proof, _) => (Ok (cast proof contents))
         | Error msg => (Error msg)
         end
 

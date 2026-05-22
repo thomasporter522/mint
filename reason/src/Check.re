@@ -788,6 +788,12 @@ let mlBuiltins: context =
       /* `print` is a debug builtin: prints its argument and returns it.
          Polymorphic — needs Builtin typing. */
       ("print", Builtin("print")),
+      /* Hole / meta introspection: `is-hole t` and `is-meta t` return
+         Bool; `meta-id t` returns the meta's integer id as a String
+         (or the metalang `?` for non-metas). */
+      ("is-hole", Builtin("is-hole")),
+      ("is-meta", Builtin("is-meta")),
+      ("meta-id", Builtin("meta-id")),
       /* Monomorphic builtins */
       ("true", ML(MBool)),
       ("false", ML(MBool)),
@@ -1918,6 +1924,11 @@ and inferExpr = (ctx: context, t: ml): staticInfo =>
      holes: [(t.meta.start, {goal: mlHole, context: ctx})],
      inferred: Some(([], olHole)), mlInferred: Some(MTerm)}
 
+  | Meta(_) =>
+    /* Meta literal in ML source isn't a thing users write; appears only
+       when reflecting embedded OL terms. Treat as a Term. */
+    setMlType(emptyInfo, MTerm)
+
   | Ap({value: Identifier("fst"), _}, [arg]) =>
     let argInfo = inferExpr(ctx, arg);
     let retTy =
@@ -1980,6 +1991,23 @@ and inferExpr = (ctx: context, t: ml): staticInfo =>
     let argInfo = inferExpr(ctx, arg);
     let argTy = getInferredMlType(argInfo);
     setMlType(argInfo, argTy);
+
+  | Ap({value: Identifier("is-hole"), _}, [arg]) =>
+    /* is-hole : Term -> Bool. True iff arg is an OL hole. */
+    let argInfo = checkExpr(ctx, MTerm, arg);
+    setMlType(argInfo, MBool);
+
+  | Ap({value: Identifier("is-meta"), _}, [arg]) =>
+    /* is-meta : Term -> Bool. True iff arg is an OL metavariable. */
+    let argInfo = checkExpr(ctx, MTerm, arg);
+    setMlType(argInfo, MBool);
+
+  | Ap({value: Identifier("meta-id"), _}, [arg]) =>
+    /* meta-id : Term -> String. Integer id of an OL meta, stringified.
+       For non-metas returns the metalang `?` so callers must guard with
+       is-meta first. */
+    let argInfo = checkExpr(ctx, MTerm, arg);
+    setMlType(argInfo, MString);
 
   | Ap({value: Identifier("foldl"), _}, [fArg, initArg, listArg]) =>
     /* Custom typing for foldl: infer init and list types, check f for consistency */
@@ -2146,6 +2174,10 @@ and checkExpr = (ctx: context, expected: mlType, t: ml): staticInfo =>
   | Hole(_) =>
     let goal = mlTypeToTerm(expected);
     {...emptyInfo, holes: [(t.meta.start, {goal, context: ctx})]};
+
+  | Meta(_) =>
+    /* Same as inferExpr: Meta only appears when embedded; treat as Term. */
+    emptyInfo;
 
   | Fun(pats, body) =>
     switch (pats, expected) {

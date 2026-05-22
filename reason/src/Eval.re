@@ -223,6 +223,8 @@ let rec evalExpr = (env: evalEnv, t: ml): evalResult =>
 
   | Hole(_) => Ok(Val(t))
 
+  | Meta(_) => Ok(Val(t))
+
   | List(items) => evalList(env, items)
 
   | Cons(head, tail) =>

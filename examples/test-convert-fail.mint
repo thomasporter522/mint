@@ -50,7 +50,7 @@ meta
         (foldl (fun acc => fun e => acc || (e == x)) false xs)
     match-term : ((List Term) -> ((List (Term, Term)) -> (Term -> (Term -> (Result (List (Term, Term))))))) =
         fun binders => fun bindings => fun pat => fun term =>
-            if (pat == ?) then (Ok bindings) else
+            if (is-hole pat) then (Ok bindings) else
             let pp = (decompose pat) in
             let (ph, pa) = pp in
             match pa with
@@ -82,7 +82,7 @@ meta
             | p :: ps =>
                 match rts with
                 | [] =>
-                    if (p == ?) then (align-match binders bindings ps []) else (Error "pattern wider than term") end
+                    if (is-hole p) then (align-match binders bindings ps []) else (Error "pattern wider than term") end
                 | t :: ts =>
                     match (match-term binders bindings p t) with
                     | Ok b1 => (align-match binders b1 ps ts)
@@ -168,8 +168,8 @@ meta
             end
     convert : ((List Signature) -> (Term -> (Term -> (Result Term)))) =
         fun ctx => fun t1 => fun t2 =>
-            if (t1 == ?) then (Ok (refl t2)) else
-            if (t2 == ?) then (Ok (refl t1)) else
+            if (is-hole t1) then (Ok (refl t2)) else
+            if (is-hole t2) then (Ok (refl t1)) else
             let (t1r, p1) = (head-reduce ctx t1) in
             let (t2r, p2) = (head-reduce ctx t2) in
             if (t1r == t2r) then (Ok (trans p1 (sym p2))) else
@@ -177,8 +177,8 @@ meta
             let d2 = (decompose t2r) in
             let (h1, a1) = d1 in
             let (h2, a2) = d2 in
-            if (h1 == ?) then (Ok (trans p1 (trans (refl t2r) (sym p2)))) else
-            if (h2 == ?) then (Ok (trans p1 (trans (refl t1r) (sym p2)))) else
+            if (is-hole h1) then (Ok (trans p1 (trans (refl t2r) (sym p2)))) else
+            if (is-hole h2) then (Ok (trans p1 (trans (refl t1r) (sym p2)))) else
             if (h1 == h2) then
                 match (convert-list ctx a1 a2) with
                 | Ok proofs =>

@@ -102,6 +102,7 @@ let rec printML = (t: ml): string => {
     | Hole(User) => "?"
     | Hole(Synthesized) => ""
     | Hole(Auto) => "\xE2\x9F\x90"
+    | Meta(n) => "?M" ++ string_of_int(n)
     | TagLit(name) => "#" ++ name
     | Identifier(v) => v
     | StringLit(s) => "\"" ++ s ++ "\""
@@ -155,6 +156,7 @@ let rec debugML = (t: ml): string => {
   | Hole(User) => "Hole"
   | Hole(Synthesized) => "Hole_"
   | Hole(Auto) => "Auto"
+  | Meta(n) => "Meta(" ++ string_of_int(n) ++ ")"
   | Identifier(v) => "Id(" ++ v ++ ")"
   | StringLit(s) => "Str(" ++ s ++ ")"
   | TagLit(name) => "Tag(#" ++ name ++ ")"
