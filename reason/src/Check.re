@@ -197,6 +197,13 @@ let metaDefsRef: ref(list((string, ml))) = ref([]);
    module-local ref, matching the existing `metaDefsRef` pattern. */
 let completenessRef: ref(StringMap.t(bool)) = ref(StringMap.empty);
 
+/* Per-decl external-ref list, keyed by decl name. Recorded during
+   checkDeclLine so that block-level mutual recursion can defer the
+   "every ref is complete" check until the whole block has been
+   walked — a decl's forward refs aren't in completenessRef yet at
+   the moment the decl is processed. */
+let declRefsRef: ref(StringMap.t(list(string))) = ref(StringMap.empty);
+
 /* `⟐` auto-hole sites recorded during the program check: maps the
    source offset of each `⟐` to its (context, expected type) at
    elaboration time.  Read by the externally-exposed
@@ -1020,6 +1027,10 @@ let shadowCheck =
     : (list(error), list((meta, meta))) =>
   switch (StringMap.find_opt(name, ctx)) {
   | None => ([], [])
+  | Some(OL(_, Some(dm))) when dm.start == nameMeta.start && dm.end_ == nameMeta.end_ =>
+    /* Same source position = same decl, just visible via the block-self
+       pre-binding. Not a real shadow. */
+    ([], [])
   | Some(b) =>
     let warns = [
       Error.warn("Shadows existing binding", nameMeta.start, nameMeta.end_),
@@ -1391,9 +1402,13 @@ and checkDeclLine = (ctx: context, d: decl): staticInfo => {
     )
     @ olCollectRefs(externalRetType, ctx);
   let hasErrors = Error.hasRealErrors(resolved.errors);
-  let typeComplete =
-    !typeHasHoles && !hasErrors && allRefsComplete(typeRefs);
-  completenessRef := StringMap.add(d.declName, typeComplete, completenessRef^);
+  /* "Local" completeness: no holes, no semantic errors. The transitive
+     "all refs are complete" check is deferred to the block-level pass
+     (finalizeBlockCompleteness below) so forward refs to other decls
+     in the same block can be resolved against their own localComplete. */
+  let localComplete = !typeHasHoles && !hasErrors;
+  declRefsRef := StringMap.add(d.declName, typeRefs, declRefsRef^);
+  completenessRef := StringMap.add(d.declName, localComplete, completenessRef^);
   /* Per-decl elaborated reconstruction: same as the external binding,
      but as a `decl` value so `elaborateProgram` can rebuild the source
      program in declaration order (preserving duplicate names, which a
@@ -2648,10 +2663,31 @@ let runConstructSchema =
             schemaMeta.start, schemaMeta.end_,
           )];
         } else {
+          /* Build a SINGLE substEnv covering EVERY decl in the block before
+             any witness is checked, so substitution is simultaneous across
+             the block — each witness's check sees every other witness in
+             the same construct. Each pre-binding uses the raw (schema-
+             produced) witness; as elaboration proceeds we update entries
+             to their elaborated forms, but the lookup keys cover the
+             full set throughout. */
+          let initialSubstEnv =
+            List.fold_left2(
+              (acc, d: decl, w) => {
+                let paramNames = List.map((p: param) => p.paramName, d.params);
+                StringMap.add(d.declName, (paramNames, w), acc);
+              },
+              emptyWitnessEnv,
+              elaboratedDecls,
+              witnesses,
+            );
           let (witnessErrs, witnessHoles, _) = List.fold_left2(
             ((accErrs, accHoles, substEnv), d: decl, witness) => {
               /* d here is from elaboratedDecls — paramTypes and retType
-                 are already in their elaborated form. */
+                 are already in their elaborated form. substEnv starts
+                 as initialSubstEnv (block-complete) and is updated with
+                 each witness's elaborated form as we go, so later
+                 witnesses see elaborated forms of earlier ones while
+                 still having access to every other decl's witness. */
               let witnessCtx =
                 List.fold_left(
                   (acc, p: param) => {
@@ -2662,10 +2698,8 @@ let runConstructSchema =
                   d.params,
                 );
               let expectedType = resolveWithParams(substEnv, d.retType);
-              /* Apply [x_j ↦ t_j] substitutions from earlier witnesses to the
-                 current witness body too, matching the formalism's
-                 [x ↦ t][w̄] where the substitution reaches into both
-                 subsequent declarations and subsequent witness terms. */
+              /* Apply the simultaneous substitution [x ↦ t] across the
+                 whole block to the witness body too. */
               let witnessOL = resolveWithParams(substEnv, mlToOL(witness));
               /* Each witness gets a fresh elaboration state — solutions
                  don't cross witness boundaries. */
@@ -2707,7 +2741,7 @@ let runConstructSchema =
                 StringMap.add(d.declName, typeComplete && witnessOK, completenessRef^);
               (accErrs @ witnessInfo.errors, accHoles @ witnessInfo.holes, newSubstEnv);
             },
-            ([], [], emptyWitnessEnv),
+            ([], [], initialSubstEnv),
             elaboratedDecls,
             witnesses,
           );
@@ -2825,16 +2859,78 @@ let processBlockItems = (ctx: context, items: list(blockItem)): (staticInfo, con
     items,
   );
 
+/* Build a "block self-binding" context: for each decl in the block, add
+   a raw-signature binding to ctx. This makes the entire block's
+   namespace visible to each decl in the block, enabling forward
+   references and full mutual recursion across the block.
+   The binding uses raw (non-elaborated) param types and retType — the
+   same form a decl's self-reference already uses inside its own check.
+   processBlockItems later overwrites each pre-binding with the decl's
+   elaborated external binding as it gets processed. */
+let blockSelfBindings = (ctx: context, decls: list(decl)): context =>
+  List.fold_left(
+    (acc, d: decl) => {
+      /* First-wins on duplicate names so a same-block redeclaration
+         (`foo : Sort` twice) leaves the FIRST decl's binding in place
+         — the second decl's shadowCheck then sees the first decl and
+         warns as expected. */
+      if (StringMap.mem(d.declName, acc)) {
+        acc;
+      } else {
+        let rawParamPairs =
+          List.map((p: param) => (Some(p.paramName), p.paramType), d.params);
+        let preBinding =
+          OL(Some((rawParamPairs, d.retType)), Some(d.nameMeta));
+        StringMap.add(d.declName, preBinding, acc);
+      };
+    },
+    ctx,
+    decls,
+  );
+
+/* After processBlockItems has run, each decl in the block has its
+   "local complete" flag in completenessRef and its type-refs in
+   declRefsRef. Now fold in the transitive condition: for each block
+   decl X, X is complete iff its local-complete is true AND every ref
+   it makes (including refs to other decls in the same block) is
+   complete. We only conjoin — never flip false→true — so a single
+   pass suffices. */
+let finalizeBlockCompleteness = (decls: list(decl)): unit =>
+  List.iter(
+    (d: decl) => {
+      let refs =
+        switch (StringMap.find_opt(d.declName, declRefsRef^)) {
+        | Some(rs) => rs
+        | None => []
+        };
+      let local =
+        switch (StringMap.find_opt(d.declName, completenessRef^)) {
+        | Some(b) => b
+        | None => false
+        };
+      completenessRef :=
+        StringMap.add(d.declName, local && allRefsComplete(refs), completenessRef^);
+    },
+    decls,
+  );
+
 let checkBlock = (ctx: context, block: block): (staticInfo, context) =>
   switch (block) {
   | Postulate(blockMeta, decls, tagLines) =>
+    /* Pre-populate the context with raw-signature bindings for every
+       decl in the block, so each decl can refer forward to others in
+       the same block. processBlockItems then progressively replaces
+       each pre-binding with the elaborated external binding as decls
+       are checked in source order. */
+    let blockCtx = blockSelfBindings(ctx, decls);
     /* Interleave decls and tag lines in source order so that an
        earlier `#reduction foo` line takes effect on the context
-       BEFORE a later decl is type-checked. Otherwise a decl that
-       elaborates by invoking a coerce procedure misses any tag
-       added in the same block. */
+       BEFORE a later decl is type-checked. */
     let items = interleaveBlock(decls, tagLines);
-    let (info, finalCtx) = processBlockItems(ctx, items);
+    let (info, finalCtx) = processBlockItems(blockCtx, items);
+    /* Fold in the transitive ref-completeness for every block decl
+       now that every block-mate has its local-complete recorded. */
+    finalizeBlockCompleteness(decls);
     let completeBlocks =
       allDeclsComplete(decls) ? [blockMeta] : [];
     let info = {
@@ -2868,10 +2964,13 @@ let checkBlock = (ctx: context, block: block): (staticInfo, context) =>
     (withBindings(metaInfo, cleanCtx), cleanCtx);
 
   | Construct(schemaName, schemaMeta, blockMeta, decls, tagLines) =>
-    /* As with Postulate, process decls and tag lines in source order so
-       intra-block tags are visible to later decls. */
+    /* As with Postulate: pre-populate block-self bindings so each decl
+       can refer forward, and interleave decls + tag lines in source
+       order so intra-block tags fire promptly. */
+    let blockCtx = blockSelfBindings(ctx, decls);
     let items = interleaveBlock(decls, tagLines);
-    let (bodyInfo, finalCtx) = processBlockItems(ctx, items);
+    let (bodyInfo, finalCtx) = processBlockItems(blockCtx, items);
+    finalizeBlockCompleteness(decls);
     let witnessErrors = runConstructSchema(ctx, finalCtx, schemaName, schemaMeta, decls);
     let tagErrs = [];
     /* If the schema didn't run cleanly (not found, wrong arity, eval
@@ -2898,6 +2997,7 @@ let checkBlock = (ctx: context, block: block): (staticInfo, context) =>
 let checkProgram = (ctx: context, prog: program): staticInfo => {
   /* Reset per-program state. */
   completenessRef := StringMap.empty;
+  declRefsRef := StringMap.empty;
   metaDefsRef := [];
   autoHoleContextsRef := IntMap.empty;
   tagNamespaceRef := StringSet.empty;

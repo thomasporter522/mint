@@ -2574,10 +2574,22 @@ describe('argument type well-formedness', () => {
     expect(msgs.some(m => m.includes('Inconsistency'))).toBe(true);
   });
 
-  it('rejects parameter type referencing a name declared later in the block', () => {
-    // `later` is declared after `f`, so not in scope when checking f.
+  it('accepts parameter type referencing a name declared later in the same block', () => {
+    // Block-level mutual recursion: the whole postulate block is in
+    // scope while each decl is checked, so forward references resolve.
+    expect(errors('postulate\nSort : Sort\n(f (a : later)) : Sort\nlater : Sort')).toEqual([]);
+  });
+
+  it('forward retType refs in same block: even/odd-style mutual recursion', () => {
+    // even's retType `odd` refers forward to odd, which is declared next.
+    expect(errors('postulate\nSort : Sort\nodd : Sort\neven : odd')).toEqual([]);
+  });
+
+  it('forward refs do not leak across blocks: a later block cannot be seen by an earlier one', () => {
+    // `later` lives in a SEPARATE block, so the earlier postulate's
+    // reference is still an unbound error.
     const msgs = errorMessages(
-      'postulate\nSort : Sort\n(f (a : later)) : Sort\nlater : Sort'
+      'postulate\nSort : Sort\n(f (a : later)) : Sort\npostulate\nlater : Sort'
     );
     expect(msgs.some(m => m.includes('Unbound') && m.includes('later'))).toBe(true);
   });
