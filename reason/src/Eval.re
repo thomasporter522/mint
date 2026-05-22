@@ -256,8 +256,7 @@ let rec evalExpr = (env: evalEnv, t: ml): evalResult =>
     switch (evalExpr(env, binding.rhs)) {
     | Err(_) as e => e
     | Ok(rhsVal) =>
-      let pat = Term.mkPat(PVar(binding.name));
-      switch (matchPat(StringMap.empty, pat, rhsVal)) {
+      switch (matchPat(StringMap.empty, binding.pat, rhsVal)) {
       | Some(bindings) =>
         let bodyEnv = StringMap.union((_, _, v) => Some(v), env, bindings);
         evalExpr(bodyEnv, body);

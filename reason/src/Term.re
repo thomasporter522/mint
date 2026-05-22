@@ -125,9 +125,12 @@ and ml = {
   meta,
 }
 
-/* ML bindings (shared by let and meta-level definitions) */
+/* ML bindings (shared by let and meta-level definitions).
+   `pat` is the LHS pattern; for top-level meta defs (LetDef/SchemaDef/
+   CoerceDef) and most let-ins it is just `PVar(name)`, but Let admits
+   arbitrary patterns so `let (a, b) = e in …` destructures. */
 and binding = {
-  name: string,
+  pat: pat,
   annotation: option(mlType),         /* parsed directly into mlType by the builder */
   rawAnnotation: option(ml),          /* raw type expression, preserved for error reporting */
   rhs: ml,
@@ -183,6 +186,18 @@ let isGhost = (m: meta): bool =>
 let mkOL = (t: cOL): ol => {value: t, meta: defaultMeta};
 let mkML = (t: cML): ml => {value: t, meta: defaultMeta};
 let mkPat = (p: cPat): pat => {value: p, meta: defaultMeta};
+
+/* For places that historically referred to a binding's name (top-level
+   meta defs, LetDef, SchemaDef, CoerceDef): the LHS pattern is always
+   a PVar there, so extracting the name is safe. Returns "_" if the
+   binding was somehow destructuring at a position that expected a
+   single name — those positions only arise through grammar rules that
+   restrict the LHS to an Identifier, so this is defensive. */
+let bindingName = (b: binding): string =>
+  switch (b.pat.value) {
+  | PVar(n) => n
+  | _ => "_"
+  };
 
 /* Embed an OL term into the ML language, preserving structure and metadata.
    An unsolved meta degrades to Hole(User) so it prints as `?` in goal

@@ -87,7 +87,9 @@ export type CML =
 export type ML = { value: CML; meta: Meta }
 
 export type Binding = {
-  name: string
+  /* LHS pattern. PVar(name) for top-level meta defs and simple lets;
+     can be a tuple/cons/etc. pattern for destructuring lets. */
+  pat: Pat
   annotation: MLType | null      // parsed type, if recognized
   rawAnnotation: ML | null       // original type expression for errors
   rhs: ML

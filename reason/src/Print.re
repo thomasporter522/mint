@@ -138,7 +138,7 @@ let rec printML = (t: ml): string => {
       ++ " else " ++ printML(elseBr)
       ++ " end"
     | Let(b, body) =>
-      "let " ++ b.name
+      "let " ++ printPat(b.pat)
       ++ (switch (b.annotation) {
           | Some(ann) => " : " ++ MLType.printType(ann)
           | None => ""
@@ -176,7 +176,7 @@ let rec debugML = (t: ml): string => {
     "Match(" ++ debugML(scrut) ++ ",[" ++
     String.concat(",", List.map(((p, b)) => "(" ++ debugPat(p) ++ "=>" ++ debugML(b) ++ ")", branches)) ++ "])"
   | Let(b, body) =>
-    "Let(" ++ b.name ++ "," ++ debugML(b.rhs) ++ "," ++ debugML(body) ++ ")"
+    "Let(" ++ debugPat(b.pat) ++ "," ++ debugML(b.rhs) ++ "," ++ debugML(body) ++ ")"
   | If(c, t, e) =>
     "If(" ++ debugML(c) ++ "," ++ debugML(t) ++ "," ++ debugML(e) ++ ")"
   };
@@ -202,7 +202,7 @@ let printDecl = (d: decl): string =>
   };
 
 let printBinding = (b: binding): string =>
-  b.name
+  printPat(b.pat)
   ++ (switch (b.annotation) {
       | Some(ann) => " : " ++ MLType.printType(ann)
       | None => ""

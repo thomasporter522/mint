@@ -383,10 +383,15 @@ function buildListExpr(node: SyntaxNode, src: string, m: Meta): ML {
   return mkML({ kind: 'List', items }, m)
 }
 
+/* Several rules now accept either `Expr` (the strict meta-let RHS form)
+   or `TopExpr` (the delimited-position form that admits juxtaposition
+   without parens). Treat both uniformly when walking the parse tree. */
+const isExprNode = (c: SyntaxNode) => c.name === 'Expr' || c.name === 'TopExpr'
+
 function buildFun(node: SyntaxNode, src: string, m: Meta): ML {
   const params = childrenByName(node, 'Pattern').map(p => buildPat(p, src))
-  // The body is the last Expr child (after the => token)
-  const exprs = children(node).filter(c => c.name === 'Expr')
+  // The body is the last Expr/TopExpr child (after the => token)
+  const exprs = children(node).filter(isExprNode)
   const body = exprs.length > 0
     ? buildML(exprs[exprs.length - 1], src)
     : mkML({ kind: 'Hole', hk: 'Synthesized' })
@@ -394,14 +399,14 @@ function buildFun(node: SyntaxNode, src: string, m: Meta): ML {
 }
 
 function buildMatch(node: SyntaxNode, src: string, m: Meta): ML {
-  const exprs = children(node).filter(c => c.name === 'Expr')
+  const exprs = children(node).filter(isExprNode)
   const scrut = exprs.length > 0
     ? buildML(exprs[0], src)
     : mkML({ kind: 'Hole', hk: 'Synthesized' })
   const arms: { pat: Pat; body: ML }[] = []
   for (const arm of childrenByName(node, 'MatchArm')) {
     const pat = firstChildByName(arm, 'Pattern')
-    const armExprs = children(arm).filter(c => c.name === 'Expr')
+    const armExprs = children(arm).filter(isExprNode)
     arms.push({
       pat: pat ? buildPat(pat, src) : mkPat({ kind: 'PWildcard' }),
       body: armExprs.length > 0
@@ -413,16 +418,16 @@ function buildMatch(node: SyntaxNode, src: string, m: Meta): ML {
 }
 
 function buildIf(node: SyntaxNode, src: string, m: Meta): ML {
-  const exprs = children(node).filter(c => c.name === 'Expr')
+  const exprs = children(node).filter(isExprNode)
   const get = (i: number): ML =>
     exprs[i] ? buildML(exprs[i], src) : mkML({ kind: 'Hole', hk: 'Synthesized' })
   return mkML({ kind: 'If', cond: get(0), then_: get(1), else_: get(2) }, m)
 }
 
 function buildLet(node: SyntaxNode, src: string, m: Meta): ML {
-  // Let { Let_kw Identifier (":" Expr)? "=" Expr In_kw Expr }
-  const id = firstChildByName(node, 'Identifier')
-  const exprs = children(node).filter(c => c.name === 'Expr')
+  // Let { Let_kw Pattern (":" Expr)? "=" TopExpr In_kw TopExpr }
+  const patNode = firstChildByName(node, 'Pattern')
+  const exprs = children(node).filter(isExprNode)
   // Heuristic: if 3 exprs, the first is annotation, second is rhs, third is body.
   // If 2 exprs, no annotation: first is rhs, second is body.
   let annotation: MLType | null = null
@@ -440,8 +445,11 @@ function buildLet(node: SyntaxNode, src: string, m: Meta): ML {
     rhs = mkML({ kind: 'Hole', hk: 'Synthesized' })
     body = mkML({ kind: 'Hole', hk: 'Synthesized' })
   }
+  const pat: Pat = patNode
+    ? buildPat(patNode, src)
+    : mkPat({ kind: 'PVar', name: '_' })
   const binding: Binding = {
-    name: id ? text(id, src) : '_',
+    pat,
     annotation,
     rawAnnotation,
     rhs,
@@ -479,8 +487,12 @@ function buildMetaDef(node: SyntaxNode, src: string): MetaDef {
   } else {
     rhs = mkML({ kind: 'Hole', hk: 'Synthesized' })
   }
+  const name = id ? text(id, src) : '_'
+  const pat: Pat = id
+    ? mkPat({ kind: 'PVar', name }, metaOf(id))
+    : mkPat({ kind: 'PVar', name })
   const binding: Binding = {
-    name: id ? text(id, src) : '_',
+    pat,
     annotation: null,
     rawAnnotation,
     rhs,

@@ -43,8 +43,11 @@ describe('TS builder smoke', () => {
     expect(prog).toHaveLength(1)
     if (prog[0].kind !== 'Meta') throw new Error()
     expect(prog[0].defs).toHaveLength(1)
-    expect(prog[0].defs[0].kind).toBe('LetDef')
-    expect(prog[0].defs[0].binding.name).toBe('foo')
+    const def = prog[0].defs[0]
+    if (def.kind !== 'LetDef') throw new Error('expected LetDef')
+    const bpat = def.binding.pat
+    if (bpat.value.kind !== 'PVar') throw new Error('expected PVar')
+    expect(bpat.value.name).toBe('foo')
   })
 
   it('parses construct blocks', () => {

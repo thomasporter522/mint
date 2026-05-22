@@ -1121,22 +1121,12 @@ let rec subsume =
   | (Some(exp), Some(inf)) =>
     let (s, conflict) = unify(state, ctx, exp, inf);
     /* Keep the post-unify state on failure so metas committed before
-       the mismatch stay solved. The message reports the top-level
-       expected and inferred types — not unify's drilled-down conflict
-       subterms — zonked against the final state. */
+       the mismatch stay solved. The message reports the entry-level
+       (expected, inferred) types — what's being compared at this
+       source position — zonked against the final state. */
     switch (conflict) {
     | None => ([], s, None)
-    | Some((cExp, cInf)) =>
-      /* Report the pair that actually disagreed, not subsume's
-         entry-level (exp, inf). Unify drills into Ap heads/args and
-         into meta types; the returned pair is the deepest level at
-         which unification failed. The entry-level pair can zonk to
-         identical strings (e.g. `B` vs `B`) when the real
-         disagreement is between their *types* (e.g. `U` vs `sto X U`
-         in a meta-type check), which makes the error unreadable.
-         Showing the conflict pair preserves context for head/arg
-         mismatches too — unify already returns the outer Ap pair on
-         head conflict and the sub-arg pair on arg conflict. */
+    | Some(_) =>
       let coerceCandidates = collectCoerceBindings(ctx);
       let canCoerce =
         switch (subterm) {
@@ -1150,9 +1140,9 @@ let rec subsume =
         | None =>
           ([mark(
              "Inconsistency (expected "
-             ++ printOL(zonk(s.solutions, cExp))
+             ++ printOL(zonk(s.solutions, exp))
              ++ ", got "
-             ++ printOL(zonk(s.solutions, cInf))
+             ++ printOL(zonk(s.solutions, inf))
              ++ ")",
              from, to_,
            )], s, None)
@@ -1160,9 +1150,9 @@ let rec subsume =
       } else {
         ([mark(
            "Inconsistency (expected "
-           ++ printOL(zonk(s.solutions, cExp))
+           ++ printOL(zonk(s.solutions, exp))
            ++ ", got "
-           ++ printOL(zonk(s.solutions, cInf))
+           ++ printOL(zonk(s.solutions, inf))
            ++ ")",
            from, to_,
          )], s, None);
@@ -2040,24 +2030,21 @@ and inferExpr = (ctx: context, t: ml): staticInfo =>
        drops it. Without this, `let x = … in (a, b)` infers `MTerm` and
        a subsequent match arm at the same body type gets type-checked
        at `MTerm`, producing spurious "Expected Term, got (Term, Term)"
-       errors. */
-    let info =
+       errors.
+       Destructuring lets (e.g. `let (a, b) = …`) are handled via
+       `checkPat`, which walks the pattern and extends ctx with each
+       binder at the appropriate component type. */
+    let (rhsTy, exprInfo) =
       switch (b.annotation) {
-      | Some(annotTy) =>
-        let exprInfo = checkExpr(ctx, annotTy, b.rhs);
-        let newCtx = StringMap.add(b.name, ML(annotTy), ctx);
-        let bodyInfo = inferExpr(newCtx, body);
-        let merged = mergeInfos(exprInfo, bodyInfo);
-        {...merged, mlInferred: bodyInfo.mlInferred};
+      | Some(annotTy) => (annotTy, checkExpr(ctx, annotTy, b.rhs))
       | None =>
         let exprInfo = inferExpr(ctx, b.rhs);
-        let exprTy = getInferredMlType(exprInfo);
-        let newCtx = StringMap.add(b.name, ML(exprTy), ctx);
-        let bodyInfo = inferExpr(newCtx, body);
-        let merged = mergeInfos(exprInfo, bodyInfo);
-        {...merged, mlInferred: bodyInfo.mlInferred};
+        (getInferredMlType(exprInfo), exprInfo);
       };
-    info;
+    let (newCtx, patInfo) = checkPat(ctx, rhsTy, b.pat);
+    let bodyInfo = inferExpr(newCtx, body);
+    let merged = mergeInfos(mergeInfos(exprInfo, patInfo), bodyInfo);
+    {...merged, mlInferred: bodyInfo.mlInferred};
 
   | Match(scrut, branches) =>
     let scrutInfo = inferExpr(ctx, scrut);
@@ -2213,19 +2200,16 @@ and checkExpr = (ctx: context, expected: mlType, t: ml): staticInfo =>
     }
 
   | Let(b, body) =>
-    switch (b.annotation) {
-    | Some(annotTy) =>
-      let exprInfo = checkExpr(ctx, annotTy, b.rhs);
-      let newCtx = StringMap.add(b.name, ML(annotTy), ctx);
-      let bodyInfo = checkExpr(newCtx, expected, body);
-      mergeInfos(exprInfo, bodyInfo);
-    | None =>
-      let exprInfo = inferExpr(ctx, b.rhs);
-      let exprTy = getInferredMlType(exprInfo);
-      let newCtx = StringMap.add(b.name, ML(exprTy), ctx);
-      let bodyInfo = checkExpr(newCtx, expected, body);
-      mergeInfos(exprInfo, bodyInfo);
-    }
+    let (rhsTy, exprInfo) =
+      switch (b.annotation) {
+      | Some(annotTy) => (annotTy, checkExpr(ctx, annotTy, b.rhs))
+      | None =>
+        let exprInfo = inferExpr(ctx, b.rhs);
+        (getInferredMlType(exprInfo), exprInfo);
+      };
+    let (newCtx, patInfo) = checkPat(ctx, rhsTy, b.pat);
+    let bodyInfo = checkExpr(newCtx, expected, body);
+    mergeInfos(mergeInfos(exprInfo, patInfo), bodyInfo);
 
   | Ap({value: Identifier("foldl"), _}, [fArg, initArg, listArg]) =>
     /* When we know the expected type, use it as initTy so that [] gets
@@ -2301,21 +2285,15 @@ and stripImplicits = (sols: IntMap.t(ol), ctx: context, t: ol): ol => {
         let (info, state) =
           checkOLTerm(emptyElabState, ctx, Expression(None), stripCheck);
         if (info.errors != []) {
-          print_endline("DBG strip k=" ++ string_of_int(k) ++ " on " ++ printOL(target) ++ " FAILED (errors: " ++ string_of_int(List.length(info.errors)) ++ ")");
-          List.iter((e: Error.error) => print_endline("  err: " ++ e.message), info.errors);
           None;
         } else {
           switch (info.elaborated) {
-          | None =>
-            print_endline("DBG strip k=" ++ string_of_int(k) ++ " on " ++ printOL(target) ++ " FAILED (no elab)");
-            None;
+          | None => None
           | Some(elab) =>
             let elabZonked = zonk(state.solutions, elab);
             if (equalForStrip(target, elabZonked)) {
-              print_endline("DBG strip k=" ++ string_of_int(k) ++ " on " ++ printOL(target) ++ " OK -> " ++ printOL({...t, value: OLAp(f, kept)}));
               Some(kept);
             } else {
-              print_endline("DBG strip k=" ++ string_of_int(k) ++ " on " ++ printOL(target) ++ " FAILED (not equal): elab=" ++ printOL(elabZonked));
               None;
             };
           };
@@ -2369,7 +2347,7 @@ and processMetaDefs =
         switch (d) {
         | LetDef(b) =>
           switch (b.annotation) {
-          | Some(_) => StringSet.add(b.name, s)
+          | Some(_) => StringSet.add(bindingName(b), s)
           | None => s
           }
         | _ => s
@@ -2382,7 +2360,7 @@ and processMetaDefs =
         switch (d) {
         | LetDef(b) =>
           switch (b.annotation) {
-          | Some(ty) => StringMap.add(b.name, MetaLet(b.rhs, ty), c)
+          | Some(ty) => StringMap.add(bindingName(b), MetaLet(b.rhs, ty), c)
           | None => c
           }
         | _ => c
@@ -2420,13 +2398,13 @@ and processMetaDefsLoop =
        hit-area stay tight on the name. */
     let nameMeta = {
       ...b.bindingMeta,
-      end_: b.bindingMeta.start + String.length(b.name),
+      end_: b.bindingMeta.start + String.length(bindingName(b)),
     };
-    let (shadowWarns, shadowDefs) = shadowCheck(b.name, nameMeta, accCtx);
+    let (shadowWarns, shadowDefs) = shadowCheck(bindingName(b), nameMeta, accCtx);
     let info =
       withErrors(mergeInfos(accInfo, schemaInfo), annotErrors @ shadowWarns);
     let info = {...info, definitions: info.definitions @ shadowDefs};
-    let newCtx = StringMap.add(b.name, SchemaBinding(b.rhs), accCtx);
+    let newCtx = StringMap.add(bindingName(b), SchemaBinding(b.rhs), accCtx);
     processMetaDefsLoop(info, newCtx, accDefs, preReg, rest);
 
   | [CoerceDef(b), ...rest] =>
@@ -2447,9 +2425,9 @@ and processMetaDefsLoop =
       };
     let nameMeta = {
       ...b.bindingMeta,
-      end_: b.bindingMeta.start + String.length(b.name),
+      end_: b.bindingMeta.start + String.length(bindingName(b)),
     };
-    let (shadowWarns, shadowDefs) = shadowCheck(b.name, nameMeta, accCtx);
+    let (shadowWarns, shadowDefs) = shadowCheck(bindingName(b), nameMeta, accCtx);
     let info =
       withErrors(mergeInfos(accInfo, coerceInfo), annotErrors @ shadowWarns);
     let info = {...info, definitions: info.definitions @ shadowDefs};
@@ -2462,7 +2440,7 @@ and processMetaDefsLoop =
           },
         accCtx, 0,
       );
-    let newCtx = StringMap.add(b.name, CoerceBinding(coerceIdx, b.rhs), accCtx);
+    let newCtx = StringMap.add(bindingName(b), CoerceBinding(coerceIdx, b.rhs), accCtx);
     processMetaDefsLoop(info, newCtx, accDefs, preReg, rest);
 
   | [LetDef(b), ...rest] =>
@@ -2473,7 +2451,7 @@ and processMetaDefsLoop =
            can mutually refer); accCtx already has this name. The
            recCtx-rebind here is a no-op for the pre-registered case but
            keeps the path correct if the pre-pass is bypassed. */
-        let recCtx = StringMap.add(b.name, MetaLet(b.rhs, ty), accCtx);
+        let recCtx = StringMap.add(bindingName(b), MetaLet(b.rhs, ty), accCtx);
         (checkExpr(recCtx, ty, b.rhs), ty);
       | None =>
         let info = inferExpr(accCtx, b.rhs);
@@ -2481,7 +2459,7 @@ and processMetaDefsLoop =
       };
     let nameMeta = {
       ...b.bindingMeta,
-      end_: b.bindingMeta.start + String.length(b.name),
+      end_: b.bindingMeta.start + String.length(bindingName(b)),
     };
     /* If this name was pre-registered (annotated and in the block-wide
        pre-pass), drop it from the ctx we hand to shadowCheck so the
@@ -2490,19 +2468,19 @@ and processMetaDefsLoop =
        still triggers a real shadow warning (because by then the first
        binding has been added to accCtx normally). */
     let (ctxForShadow, preReg) =
-      if (StringSet.mem(b.name, preReg)) {
-        (StringMap.remove(b.name, accCtx), StringSet.remove(b.name, preReg));
+      if (StringSet.mem(bindingName(b), preReg)) {
+        (StringMap.remove(bindingName(b), accCtx), StringSet.remove(bindingName(b), preReg));
       } else {
         (accCtx, preReg);
       };
-    let (shadowWarns, shadowDefs) = shadowCheck(b.name, nameMeta, ctxForShadow);
+    let (shadowWarns, shadowDefs) = shadowCheck(bindingName(b), nameMeta, ctxForShadow);
     let bodyInfo = withErrors(bodyInfo, shadowWarns);
     let bodyInfo = {
       ...bodyInfo,
       definitions: bodyInfo.definitions @ shadowDefs,
     };
-    let newCtx = StringMap.add(b.name, MetaLet(b.rhs, rhsTy), accCtx);
-    let newDefs = accDefs @ [(b.name, b.rhs)];
+    let newCtx = StringMap.add(bindingName(b), MetaLet(b.rhs, rhsTy), accCtx);
+    let newDefs = accDefs @ [(bindingName(b), b.rhs)];
     processMetaDefsLoop(mergeInfos(accInfo, bodyInfo), newCtx, newDefs, preReg, rest);
 
   | [NewtagDef(tag, defMeta), ...rest] =>

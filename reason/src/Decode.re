@@ -241,7 +241,7 @@ and decodeBinding = (j: jsObj): binding => {
     | None => None
     };
   {
-    name: _str(j, "name"),
+    pat: decodePat(_obj(j, "pat")),
     annotation,
     rawAnnotation,
     rhs: decodeML(_obj(j, "rhs")),

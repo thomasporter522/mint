@@ -150,11 +150,23 @@ BinaryInner {
 
 CommaSep<E> { E ("," E)* }
 
-Let  { Let_kw  Identifier (":" Expr)? "=" Expr In_kw Expr }
+/* Positions with both opening AND closing keyword delimiters admit
+   juxtaposition application without parens — the closing delimiter
+   tells the parser where the expression ends. `TopExpr` already has
+   the right shape (`AppInner` + `TopBinaryExpr`).
+
+   Let-RHS: delimited by `=` and `in`. ✓
+   Match scrut: `match` and `with`. ✓
+   If branches: `then`/`else`/`end`. ✓
+   Match-arm body: `=>` and (`|` or `end`). ✓
+   Let-body and Fun-body have only an opening delimiter; juxtaposing
+   there would let the body eat the start of the next meta-let item
+   (which has no Terminator in meta blocks). So they stay strict. */
+Let  { Let_kw  Pattern (":" Expr)? "=" TopExpr In_kw Expr }
 Fun  { Fun_kw  Pattern+ "=>" Expr }
-Match { Match_kw Expr With_kw MatchArm* End_kw }
-MatchArm { "|" Pattern "=>" Expr }
-If   { If_kw   Expr Then_kw Expr Else_kw Expr End_kw }
+Match { Match_kw TopExpr With_kw MatchArm* End_kw }
+MatchArm { "|" Pattern "=>" TopExpr }
+If   { If_kw   TopExpr Then_kw TopExpr Else_kw TopExpr End_kw }
 
 /* === Patterns === */
 
