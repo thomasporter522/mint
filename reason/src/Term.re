@@ -107,6 +107,7 @@ and pat = {
    expressions can mix OL identifiers with ML-bound variables. */
 type cML =
   | Hole(holeKind)
+  | Meta(int)                                 /* OL metavariable embedded in ML; distinct from Hole */
   | Identifier(string)                        /* x — could be OL or ML, resolved by checker */
   | StringLit(string)
   | TagLit(string)                            /* #name — tag-value literal */
@@ -200,14 +201,14 @@ let bindingName = (b: binding): string =>
   };
 
 /* Embed an OL term into the ML language, preserving structure and metadata.
-   An unsolved meta degrades to Hole(User) so it prints as `?` in goal
-   tooltips — Hole(Synthesized) would print as empty (parser-fallback
-   convention) and turn `Ul ?M` into the misleading `Ul`. */
+   OLMeta becomes ML Meta(id) — a distinct ML constructor so user-level
+   code can distinguish metas from holes. (Previously OLMeta degraded
+   to Hole(User), which conflated the two.) */
 let rec embedOL = (t: ol): ml => {
   let value =
     switch (t.value) {
     | OLHole(k) => Hole(k)
-    | OLMeta(_) => Hole(User)
+    | OLMeta(n) => Meta(n)
     | OLIdentifier(s) => Identifier(s)
     | OLAp(f, args) => Ap(embedOL(f), List.map(embedOL, args))
     };

@@ -88,7 +88,7 @@ meta
     match-term : ((List Term) -> ((List (Term, Term)) -> (Term -> (Term -> (Result (List (Term, Term))))))) =
         fun binders => fun bindings => fun pat => fun term =>
             -- Hole in pattern (`?`) acts as a wildcard. This shows up
-            -- when a rule's LHS has impl-inserted metas — after
+            -- when a rule's LHS has impl-inserted metas -- after
             -- embedding the metas surface as holes, and they should
             -- match whatever the target has in that slot.
             if (pat == ?) then (Ok bindings) else
@@ -184,11 +184,11 @@ meta
             end
 
     -- Iterate context's #reduction-tagged entries; return the first
-    -- (reduced-term, proof) that fires. Generic — no rule names baked
+    -- (reduced-term, proof) that fires. Generic -- no rule names baked
     -- in.
     -- Iterate context's #reduction-tagged entries; return the first
     -- (reduced-term, proof) that fires. We pre-filter by checking that
-    -- the rule's LHS head matches the target's head — this skips most
+    -- the rule's LHS head matches the target's head -- this skips most
     -- irrelevant rules without invoking match-term.
     try-top : ((List Signature) -> (Term -> (Result (Term, Term)))) = fun ctx => fun term =>
         let term-head = (fst (decompose term)) in
@@ -211,8 +211,63 @@ meta
                 end
             end) (Error "no rule fired") ctx)
 
-    -- Top-loop: exhaust top-level reductions on `t`. Returns the
-    -- normal-form-w.r.t.-top and a chained proof.
+    -- Map a function returning (Term, Term) over a list, accumulating
+    -- two parallel lists.
+    refls-for : ((List Term) -> (List Term)) = fun ts =>
+        (foldl (fun acc => fun t => (append acc [(refl t)])) [] ts)
+
+    -- Replace the i-th element of a list with v.
+    list-set : ((List Term) -> ((List Term) -> ((List Term) -> (List Term)))) =
+        fun prefix => fun suffix => fun v-list =>
+            -- prefix (reversed) ++ v-list ++ suffix
+            (append (foldl (fun acc => fun x => x :: acc) v-list prefix) suffix)
+
+    -- Try a one-step reduction inside a list of args: walk left-to-right,
+    -- and for the first arg whose single-step succeeds, return the new
+    -- list-of-args plus a proofs-list (refls for non-changed positions
+    -- and the actual proof for the changed one). Returns Error if no
+    -- arg can be single-stepped.
+    --
+    -- The proofs-list is what apply-cong consumes.
+    step-first-arg : ((List Signature) -> ((List Term) -> ((List Term) -> (Result ((List Term), (List Term)))))) =
+        fun ctx => fun prefix-rev => fun args =>
+            match args with
+            | [] => (Error "no arg can step")
+            | a :: rest =>
+                match (single-step ctx a) with
+                | Ok (a-new, a-proof) =>
+                    let prefix = (foldl (fun acc => fun x => x :: acc) [] prefix-rev) in
+                    let new-args = (append (append prefix [a-new]) rest) in
+                    let proofs = (append (append (refls-for prefix) [a-proof]) (refls-for rest)) in
+                    (Ok (new-args, proofs))
+                | Error _ => (step-first-arg ctx (a :: prefix-rev) rest)
+                end
+            end
+
+    -- Single step: one rewrite, either at the top or in the first
+    -- child that admits one. Returns Ok (t-new, proof : eq t t-new) or Error.
+    single-step : ((List Signature) -> (Term -> (Result (Term, Term)))) =
+        fun ctx => fun t =>
+            match (try-top ctx t) with
+            | Ok x => (Ok x)
+            | Error _ =>
+                let d = (decompose t) in
+                let (h, args) = d in
+                match args with
+                | [] => (Error "atom: no children to step")
+                | _ :: _ =>
+                    match (step-first-arg ctx [] args) with
+                    | Ok (new-args, proofs) =>
+                        match (apply-cong h proofs) with
+                        | Ok cong-proof => (Ok ((apply h new-args), cong-proof))
+                        | Error msg => (Error msg)
+                        end
+                    | Error msg => (Error msg)
+                    end
+                end
+            end
+
+    -- Top-loop: exhaust top-level reductions on `t`.
     top-loop : ((List Signature) -> (Term -> (Term, Term))) = fun ctx => fun t =>
         match (try-top ctx t) with
         | Ok (t-next, step-proof) =>
@@ -221,9 +276,17 @@ meta
         | Error _ => (t, (refl t))
         end
 
-    -- Map head-reduce over an argument list; collect each arg's
-    -- reduction proof. Returns the list of (reduced-arg, proof) pairs
-    -- in original order.
+    -- Map top-loop over an argument list (no deep recursion).
+    top-loop-args : ((List Signature) -> ((List Term) -> ((List Term), (List Term)))) =
+        fun ctx => fun args =>
+            (foldl (fun acc => fun a =>
+                match acc with
+                | (reduced-acc, proofs-acc) =>
+                    let (a-r, a-p) = (top-loop ctx a) in
+                    ((append reduced-acc [a-r]), (append proofs-acc [a-p]))
+                end) ([], []) args)
+
+    -- Map head-reduce over an argument list.
     head-reduce-args : ((List Signature) -> ((List Term) -> ((List Term), (List Term)))) =
         fun ctx => fun args =>
             (foldl (fun acc => fun a =>
@@ -233,8 +296,7 @@ meta
                     ((append reduced-acc [a-r]), (append proofs-acc [a-p]))
                 end) ([], []) args)
 
-    -- Check whether all proofs in a list are refls (i.e. the
-    -- corresponding terms didn't change). Returns true if so.
+    -- Check whether all proofs in a list are refls.
     all-refl : ((List Term) -> Bool) = fun proofs =>
         (foldl (fun acc => fun p =>
             acc && (match (decompose p) with
@@ -242,12 +304,11 @@ meta
                     end)
         ) true proofs)
 
-    -- Head-reduce: apply rewrites at the root until none fires. When
-    -- stuck at the root, head-reduce each child and re-try at the root
-    -- — recursing until both the root and children stop reducing.
-    -- This exposes patterns whose LHS only matches after sub-positions
-    -- normalise (e.g. a rule on `sap A B (lto X Y) x` only fires once
-    -- the lto-headed sub-term is rewritten by lto-eq into `to (sap A x)`).
+    -- Head-reduce: top-loop, then deeply normalize each child, then
+    -- re-try top. KEY OPTIMIZATION: after rebuilding with normalized
+    -- children, we only `top-loop` (not full head-reduce) because the
+    -- children are already in NF. If top-loop fires, the result has
+    -- a new shape; THEN we recurse fully.
     head-reduce : ((List Signature) -> (Term -> (Term, Term))) = fun ctx => fun t =>
         let (t1, p1) = (top-loop ctx t) in
         let d = (decompose t1) in
@@ -260,8 +321,17 @@ meta
             match (apply-cong h args-proofs) with
             | Ok cong-proof =>
                 let t2 = (apply h args-reduced) in
-                let (t3, p3) = (head-reduce ctx t2) in
-                (t3, (trans p1 (trans cong-proof p3)))
+                -- Children are NF: only top-loop on t2 (no deep recurse).
+                let (t2-top, top-p) = (top-loop ctx t2) in
+                if (t2-top == t2) then
+                    -- top didn't fire; t2 is fully normalized.
+                    (t2, (trans p1 cong-proof))
+                else
+                    -- top fired; t2-top has fresh shape that may need
+                    -- another deep pass.
+                    let (t-final, rest-p) = (head-reduce ctx t2-top) in
+                    (t-final, (trans p1 (trans cong-proof (trans top-p rest-p))))
+                end
             | Error _ => (t1, p1)
             end end
         end
@@ -288,7 +358,7 @@ meta
     -- Helper: walks reversed xs, ys; accumulates proofs in `acc` in
     -- the correct (un-reversed) order. Args are already normalized
     -- (head-reduce-args normalized them in the parent's head-reduce),
-    -- so we use convert-norm — saves re-reducing already-normal terms.
+    -- so we use convert-norm -- saves re-reducing already-normal terms.
     convert-list-rev : ((List Signature) -> ((List Term) -> ((List Term) -> ((List Term) -> (Result (List Term)))))) =
         fun ctx => fun rxs => fun rys => fun acc =>
             match (rxs, rys) with
@@ -351,7 +421,7 @@ meta
         else
             -- No congruence rule for this head: we can only succeed if
             -- the args are all already-refl. We check by inspecting the
-            -- proofs — if any is non-trivial, fail.
+            -- proofs -- if any is non-trivial, fail.
             (Error "no congruence rule for this head")
         end end end end end
 
@@ -379,21 +449,21 @@ meta
                 | Error msg => (Error msg)
                 end
             else (Error "head constructors disagree")
-            end end end end end
+            end end end end end end
 
     -- Top-level convert: head-reduce both, then compare as normalized.
-    -- Returns Ok proof : eq t1 t2 when successful.
     convert : ((List Signature) -> (Term -> (Term -> (Result Term)))) =
         fun ctx => fun t1 => fun t2 =>
             if (t1 == ?) then (Ok (refl t2)) else
             if (t2 == ?) then (Ok (refl t1)) else
+            if (t1 == t2) then (Ok (refl t1)) else
             let (t1r, p1) = (head-reduce ctx t1) in
             let (t2r, p2) = (head-reduce ctx t2) in
             match (convert-norm ctx t1r t2r) with
             | Ok mid => (Ok (trans p1 (trans mid (sym p2))))
             | Error msg => (Error msg)
             end
-            end end
+            end end end
 
     -- Install as a coerce procedure. When the elaborator detects a
     -- type mismatch in a value position, convert is called on the
@@ -422,19 +492,10 @@ lto-eq (X : U) (A : sto X U) (x : X) : eq (ap (lto X A) x) (to (sap A x))
 
 lap (X : U) (A : sto X U) (B : sap (to X) (lsto A (sap lk U)))
     (f : sap (to X) (lsap (lto A) B)) (a : sap (to X) A) : sap (to X) (lsap B a)
--- Just the LHS of lap-eq's eq
-lap-eq-lhs (X : U) (A : sto X U) (B : sap (to X) (lsto A (sap lk U)))
-    (f : sap (to X) (lsap (lto A) B)) (a : sap (to X) A) (x : X) :
-    sap (to X) (lsap B a)
--- The body of LHS as a type
-lap-eq-lhs-test (X : U) (A : sto X U) (B : sap (to X) (lsto A (sap lk U)))
-    (f : sap (to X) (lsap (lto A) B)) (a : sap (to X) A) (x : X) :
-    U
--- Now the eq of one ap term to itself (no coerce needed)
-lap-eq-refl (X : U) (A : sto X U) (B : sap (to X) (lsto A (sap lk U)))
-    (f : sap (to X) (lsap (lto A) B)) (a : sap (to X) A) (x : X) :
-    eq (ap (lap f a) x) (ap (lap f a) x)
--- Now the FULL lap-eq type:
+-- Test: original lap-eq had a hand-rolled cast. Strip it and let the
+-- conversion coerce produce the bridging proof. Tag lines above are
+-- applied to the context as they are processed, so lap-eq's coerce
+-- sees them when it runs.
 lap-eq (X : U) (A : sto X U) (B : sap (to X) (lsto A (sap lk U)))
     (f : sap (to X) (lsap (lto A) B)) (a : sap (to X) A) (x : X) :
     eq (ap (lap f a) x)

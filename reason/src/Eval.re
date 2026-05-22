@@ -26,17 +26,31 @@ type evalResult =
    and returns the result as an ml AST value — either
    `Ap(Identifier "Ok", [candidate])` or
    `Ap(Identifier "Error", [StringLit msg])`. */
+/* Trace builtin: append messages to /tmp/mint-trace.log for debugging
+   without going through the JS test runner's stdout capture. Uses
+   Node.js fs via Melange interop. Silent no-op if `fs` isn't available. */
+[@mel.module "fs"] external appendFileSync: (string, string) => unit = "appendFileSync";
+let appendTrace = (msg: string): unit =>
+  try(appendFileSync("/tmp/mint-trace.log", msg ++ "\n")) {
+  | _ => ()
+  };
+
 let canonicalCallbackRef: ref(option((ml, ml) => ml)) = ref(None);
 let setCanonicalCallback = (cb: (ml, ml) => ml): unit =>
   canonicalCallbackRef := Some(cb);
 
 /* --- Structural equality on ml terms --- */
 
+/* Structural equality. Meta(n) is identified by its int id. Hole is
+   structural ("?" matches "?") for use inside termEqual; the Eq
+   builtin (BinOp Eq) propagates Hole as unknown at the top level —
+   see evalBinOp. */
 let rec termEqual = (a: ml, b: ml): bool =>
   switch (a.value, b.value) {
   | (Identifier(x), Identifier(y)) => x == y
   | (StringLit(x), StringLit(y)) => x == y
   | (TagLit(x), TagLit(y)) => x == y
+  | (Meta(n), Meta(m)) => n == m
   | (Ap(f1, args1), Ap(f2, args2)) =>
     termEqual(f1, f2)
     && List.length(args1) == List.length(args2)
@@ -50,6 +64,20 @@ let rec termEqual = (a: ml, b: ml): bool =>
   | (Cons(h1, t1), Cons(h2, t2)) =>
     termEqual(h1, h2) && termEqual(t1, t2)
   | (Hole(_), Hole(_)) => true
+  | _ => false
+  };
+
+/* Is this ML term the embedded form of an OL hole? */
+let isHole = (t: ml): bool =>
+  switch (t.value) {
+  | Hole(_) => true
+  | _ => false
+  };
+
+/* Is this ML term the embedded form of an OL meta? */
+let isMeta = (t: ml): bool =>
+  switch (t.value) {
+  | Meta(_) => true
   | _ => false
   };
 
@@ -329,7 +357,9 @@ and evalApp = (env: evalEnv, fVal: mlValue, args: list(ml)): evalResult =>
     switch (evalExpr(env, arg)) {
     | Err(_) as e => e
     | Ok(argVal) =>
-      print_endline("[print] " ++ Print.printML(termOf(argVal)));
+      let msg = "[print] " ++ Print.printML(termOf(argVal));
+      print_endline(msg);
+      appendTrace(msg);
       Ok(argVal);
     }
   | (Val({value: Identifier("print"), _}), [labelArg, arg]) =>
@@ -344,7 +374,9 @@ and evalApp = (env: evalEnv, fVal: mlValue, args: list(ml)): evalResult =>
           | StringLit(s) => s
           | _ => Print.printML(termOf(labelVal))
           };
-        print_endline("[print] " ++ label ++ ": " ++ Print.printML(termOf(argVal)));
+        let msg = "[print] " ++ label ++ ": " ++ Print.printML(termOf(argVal));
+        print_endline(msg);
+        appendTrace(msg);
         Ok(argVal);
       }
     }
@@ -360,6 +392,35 @@ and evalApp = (env: evalEnv, fVal: mlValue, args: list(ml)): evalResult =>
     | Err(_) as e => e
     | Ok(Val({value: Tuple([_, second, ..._]), _})) => Ok(Val(second))
     | Ok(_) => Err("snd: argument is not a tuple")
+    }
+  /* is-hole t — true iff t is an OL hole (`?` in user source). The
+     metalang `?` literal is unknown / propagates through ==; this
+     builtin lets procedures check object-language holes explicitly. */
+  | (Val({value: Identifier("is-hole"), _}), [arg]) =>
+    switch (evalExpr(env, arg)) {
+    | Err(_) as e => e
+    | Ok(Val(t)) =>
+      Ok(Val(mk(Identifier(isHole(t) ? "true" : "false"))))
+    | Ok(_) => Err("is-hole: argument is not a term")
+    }
+  /* is-meta t — true iff t is an OL metavariable (introduced by impl
+     args or auto-holes). Returns the boolean as identifier "true"/"false". */
+  | (Val({value: Identifier("is-meta"), _}), [arg]) =>
+    switch (evalExpr(env, arg)) {
+    | Err(_) as e => e
+    | Ok(Val(t)) =>
+      Ok(Val(mk(Identifier(isMeta(t) ? "true" : "false"))))
+    | Ok(_) => Err("is-meta: argument is not a term")
+    }
+  /* meta-id t — for a meta term, return its integer id as a string-tagged
+     ml value (so it can be compared via ==). Returns ? for non-metas. */
+  | (Val({value: Identifier("meta-id"), _}), [arg]) =>
+    switch (evalExpr(env, arg)) {
+    | Err(_) as e => e
+    | Ok(Val({value: Meta(n), _})) =>
+      Ok(Val(mk(StringLit(string_of_int(n)))))
+    | Ok(Val(_)) => Ok(Val(mk(Hole(User))))
+    | Ok(_) => Err("meta-id: argument is not a term")
     }
   /* decompose t — view a term as (head, args). For an Ap returns the
      literal pair; for any atomic OL value (Identifier, Hole, Meta)
@@ -473,12 +534,28 @@ and evalMatch = (env: evalEnv, scrutVal: mlValue, branches: list((pat, ml))): ev
     }
   }
 
-and evalBinOp = (op: binOp, lv: mlValue, rv: mlValue): evalResult =>
+and evalBinOp = (op: binOp, lv: mlValue, rv: mlValue): evalResult => {
+  /* "Is this ml value the metalang ? (Hole)?" — Hole propagates as
+     unknown through ==/!=. The user-level code should now use
+     `is-hole` / `is-meta` to test for OL holes / metas explicitly. */
+  let isHoleVal = (v: mlValue) =>
+    switch (v) {
+    | Val(t) => isHole(t)
+    | _ => false
+    };
   switch (op) {
   | Eq =>
-    Ok(Val(mk(Identifier(mlValueEqual(lv, rv) ? "true" : "false"))))
+    if (isHoleVal(lv) || isHoleVal(rv)) {
+      Ok(Val(mk(Hole(User))));
+    } else {
+      Ok(Val(mk(Identifier(mlValueEqual(lv, rv) ? "true" : "false"))));
+    }
   | Neq =>
-    Ok(Val(mk(Identifier(mlValueEqual(lv, rv) ? "false" : "true"))))
+    if (isHoleVal(lv) || isHoleVal(rv)) {
+      Ok(Val(mk(Hole(User))));
+    } else {
+      Ok(Val(mk(Identifier(mlValueEqual(lv, rv) ? "false" : "true"))));
+    }
   | And =>
     switch (lv, rv) {
     | (Val({value: Identifier("true"), _}), Val({value: Identifier("true"), _})) =>
@@ -491,6 +568,7 @@ and evalBinOp = (op: binOp, lv: mlValue, rv: mlValue): evalResult =>
     | _ => Ok(rv)
     }
   };
+};
 
 /* === Top-level: run a schema on construct declarations === */
 
