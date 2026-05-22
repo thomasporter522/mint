@@ -24,10 +24,13 @@ to (A : U) (B : to A (k A U U)) : U
 k (X A : U) (a : A) : (to X (k X U A))
 ap (A : U) (B : to A (k A U U)) (f : to A B) (a : A) : (ap A (k A U U) B a)
 -- kk (X : U) (Y : to X (k X U U)) (A : U) (a : A) : to X (lto X Y (kk X Y U A))
-lto (X : U) 
-    (A : to X (k X U U)) 
-    (B : to X (lto X A (cast ? (k (k U)))))
-    : (to X (k X U U))
+
+-- lto : to U (cast ? (ap lto ?))
+-- lto-eq : ?
+-- lto (X : U) 
+--     (A : to X (k X U U)) 
+--     (B : to X (lto X A (cast ? (k (k U)))))
+--     : (to X (k X U U))
 
 -- lid (X : U) : to X (k X)
 -- eq : to U (lto lid ?)
