@@ -237,7 +237,6 @@ meta
     -- corresponding terms didn't change). Returns true if so.
     all-refl : ((List Term) -> Bool) = fun proofs =>
         (foldl (fun acc => fun p =>
-            -- A refl proof has head=refl after decompose. Cheap check.
             acc && (match (decompose p) with
                     | (h, _) => (h == refl)
                     end)
@@ -249,24 +248,8 @@ meta
     -- This exposes patterns whose LHS only matches after sub-positions
     -- normalise (e.g. a rule on `sap A B (lto X Y) x` only fires once
     -- the lto-headed sub-term is rewritten by lto-eq into `to (sap A x)`).
-    -- Returns (final-term, eq input final-term).
     head-reduce : ((List Signature) -> (Term -> (Term, Term))) = fun ctx => fun t =>
-        let (t1, p1) = (top-loop ctx t) in
-        let d = (decompose t1) in
-        let (h, args) = d in
-        match args with
-        | [] => (t1, p1)
-        | _ :: _ =>
-            let (args-reduced, args-proofs) = (head-reduce-args ctx args) in
-            if (all-refl args-proofs) then (t1, p1) else
-            match (apply-cong h args-proofs) with
-            | Ok cong-proof =>
-                let t2 = (apply h args-reduced) in
-                let (t3, p3) = (head-reduce ctx t2) in
-                (t3, (trans p1 (trans cong-proof p3)))
-            | Error _ => (t1, p1)
-            end end
-        end
+        (top-loop ctx t)
 
     -- Build an eq-proof between two argument lists by zipping convert
     -- over them. Order of cong applications follows the order in which
@@ -288,25 +271,25 @@ meta
             (convert-list-rev ctx (reverse-terms xs) (reverse-terms ys) [])
 
     -- Helper: walks reversed xs, ys; accumulates proofs in `acc` in
-    -- the correct (un-reversed) order.
+    -- the correct (un-reversed) order. Args are already normalized
+    -- (head-reduce-args normalized them in the parent's head-reduce),
+    -- so we use convert-norm — saves re-reducing already-normal terms.
     convert-list-rev : ((List Signature) -> ((List Term) -> ((List Term) -> ((List Term) -> (Result (List Term)))))) =
         fun ctx => fun rxs => fun rys => fun acc =>
             match (rxs, rys) with
             | ([], []) => (Ok acc)
             | (x :: xt, y :: yt) =>
-                match (convert ctx x y) with
+                match (convert-norm ctx x y) with
                 | Ok p => (convert-list-rev ctx xt yt (p :: acc))
                 | Error msg => (Error msg)
                 end
             | ([], y :: yt) =>
-                -- xs ran out: pair remaining ys against `?`.
-                match (convert ctx ? y) with
+                match (convert-norm ctx ? y) with
                 | Ok p => (convert-list-rev ctx [] yt (p :: acc))
                 | Error msg => (Error msg)
                 end
             | (x :: xt, []) =>
-                -- ys ran out: pair remaining xs against `?`.
-                match (convert ctx x ?) with
+                match (convert-norm ctx x ?) with
                 | Ok p => (convert-list-rev ctx xt [] (p :: acc))
                 | Error msg => (Error msg)
                 end
@@ -357,8 +340,33 @@ meta
             (Error "no congruence rule for this head")
         end end end end end
 
-    -- Top-level convert: head-reduce both, check head agreement,
-    -- recurse on children, combine via apply-cong.
+    -- Compare two ALREADY-normalized terms. Skips the head-reduce step
+    -- because head-reduce on the parent already normalized children.
+    -- This is what convert-list/convert-norm recursively call.
+    convert-norm : ((List Signature) -> (Term -> (Term -> (Result Term)))) =
+        fun ctx => fun t1r => fun t2r =>
+            if (t1r == ?) then (Ok (refl t2r)) else
+            if (t2r == ?) then (Ok (refl t1r)) else
+            if (t1r == t2r) then (Ok (refl t1r)) else
+            let d1 = (decompose t1r) in
+            let d2 = (decompose t2r) in
+            let (h1, a1) = d1 in
+            let (h2, a2) = d2 in
+            if (h1 == ?) then (Ok (refl t2r)) else
+            if (h2 == ?) then (Ok (refl t1r)) else
+            if (h1 == h2) then
+                match (convert-list ctx a1 a2) with
+                | Ok proofs =>
+                    match (apply-cong h1 proofs) with
+                    | Ok mid => (Ok mid)
+                    | Error msg => (Error msg)
+                    end
+                | Error msg => (Error msg)
+                end
+            else (Error "head constructors disagree")
+            end end end end end
+
+    -- Top-level convert: head-reduce both, then compare as normalized.
     -- Returns Ok proof : eq t1 t2 when successful.
     convert : ((List Signature) -> (Term -> (Term -> (Result Term)))) =
         fun ctx => fun t1 => fun t2 =>
@@ -366,24 +374,11 @@ meta
             if (t2 == ?) then (Ok (refl t1)) else
             let (t1r, p1) = (head-reduce ctx t1) in
             let (t2r, p2) = (head-reduce ctx t2) in
-            if (t1r == t2r) then (Ok (trans p1 (sym p2))) else
-            let d1 = (decompose t1r) in
-            let d2 = (decompose t2r) in
-            let (h1, a1) = d1 in
-            let (h2, a2) = d2 in
-            if (h1 == ?) then (Ok (trans p1 (trans (refl t2r) (sym p2)))) else
-            if (h2 == ?) then (Ok (trans p1 (trans (refl t1r) (sym p2)))) else
-            if (h1 == h2) then
-                match (convert-list ctx a1 a2) with
-                | Ok proofs =>
-                    match (apply-cong h1 proofs) with
-                    | Ok mid => (Ok (trans p1 (trans mid (sym p2))))
-                    | Error msg => (Error msg)
-                    end
-                | Error msg => (Error msg)
-                end
-            else (Error "head constructors disagree")
-            end end end end end end
+            match (convert-norm ctx t1r t2r) with
+            | Ok mid => (Ok (trans p1 (trans mid (sym p2))))
+            | Error msg => (Error msg)
+            end
+            end end
 
     -- Install as a coerce procedure. When the elaborator detects a
     -- type mismatch in a value position, convert is called on the
@@ -412,10 +407,19 @@ lto-eq (X : U) (A : sto X U) (x : X) : eq (ap (lto X A) x) (to (sap A x))
 
 lap (X : U) (A : sto X U) (B : sap (to X) (lsto A (sap lk U)))
     (f : sap (to X) (lsap (lto A) B)) (a : sap (to X) A) : sap (to X) (lsap B a)
--- Test: original lap-eq had a hand-rolled cast. Strip it and let the
--- conversion coerce produce the bridging proof. Tag lines above are
--- applied to the context as they are processed, so lap-eq's coerce
--- sees them when it runs.
+-- Just the LHS of lap-eq's eq
+lap-eq-lhs (X : U) (A : sto X U) (B : sap (to X) (lsto A (sap lk U)))
+    (f : sap (to X) (lsap (lto A) B)) (a : sap (to X) A) (x : X) :
+    sap (to X) (lsap B a)
+-- The body of LHS as a type
+lap-eq-lhs-test (X : U) (A : sto X U) (B : sap (to X) (lsto A (sap lk U)))
+    (f : sap (to X) (lsap (lto A) B)) (a : sap (to X) A) (x : X) :
+    U
+-- Now the eq of one ap term to itself (no coerce needed)
+lap-eq-refl (X : U) (A : sto X U) (B : sap (to X) (lsto A (sap lk U)))
+    (f : sap (to X) (lsap (lto A) B)) (a : sap (to X) A) (x : X) :
+    eq (ap (lap f a) x) (ap (lap f a) x)
+-- Now the FULL lap-eq type:
 lap-eq (X : U) (A : sto X U) (B : sap (to X) (lsto A (sap lk U)))
     (f : sap (to X) (lsap (lto A) B)) (a : sap (to X) A) (x : X) :
     eq (ap (lap f a) x)
