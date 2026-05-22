@@ -320,6 +320,34 @@ and evalApp = (env: evalEnv, fVal: mlValue, args: list(ml)): evalResult =>
     | Err(_) as e => e
     | Ok(argVal) => Ok(Val(mk(Ap(mk(Identifier("Error")), [termOf(argVal)]))))
     }
+  /* `print` — debug builtin: print the argument's term form to stdout
+     and return it unchanged. Useful for inspecting meta-language values
+     when tracing the conversion procedure. Two arg forms supported:
+     `(print x)` prints x and returns x; `(print label x)` prefixes a
+     label string. */
+  | (Val({value: Identifier("print"), _}), [arg]) =>
+    switch (evalExpr(env, arg)) {
+    | Err(_) as e => e
+    | Ok(argVal) =>
+      print_endline("[print] " ++ Print.printML(termOf(argVal)));
+      Ok(argVal);
+    }
+  | (Val({value: Identifier("print"), _}), [labelArg, arg]) =>
+    switch (evalExpr(env, labelArg)) {
+    | Err(_) as e => e
+    | Ok(labelVal) =>
+      switch (evalExpr(env, arg)) {
+      | Err(_) as e => e
+      | Ok(argVal) =>
+        let label =
+          switch (termOf(labelVal).value) {
+          | StringLit(s) => s
+          | _ => Print.printML(termOf(labelVal))
+          };
+        print_endline("[print] " ++ label ++ ": " ++ Print.printML(termOf(argVal)));
+        Ok(argVal);
+      }
+    }
   /* fst and snd — built-in pair projections */
   | (Val({value: Identifier("fst"), _}), [arg]) =>
     switch (evalExpr(env, arg)) {

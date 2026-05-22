@@ -785,6 +785,9 @@ let mlBuiltins: context =
       ("apply", Builtin("apply")),
       ("decompose", Builtin("decompose")),
       ("append", Builtin("append")),
+      /* `print` is a debug builtin: prints its argument and returns it.
+         Polymorphic — needs Builtin typing. */
+      ("print", Builtin("print")),
       /* Monomorphic builtins */
       ("true", ML(MBool)),
       ("false", ML(MBool)),
@@ -1965,6 +1968,19 @@ and inferExpr = (ctx: context, t: ml): staticInfo =>
     let ysInfo = checkExpr(ctx, xsTy, ysArg);
     setMlType(mergeInfos(xsInfo, ysInfo), xsTy);
 
+  | Ap({value: Identifier("print"), _}, [arg]) =>
+    /* print : a -> a. Logs via print_endline in Eval. Returns arg as-is. */
+    let argInfo = inferExpr(ctx, arg);
+    let argTy = getInferredMlType(argInfo);
+    setMlType(argInfo, argTy);
+
+  | Ap({value: Identifier("print"), _}, [labelArg, arg]) =>
+    /* `print label x` — same as `print x` but with a label prefix. */
+    let _labelInfo = inferExpr(ctx, labelArg);
+    let argInfo = inferExpr(ctx, arg);
+    let argTy = getInferredMlType(argInfo);
+    setMlType(argInfo, argTy);
+
   | Ap({value: Identifier("foldl"), _}, [fArg, initArg, listArg]) =>
     /* Custom typing for foldl: infer init and list types, check f for consistency */
     let initInfo = inferExpr(ctx, initArg);
@@ -2210,6 +2226,15 @@ and checkExpr = (ctx: context, expected: mlType, t: ml): staticInfo =>
     let (newCtx, patInfo) = checkPat(ctx, rhsTy, b.pat);
     let bodyInfo = checkExpr(newCtx, expected, body);
     mergeInfos(mergeInfos(exprInfo, patInfo), bodyInfo);
+
+  | Ap({value: Identifier("print"), _}, [arg]) =>
+    /* `print x` at a checking position: just check the arg against
+       expected. The runtime acts as identity, returning x unchanged. */
+    checkExpr(ctx, expected, arg);
+
+  | Ap({value: Identifier("print"), _}, [labelArg, arg]) =>
+    let _labelInfo = inferExpr(ctx, labelArg);
+    checkExpr(ctx, expected, arg);
 
   | Ap({value: Identifier("foldl"), _}, [fArg, initArg, listArg]) =>
     /* When we know the expected type, use it as initTy so that [] gets
@@ -2697,56 +2722,89 @@ let allDeclsComplete = (decls: list(decl)): bool =>
     decls,
   );
 
-/* Validate each tag-line in a postulate/construct block:
+/* Validate one tag-line:
    - tag must be in the tag namespace (newtag'd earlier)
    - target must be an OL binding in the current/outer scope
    On success, append the tag to `tagsByNameRef`. */
-let processTagLines = (ctx: context, lines: list(tagLine)): list(error) =>
-  List.concat_map(
-    (line: tagLine) => {
-      let tagOK = StringSet.mem(line.tag, tagNamespaceRef^);
-      let targetOK =
-        switch (StringMap.find_opt(line.target, ctx)) {
-        | Some(OL(_, _)) => true
-        | _ => false
-        };
-      switch (tagOK, targetOK) {
-      | (false, _) =>
-        [mark(
-          "Unknown tag #" ++ line.tag ++ " (introduce with `newtag #" ++ line.tag ++ "`)",
-          line.lineMeta.start, line.lineMeta.end_,
-        )]
-      | (_, false) =>
-        [mark(
-          "Unknown constructor `" ++ line.target ++ "`",
-          line.lineMeta.start, line.lineMeta.end_,
-        )]
-      | (true, true) =>
-        let existing =
-          switch (StringMap.find_opt(line.target, tagsByNameRef^)) {
-          | Some(ts) => ts
-          | None => []
-          };
-        if (List.mem(line.tag, existing)) {
-          [];
-        } else {
-          tagsByNameRef :=
-            StringMap.add(line.target, existing @ [line.tag], tagsByNameRef^);
-          [];
-        };
+let processTagLine = (ctx: context, line: tagLine): list(error) => {
+  let tagOK = StringSet.mem(line.tag, tagNamespaceRef^);
+  let targetOK =
+    switch (StringMap.find_opt(line.target, ctx)) {
+    | Some(OL(_, _)) => true
+    | _ => false
+    };
+  switch (tagOK, targetOK) {
+  | (false, _) =>
+    [mark(
+      "Unknown tag #" ++ line.tag ++ " (introduce with `newtag #" ++ line.tag ++ "`)",
+      line.lineMeta.start, line.lineMeta.end_,
+    )]
+  | (_, false) =>
+    [mark(
+      "Unknown constructor `" ++ line.target ++ "`",
+      line.lineMeta.start, line.lineMeta.end_,
+    )]
+  | (true, true) =>
+    let existing =
+      switch (StringMap.find_opt(line.target, tagsByNameRef^)) {
+      | Some(ts) => ts
+      | None => []
       };
-    },
-    lines,
+    if (List.mem(line.tag, existing)) {
+      [];
+    } else {
+      tagsByNameRef :=
+        StringMap.add(line.target, existing @ [line.tag], tagsByNameRef^);
+      [];
+    };
+  };
+};
+
+/* Interleave decls and tag lines in source order, processing each in
+   turn. This way a `#reduction foo` line takes effect on the context
+   immediately — subsequent decls in the same block see `foo` already
+   tagged. Otherwise a follow-up decl that elaborates by invoking a
+   coerce procedure would miss the reduction rule. */
+type blockItem =
+  | DeclItem(decl)
+  | TagItem(tagLine);
+
+let interleaveBlock = (decls: list(decl), lines: list(tagLine)): list(blockItem) => {
+  let declItems = List.map(d => (d.declMeta.start, DeclItem(d)), decls);
+  let tagItems = List.map((l: tagLine) => (l.lineMeta.start, TagItem(l)), lines);
+  let all = declItems @ tagItems;
+  let sorted = List.sort(((a, _), (b, _)) => compare(a, b), all);
+  List.map(((_, item)) => item, sorted);
+};
+
+let processBlockItems = (ctx: context, items: list(blockItem)): (staticInfo, context) =>
+  List.fold_left(
+    ((accInfo, accCtx), item) =>
+      switch (item) {
+      | DeclItem(d) =>
+        let lineInfo = checkDeclLine(accCtx, d);
+        let newCtx = mergeBindings(accCtx, lineInfo.bindings);
+        (mergeInfos(accInfo, lineInfo), newCtx);
+      | TagItem(line) =>
+        let errs = processTagLine(accCtx, line);
+        (withErrors(accInfo, errs), accCtx);
+      },
+    (emptyInfo, ctx),
+    items,
   );
 
 let checkBlock = (ctx: context, block: block): (staticInfo, context) =>
   switch (block) {
   | Postulate(blockMeta, decls, tagLines) =>
-    let (info, finalCtx) = checkDeclList(ctx, decls);
-    let tagErrs = processTagLines(finalCtx, tagLines);
+    /* Interleave decls and tag lines in source order so that an
+       earlier `#reduction foo` line takes effect on the context
+       BEFORE a later decl is type-checked. Otherwise a decl that
+       elaborates by invoking a coerce procedure misses any tag
+       added in the same block. */
+    let items = interleaveBlock(decls, tagLines);
+    let (info, finalCtx) = processBlockItems(ctx, items);
     let completeBlocks =
       allDeclsComplete(decls) ? [blockMeta] : [];
-    let info = withErrors(info, tagErrs);
     let info = {
       ...info,
       completeBlocks: info.completeBlocks @ completeBlocks,
@@ -2778,9 +2836,12 @@ let checkBlock = (ctx: context, block: block): (staticInfo, context) =>
     (withBindings(metaInfo, cleanCtx), cleanCtx);
 
   | Construct(schemaName, schemaMeta, blockMeta, decls, tagLines) =>
-    let (bodyInfo, finalCtx) = checkDeclList(ctx, decls);
+    /* As with Postulate, process decls and tag lines in source order so
+       intra-block tags are visible to later decls. */
+    let items = interleaveBlock(decls, tagLines);
+    let (bodyInfo, finalCtx) = processBlockItems(ctx, items);
     let witnessErrors = runConstructSchema(ctx, finalCtx, schemaName, schemaMeta, decls);
-    let tagErrs = processTagLines(finalCtx, tagLines);
+    let tagErrs = [];
     /* If the schema didn't run cleanly (not found, wrong arity, eval
        failure, etc.), every decl in the block fails completeness — the
        per-witness fold may not have even run. */
