@@ -1,5 +1,4 @@
 make:
-	cp -r ./content ./web/public
 	$(MAKE) reason
 	cd web && npm run dev
 
