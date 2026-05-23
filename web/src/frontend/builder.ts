@@ -4,7 +4,8 @@
 
 import type { SyntaxNode, Tree } from '@lezer/common'
 import type {
-  Meta, OL, ML, Pat, Decl, Param, Binding, MetaDef, Block, Program, MLType,
+  Meta, OL, ML, Pat, DeclLine, DeclArg, LetBinding, Binding, MetaDef, Block,
+  Program, MLType, OLLine, StringMeta, TagLine,
 } from './ast.ts'
 import { mkOL, mkML, mkPat, embedOL } from './ast.ts'
 
@@ -35,9 +36,18 @@ function firstChildByName(node: SyntaxNode, name: string): SyntaxNode | null {
 
 /* === OL building ===
    An OL term comes from a TypeExpr / TypeApp / TypeAtom / ParenInner /
-   AtomExpr context. We narrow the more general expression-tree to OL
-   shape (identifiers, application, holes) and replace anything we can't
-   represent with a synthesized hole. */
+   AtomExpr context. OL now has just two shapes — holes and applications
+   keyed by a bare identifier head; everything else degrades to a hole. */
+
+/* Extract the head identifier of an application as a StringMeta.
+   Built OL terms produced by `buildOL` are always zero-arg `OLAp` for
+   bare identifiers, so the head reuses that node's `f`. */
+function olToHead(t: OL, fallbackMeta: Meta): StringMeta {
+  if (t.value.kind === 'OLAp' && t.value.args.length === 0) {
+    return t.value.f
+  }
+  return { string: '_', meta: fallbackMeta }
+}
 
 export function buildOL(node: SyntaxNode, src: string): OL {
   const m = metaOf(node)
@@ -45,127 +55,114 @@ export function buildOL(node: SyntaxNode, src: string): OL {
     case 'TypeExpr':
     case 'TypeBinary': {
       const c = node.firstChild
-      if (!c) return mkOL({ kind: 'OLHole', hk: 'Synthesized' }, m)
+      if (!c) return mkOL({ kind: 'OLHole' }, m)
       // Single-child wrapper
       if (!c.nextSibling) return buildOL(c, src)
       // For arrow types, etc., we currently degrade to a synthesized hole.
       // The semantics of arrow types in OL position is rare; revisit when
       // examples need it.
-      return mkOL({ kind: 'OLHole', hk: 'Synthesized' }, m)
+      return mkOL({ kind: 'OLHole' }, m)
     }
     case 'TypeApp': {
       const cs = children(node)
-      if (cs.length === 0) return mkOL({ kind: 'OLHole', hk: 'Synthesized' }, m)
-      const head = buildOL(cs[0], src)
+      if (cs.length === 0) return mkOL({ kind: 'OLHole' }, m)
+      const headOL = buildOL(cs[0], src)
+      const f = olToHead(headOL, metaOf(cs[0]))
       const args = cs.slice(1).map(c => buildOL(c, src))
-      return mkOL({ kind: 'OLAp', f: head, args }, m)
+      return mkOL({ kind: 'OLAp', f, args }, m)
     }
     case 'TypeAtom':
     case 'AtomExpr':
     case 'ParenInner': {
       const c = node.firstChild
-      if (!c) return mkOL({ kind: 'OLHole', hk: 'Synthesized' }, m)
+      if (!c) return mkOL({ kind: 'OLHole' }, m)
       if (c.name === 'LParen' || c.name === 'LBracket') {
         // Parenthesized — recurse into the inner expr (skip LParen/RParen).
-        // ParenExpr children: LParen, CommaSep<Expr>?, RParen
-        // For OL, we ignore tuples and just take the first inner expr.
         const inner = c.nextSibling
         if (!inner || inner.name === 'RParen' || inner.name === 'RBracket') {
-          return mkOL({ kind: 'OLHole', hk: 'Synthesized' }, m)
+          return mkOL({ kind: 'OLHole' }, m)
         }
         const result = buildOL(inner, src)
-        // A parenthesized BARE identifier is lifted to a zero-arg OLAp.
-        // This preserves the identifier's natural source range on the
-        // head (so inlay-hint anchors sit next to the identifier even
-        // when there's whitespace inside the parens), while letting the
-        // outer OLAp's range cover the parens for diagnostics. The
-        // OLAp's parens flag drives printer round-trip.
-        if (result.value.kind === 'OLIdentifier') {
-          return {
-            value: { kind: 'OLAp', f: result, args: [] },
-            meta: { ...m, parens: true },
-          }
+        // Record parens; extend start/end to cover them.
+        return {
+          ...result,
+          meta: { ...result.meta, parens: true, start: m.start, end: m.end },
         }
-        // Other forms (already-an-OLAp, OLHole, …) get parens recorded
-        // and start/end extended to cover the parens.
-        return { ...result, meta: { ...result.meta, parens: true, start: m.start, end: m.end } }
       }
       return buildOL(c, src)
     }
-    case 'Identifier':
-      return mkOL({ kind: 'OLIdentifier', name: text(node, src) }, m)
+    case 'Identifier': {
+      // Bare identifiers become zero-arg OLAp so every applied form goes
+      // through one shape. The StringMeta carries the identifier's own
+      // range; the outer OLAp's meta initially matches it.
+      const f: StringMeta = { string: text(node, src), meta: m }
+      return mkOL({ kind: 'OLAp', f, args: [] }, m)
+    }
     case 'Hole':
-      return mkOL({ kind: 'OLHole', hk: 'User' }, m)
     case 'Auto':
-      return mkOL({ kind: 'OLHole', hk: 'Auto' }, m)
     case 'Wildcard':
-      return mkOL({ kind: 'OLHole', hk: 'User' }, m)  // Wildcard in OL → hole
+      return mkOL({ kind: 'OLHole' }, m)
     case 'AppInner': {
       const cs = children(node)
-      if (cs.length === 0) return mkOL({ kind: 'OLHole', hk: 'Synthesized' }, m)
-      const head = buildOL(cs[0], src)
+      if (cs.length === 0) return mkOL({ kind: 'OLHole' }, m)
+      const headOL = buildOL(cs[0], src)
+      const f = olToHead(headOL, metaOf(cs[0]))
       const args = cs.slice(1).map(c => buildOL(c, src))
-      return mkOL({ kind: 'OLAp', f: head, args }, m)
+      return mkOL({ kind: 'OLAp', f, args }, m)
     }
-    case 'CommaSep':
+    case 'CommaSep': {
       // Single element passes through; multiple = tuple, not representable in OL.
       const first = node.firstChild
-      if (!first) return mkOL({ kind: 'OLHole', hk: 'Synthesized' }, m)
+      if (!first) return mkOL({ kind: 'OLHole' }, m)
       return buildOL(first, src)
+    }
     default:
-      return mkOL({ kind: 'OLHole', hk: 'Synthesized' }, m)
+      return mkOL({ kind: 'OLHole' }, m)
   }
 }
 
-/* === Param and Decl === */
+/* === Decl building === */
 
-function buildParams(node: SyntaxNode, src: string): Param[] {
+function buildDeclArgs(node: SyntaxNode, src: string): DeclArg[] {
   // Param { LParen Identifier+ ":" TypeExpr RParen }
-  // A grouped form like `(l1 l2 : level)` expands into multiple Param
-  // records, each sharing the same paramType — semantically equivalent
-  // to `(l1 : level) (l2 : level)`. paramMeta points at the whole
-  // group so go-to-def / inlay anchors look reasonable; nameMeta is
-  // per-identifier so clicking on `l1` jumps to `l1`.
+  // A grouped form like `(l1 l2 : level)` expands into multiple DeclArg
+  // records, each sharing the same declArgType.
   const ids = childrenByName(node, 'Identifier')
   const ty = firstChildByName(node, 'TypeExpr')
-  const paramType = ty ? buildOL(ty, src) : mkOL({ kind: 'OLHole', hk: 'Synthesized' })
+  const declArgType = ty ? buildOL(ty, src) : mkOL({ kind: 'OLHole' })
   const groupMeta = metaOf(node)
   if (ids.length === 0) {
     return [{
-      paramName: '_',
-      paramType,
-      paramMeta: groupMeta,
-      nameMeta: groupMeta,
+      declArgName: { string: '_', meta: groupMeta },
+      declArgType,
+      declArgMeta: groupMeta,
     }]
   }
   return ids.map(id => ({
-    paramName: text(id, src),
-    paramType,
-    paramMeta: groupMeta,
-    nameMeta: metaOf(id),
+    declArgName: { string: text(id, src), meta: metaOf(id) },
+    declArgType,
+    declArgMeta: groupMeta,
   }))
 }
 
-function buildDecl(node: SyntaxNode, src: string): Decl {
+function buildDeclLine(node: SyntaxNode, src: string): DeclLine {
   // Decl { ItemHead (":" TypeExpr)? }
   // ItemHead { Identifier Param* | LParen Identifier Param* RParen }
   const head = firstChildByName(node, 'ItemHead')
   const ty = firstChildByName(node, 'TypeExpr')
-  let name = '_'
-  let params: Param[] = []
-  let nameMeta: Meta = metaOf(node)
+  let declName: StringMeta = { string: '_', meta: metaOf(node) }
+  let args: DeclArg[] = []
   if (head) {
     const hid = firstChildByName(head, 'Identifier')
     if (hid) {
-      name = text(hid, src)
-      nameMeta = metaOf(hid)
+      declName = { string: text(hid, src), meta: metaOf(hid) }
     }
-    params = childrenByName(head, 'Param').flatMap(p => buildParams(p, src))
+    args = childrenByName(head, 'Param').flatMap(p => buildDeclArgs(p, src))
   }
   const retType = ty
     ? buildOL(ty, src)
-    : mkOL({ kind: 'OLHole', hk: 'Synthesized' })
-  return { declName: name, params, retType, declMeta: metaOf(node), nameMeta }
+    : mkOL({ kind: 'OLHole' })
+  return { declName, args, retType, declMeta: metaOf(node) }
 }
 
 /* === Pattern building === */
@@ -175,7 +172,7 @@ export function buildPat(node: SyntaxNode, src: string): Pat {
   switch (node.name) {
     case 'Pattern': {
       const c = node.firstChild
-      if (!c) return mkPat({ kind: 'PHole' }, m)
+      if (!c) return mkPat({ kind: 'PWildcard' }, m)
       return buildPat(c, src)
     }
     case 'PatBinary': {
@@ -184,18 +181,21 @@ export function buildPat(node: SyntaxNode, src: string): Pat {
       if (cs.length >= 2) {
         return mkPat({ kind: 'PCons', head: buildPat(cs[0], src), tail: buildPat(cs[1], src) }, m)
       }
-      return mkPat({ kind: 'PHole' }, m)
+      return mkPat({ kind: 'PWildcard' }, m)
     }
     case 'PatApp': {
+      // Head must be a bare identifier (the OL constructor name);
+      // everything else degrades to a wildcard.
       const cs = children(node)
-      if (cs.length === 0) return mkPat({ kind: 'PHole' }, m)
-      const head = buildPat(cs[0], src)
+      if (cs.length === 0) return mkPat({ kind: 'PWildcard' }, m)
+      const headNode = cs[0]
+      const headName = headNode.name === 'Identifier' ? text(headNode, src) : '_'
       const args = cs.slice(1).map(c => buildPat(c, src))
-      return mkPat({ kind: 'PAp', head, args }, m)
+      return mkPat({ kind: 'POLAp', head: headName, args }, m)
     }
     case 'PatAtom': {
       const c = node.firstChild
-      if (!c) return mkPat({ kind: 'PHole' }, m)
+      if (!c) return mkPat({ kind: 'PWildcard' }, m)
       if (c.name === 'LParen') return buildPatParens(node, src, m)
       if (c.name === 'LBracket') return buildPatList(node, src, m)
       return buildPat(c, src)
@@ -203,15 +203,14 @@ export function buildPat(node: SyntaxNode, src: string): Pat {
     case 'Identifier':
       return mkPat({ kind: 'PVar', name: text(node, src) }, m)
     case 'Wildcard':
-      return mkPat({ kind: 'PWildcard' }, m)
     case 'Hole':
-      return mkPat({ kind: 'PHole' }, m)
+      return mkPat({ kind: 'PWildcard' }, m)
     case 'StringLit': {
       const raw = text(node, src)
       return mkPat({ kind: 'PString', value: raw.slice(1, -1) }, m)
     }
     default:
-      return mkPat({ kind: 'PHole' }, m)
+      return mkPat({ kind: 'PWildcard' }, m)
   }
 }
 
@@ -249,7 +248,7 @@ export function buildML(node: SyntaxNode, src: string): ML {
     case 'Expr':
     case 'ExprNoEq': {
       const c = node.firstChild
-      if (!c) return mkML({ kind: 'Hole', hk: 'Synthesized' }, m)
+      if (!c) return mkML({ kind: 'Hole' }, m)
       return buildML(c, src)
     }
     case 'BinaryExpr':
@@ -258,12 +257,12 @@ export function buildML(node: SyntaxNode, src: string): ML {
       return buildBinary(node, src)
     case 'TopExpr': {
       const c = node.firstChild
-      if (!c) return mkML({ kind: 'Hole', hk: 'Synthesized' }, m)
+      if (!c) return mkML({ kind: 'Hole' }, m)
       return buildML(c, src)
     }
     case 'AppInner': {
       const cs = children(node)
-      if (cs.length === 0) return mkML({ kind: 'Hole', hk: 'Synthesized' }, m)
+      if (cs.length === 0) return mkML({ kind: 'Hole' }, m)
       const head = buildML(cs[0], src)
       const args = cs.slice(1).map(c => buildML(c, src))
       return mkML({ kind: 'Ap', f: head, args }, m)
@@ -271,7 +270,7 @@ export function buildML(node: SyntaxNode, src: string): ML {
     case 'AtomExpr':
     case 'ParenInner': {
       const c = node.firstChild
-      if (!c) return mkML({ kind: 'Hole', hk: 'Synthesized' }, m)
+      if (!c) return mkML({ kind: 'Hole' }, m)
       if (c.name === 'LParen') return buildParenExpr(node, src, m)
       if (c.name === 'LBracket') return buildListExpr(node, src, m)
       return buildML(c, src)
@@ -279,10 +278,8 @@ export function buildML(node: SyntaxNode, src: string): ML {
     case 'Identifier':
       return mkML({ kind: 'Identifier', name: text(node, src) }, m)
     case 'Hole':
-      return mkML({ kind: 'Hole', hk: 'User' }, m)
     case 'Wildcard':
-      // _ in ML expression position — treated as a hole
-      return mkML({ kind: 'Hole', hk: 'User' }, m)
+      return mkML({ kind: 'Hole' }, m)
     case 'StringLit': {
       const raw = text(node, src)
       return mkML({ kind: 'StringLit', value: raw.slice(1, -1) }, m)
@@ -308,7 +305,7 @@ export function buildML(node: SyntaxNode, src: string): ML {
       // sans control flow.
       return embedOL(buildOL(node, src))
     default:
-      return mkML({ kind: 'Hole', hk: 'Synthesized' }, m)
+      return mkML({ kind: 'Hole' }, m)
   }
 }
 
@@ -316,7 +313,7 @@ function buildBinary(node: SyntaxNode, src: string): ML {
   const cs = children(node)
   // Find the operator child (a literal token). Children layout:
   //   Expr <op> Expr
-  if (cs.length < 3) return mkML({ kind: 'Hole', hk: 'Synthesized' }, metaOf(node))
+  if (cs.length < 3) return mkML({ kind: 'Hole' }, metaOf(node))
   const left = buildML(cs[0], src)
   const opNode = cs[1]
   const right = buildML(cs[2], src)
@@ -324,7 +321,6 @@ function buildBinary(node: SyntaxNode, src: string): ML {
   const m = metaOf(node)
   switch (opText) {
     case '->':
-      // Build as Ap(Identifier "->", [left, right]) — Print.printML round-trips
       return mkML({
         kind: 'Ap',
         f: mkML({ kind: 'Identifier', name: '->' }),
@@ -337,7 +333,11 @@ function buildBinary(node: SyntaxNode, src: string): ML {
         args: [left, right],
       }, m)
     case ':':
-      return mkML({ kind: 'Asc', expr: left, type: right }, m)
+      // Ascription is no longer a first-class ML form; the type
+      // annotation gets dropped here. Annotations on let/meta-def
+      // bindings are still captured separately via the binding's
+      // `rawAnnotation`.
+      return { ...left, meta: { ...left.meta, start: m.start, end: m.end } }
     case '::':
       return mkML({ kind: 'Cons', head: left, tail: right }, m)
     case '==':
@@ -349,12 +349,11 @@ function buildBinary(node: SyntaxNode, src: string): ML {
     case '||':
       return mkML({ kind: 'BinOp', op: 'Or', left, right }, m)
     default:
-      return mkML({ kind: 'Hole', hk: 'Synthesized' }, m)
+      return mkML({ kind: 'Hole' }, m)
   }
 }
 
 function buildParenExpr(node: SyntaxNode, src: string, m: Meta): ML {
-  // (CommaSep<ParenInner>)?
   const commaSep = firstChildByName(node, 'CommaSep')
   const items: ML[] = []
   if (commaSep) {
@@ -390,11 +389,10 @@ const isExprNode = (c: SyntaxNode) => c.name === 'Expr' || c.name === 'TopExpr'
 
 function buildFun(node: SyntaxNode, src: string, m: Meta): ML {
   const params = childrenByName(node, 'Pattern').map(p => buildPat(p, src))
-  // The body is the last Expr/TopExpr child (after the => token)
   const exprs = children(node).filter(isExprNode)
   const body = exprs.length > 0
     ? buildML(exprs[exprs.length - 1], src)
-    : mkML({ kind: 'Hole', hk: 'Synthesized' })
+    : mkML({ kind: 'Hole' })
   return mkML({ kind: 'Fun', params, body }, m)
 }
 
@@ -402,7 +400,7 @@ function buildMatch(node: SyntaxNode, src: string, m: Meta): ML {
   const exprs = children(node).filter(isExprNode)
   const scrut = exprs.length > 0
     ? buildML(exprs[0], src)
-    : mkML({ kind: 'Hole', hk: 'Synthesized' })
+    : mkML({ kind: 'Hole' })
   const arms: { pat: Pat; body: ML }[] = []
   for (const arm of childrenByName(node, 'MatchArm')) {
     const pat = firstChildByName(arm, 'Pattern')
@@ -411,7 +409,7 @@ function buildMatch(node: SyntaxNode, src: string, m: Meta): ML {
       pat: pat ? buildPat(pat, src) : mkPat({ kind: 'PWildcard' }),
       body: armExprs.length > 0
         ? buildML(armExprs[0], src)
-        : mkML({ kind: 'Hole', hk: 'Synthesized' }),
+        : mkML({ kind: 'Hole' }),
     })
   }
   return mkML({ kind: 'Match', scrut, arms }, m)
@@ -420,7 +418,7 @@ function buildMatch(node: SyntaxNode, src: string, m: Meta): ML {
 function buildIf(node: SyntaxNode, src: string, m: Meta): ML {
   const exprs = children(node).filter(isExprNode)
   const get = (i: number): ML =>
-    exprs[i] ? buildML(exprs[i], src) : mkML({ kind: 'Hole', hk: 'Synthesized' })
+    exprs[i] ? buildML(exprs[i], src) : mkML({ kind: 'Hole' })
   return mkML({ kind: 'If', cond: get(0), then_: get(1), else_: get(2) }, m)
 }
 
@@ -428,31 +426,29 @@ function buildLet(node: SyntaxNode, src: string, m: Meta): ML {
   // Let { Let_kw Pattern (":" Expr)? "=" TopExpr In_kw TopExpr }
   const patNode = firstChildByName(node, 'Pattern')
   const exprs = children(node).filter(isExprNode)
-  // Heuristic: if 3 exprs, the first is annotation, second is rhs, third is body.
-  // If 2 exprs, no annotation: first is rhs, second is body.
-  let annotation: MLType | null = null
+  const annotation: MLType | null = null
   let rawAnnotation: ML | null = null
-  let rhs: ML
+  let definition: ML
   let body: ML
   if (exprs.length === 3) {
     rawAnnotation = buildML(exprs[0], src)
-    rhs = buildML(exprs[1], src)
+    definition = buildML(exprs[1], src)
     body = buildML(exprs[2], src)
   } else if (exprs.length === 2) {
-    rhs = buildML(exprs[0], src)
+    definition = buildML(exprs[0], src)
     body = buildML(exprs[1], src)
   } else {
-    rhs = mkML({ kind: 'Hole', hk: 'Synthesized' })
-    body = mkML({ kind: 'Hole', hk: 'Synthesized' })
+    definition = mkML({ kind: 'Hole' })
+    body = mkML({ kind: 'Hole' })
   }
   const pat: Pat = patNode
     ? buildPat(patNode, src)
     : mkPat({ kind: 'PVar', name: '_' })
-  const binding: Binding = {
+  const binding: LetBinding = {
     pat,
     annotation,
     rawAnnotation,
-    rhs,
+    definition,
     bindingMeta: metaOf(node),
   }
   return mkML({ kind: 'Let', binding, body }, m)
@@ -466,9 +462,6 @@ function buildMetaDef(node: SyntaxNode, src: string): MetaDef {
   const isNewtag = !!firstChildByName(node, 'Newtag_kw')
   if (isNewtag) {
     const tagNode = firstChildByName(node, 'Tag')
-    /* The `#` prefix is part of the lexeme; strip it for the tag's
-       canonical name (we display tags with `#` in the IDE and meta-
-       language but store the bare identifier internally). */
     const lexeme = tagNode ? text(tagNode, src) : '#_'
     const tag = lexeme.startsWith('#') ? lexeme.slice(1) : lexeme
     return { kind: 'NewtagDef', tag, defMeta: metaOf(node) }
@@ -478,35 +471,43 @@ function buildMetaDef(node: SyntaxNode, src: string): MetaDef {
   const id = firstChildByName(node, 'Identifier')
   const exprs = children(node).filter(c => c.name === 'Expr')
   let rawAnnotation: ML | null = null
-  let rhs: ML
+  let definition: ML
   if (exprs.length === 2) {
     rawAnnotation = buildML(exprs[0], src)
-    rhs = buildML(exprs[1], src)
+    definition = buildML(exprs[1], src)
   } else if (exprs.length === 1) {
-    rhs = buildML(exprs[0], src)
+    definition = buildML(exprs[0], src)
   } else {
-    rhs = mkML({ kind: 'Hole', hk: 'Synthesized' })
+    definition = mkML({ kind: 'Hole' })
   }
   const name = id ? text(id, src) : '_'
+  if (isSchema || isCoerce) {
+    const binding: Binding = {
+      pat: name,
+      annotation: null,
+      rawAnnotation,
+      definition,
+      bindingMeta: metaOf(node),
+    }
+    return isSchema
+      ? { kind: 'SchemaDef', binding }
+      : { kind: 'CoerceDef', binding }
+  }
   const pat: Pat = id
     ? mkPat({ kind: 'PVar', name }, metaOf(id))
     : mkPat({ kind: 'PVar', name })
-  const binding: Binding = {
+  const binding: LetBinding = {
     pat,
     annotation: null,
     rawAnnotation,
-    rhs,
+    definition,
     bindingMeta: metaOf(node),
   }
-  if (isSchema) return { kind: 'SchemaDef', binding }
-  if (isCoerce) return { kind: 'CoerceDef', binding }
   return { kind: 'LetDef', binding }
 }
 
-/* Read a `Tag Identifier Terminator` line: e.g. `#reduction abs-ident-eq`.
-   Returns the bare tag name (without `#`), the targeted constructor
-   name, and the source meta for diagnostics. */
-function buildTagLine(node: SyntaxNode, src: string): { tag: string; target: string; lineMeta: Meta } {
+/* Read a `Tag Identifier Terminator` line: e.g. `#reduction abs-ident-eq`. */
+function buildTagLine(node: SyntaxNode, src: string): TagLine {
   const tagNode = firstChildByName(node, 'Tag')
   const idNode = firstChildByName(node, 'Identifier')
   const lex = tagNode ? text(tagNode, src) : '#_'
@@ -517,33 +518,42 @@ function buildTagLine(node: SyntaxNode, src: string): { tag: string; target: str
   }
 }
 
+/* Walk a postulate/construct block's children once, collecting Decl and
+   TagLine entries into a single `lines` array in source order. */
+function buildOLLines(node: SyntaxNode, src: string): OLLine[] {
+  const lines: OLLine[] = []
+  for (const c of children(node)) {
+    if (c.name === 'PostItem') {
+      const decl = firstChildByName(c, 'Decl')
+      if (decl) lines.push({ kind: 'Decl', ...buildDeclLine(decl, src) })
+    } else if (c.name === 'Decl') {
+      lines.push({ kind: 'Decl', ...buildDeclLine(c, src) })
+    } else if (c.name === 'TagLine') {
+      lines.push({ kind: 'Tag', ...buildTagLine(c, src) })
+    }
+  }
+  return lines
+}
+
 function buildBlock(node: SyntaxNode, src: string): Block | null {
   switch (node.name) {
-    case 'Postulate': {
-      // Grammar allows an optional file-final bare `Decl` (no trailing
-      // Terminator) after the run of PostItems — collect both forms.
-      const items = childrenByName(node, 'PostItem')
-        .map(p => firstChildByName(p, 'Decl'))
-      const tail = childrenByName(node, 'Decl')
-      const decls = [...items, ...tail]
-        .filter((d): d is SyntaxNode => d !== null)
-        .map(d => buildDecl(d, src))
-      const tagLines = childrenByName(node, 'TagLine').map(t => buildTagLine(t, src))
-      return { kind: 'Postulate', blockMeta: metaOf(node), decls, tagLines }
-    }
+    case 'Postulate':
+      return {
+        kind: 'Postulate',
+        postulateMeta: metaOf(node),
+        lines: buildOLLines(node, src),
+      }
     case 'Construct': {
       // First Identifier child is the schema name
       const id = firstChildByName(node, 'Identifier')
       const schema = id ? text(id, src) : '_'
       const schemaMeta = id ? metaOf(id) : metaOf(node)
-      const items = childrenByName(node, 'PostItem')
-        .map(p => firstChildByName(p, 'Decl'))
-      const tail = childrenByName(node, 'Decl')
-      const decls = [...items, ...tail]
-        .filter((d): d is SyntaxNode => d !== null)
-        .map(d => buildDecl(d, src))
-      const tagLines = childrenByName(node, 'TagLine').map(t => buildTagLine(t, src))
-      return { kind: 'Construct', schema, schemaMeta, blockMeta: metaOf(node), decls, tagLines }
+      return {
+        kind: 'Construct',
+        schema,
+        schemaMeta,
+        lines: buildOLLines(node, src),
+      }
     }
     case 'Meta': {
       const defs = childrenByName(node, 'MetaItem').map(m => buildMetaDef(m, src))

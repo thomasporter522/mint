@@ -24,18 +24,22 @@ import type { holeInfo } from './reason-bridge.ts'
 
 /* ml AST TAG values from `type cML` declaration in Term.re — match the
    Melange variant tag order. Stable as long as the Reason enum doesn't
-   get reordered. */
+   get reordered. Nullary variants (`Hole`) get integer values, not block
+   tags; for those we test `v === 0` directly instead of `v.TAG === …`. */
 const TAG = {
-  Hole: 0,
+  Meta: 0,
   Identifier: 1,
-  StringLit: 2,
-  TagLit: 3,
-  Tuple: 4,
-  Asc: 5,
+  Ap: 2,
+  StringLit: 3,
+  TagLit: 4,
+  Tuple: 5,
   BinOp: 6,
-  Ap: 7,
-  List: 8,
-  Cons: 9,
+  List: 7,
+  Cons: 8,
+  Fun: 9,
+  Match: 10,
+  If: 11,
+  Let: 12,
 } as const
 
 type MlNode = { value: any; meta: any }
@@ -64,6 +68,8 @@ function mlListToArray<T>(cons: any): T[] {
    not native binders). */
 function mlToIRTerm(t: MlNode): IRTerm {
   const v = t.value
+  // Nullary `Hole` is encoded as the integer 0 (falsy), not a block —
+  // treated the same as a missing value.
   if (!v) return { params: [], lets: [], spine: { head: '?', args: [] } }
   if (v.TAG === TAG.Identifier) {
     return { params: [], lets: [], spine: { head: v._0, args: [] } }
@@ -78,62 +84,15 @@ function mlToIRTerm(t: MlNode): IRTerm {
       spine: { head: headName, args: args.map(mlToIRTerm) },
     }
   }
-  if (v.TAG === TAG.Hole) {
-    return { params: [], lets: [], spine: { head: '?', args: [] } }
-  }
-  if (v.TAG === TAG.Asc) {
-    // strip ascription, take the spine
-    return mlToIRTerm(v._0)
-  }
   return { params: [], lets: [], spine: { head: '?', args: [] } }
 }
 
-/* The display form of a context binding is one of:
-     atomic:    Asc(Id(name), retType)
-     function:  Asc(Ap(Id(name), [Asc(pname, pty), ...]), retType)
-   We deconstruct it into (paramSpecs, retType). */
-type ParamSpec = { name: string; ty: MlNode }
-function decomposeBinding(t: MlNode): { params: ParamSpec[]; ret: MlNode } | null {
-  if (!t.value || t.value.TAG !== TAG.Asc) return null
-  const lhs = t.value._0
-  const ret = t.value._1
-  if (lhs.value && lhs.value.TAG === TAG.Identifier) {
-    return { params: [], ret }
-  }
-  if (lhs.value && lhs.value.TAG === TAG.Ap) {
-    const args = mlListToArray<MlNode>(lhs.value._1)
-    const params: ParamSpec[] = []
-    for (const a of args) {
-      if (a.value && a.value.TAG === TAG.Asc && a.value._0.value?.TAG === TAG.Identifier) {
-        params.push({ name: a.value._0.value._0, ty: a.value._1 })
-      } else {
-        params.push({ name: '_', ty: a })
-      }
-    }
-    return { params, ret }
-  }
-  return null
-}
-
-/* A context binding's type as an IRType.  We treat retType `sort` as
-   a kind — Canonical encodes that with `null` in the params slot of
-   the enclosing IRType. */
-function bindingToIRType(t: MlNode): IRType | null {
-  const dec = decomposeBinding(t)
-  if (!dec) return null
-  // Each param's type → IRType (recursively).
-  const paramTypes = dec.params.map((p) => paramTypeToIRType(p.ty))
-  const paramVars: IRVar[] = dec.params.map((p) => ({ name: p.name }))
-  return {
-    params: paramTypes,
-    lets: [],
-    codomain: {
-      params: paramVars,
-      lets: [],
-      spine: spineOf(dec.ret),
-    },
-  }
-}
+/* Context bindings used to come in via Asc-wrapped ml terms; with Asc
+   removed from cML this path is gone. Auto-hole context entries now
+   need to arrive in the same 4-tuple signature shape that
+   `buildIRFromSignatures` already consumes — keep that path as the
+   single source of truth. Until Check.re's new context shape lands,
+   `buildIRProblem` produces an empty-context problem. */
 
 /* Convert a type-expression (an ml term in a type slot) into an
    IRType wrapping it.  Atomic spines become IRType with no params and
@@ -170,25 +129,15 @@ function typeHasHole(t: IRType | null): boolean {
   return t.params.some(typeHasHole)
 }
 
-/* Build the outer IRType problem from an auto-hole.  Each context
-   entry becomes a (typed) param of the outer Π; the goal becomes
-   the codomain spine.  Bindings that don't fully translate (e.g. the
-   in-progress self-reference whose retType still mentions `⟐`) are
-   dropped so Canonical sees a clean problem. */
+/* Build the outer IRType problem from an auto-hole. Pending kernel
+   updates that fix the new context shape, every context entry is
+   dropped and the problem reduces to the goal codomain. */
 export function buildIRProblem(info: holeInfo): IRType {
-  const params: (IRType | null)[] = []
-  const paramVars: IRVar[] = []
-  for (const [name, term] of info.context as unknown as Map<string, MlNode>) {
-    const ty = bindingToIRType(term)
-    if (ty != null && typeHasHole(ty)) continue
-    params.push(ty)
-    paramVars.push({ name })
-  }
   return {
-    params,
+    params: [],
     lets: [],
     codomain: {
-      params: paramVars,
+      params: [],
       lets: [],
       spine: spineOf(info.goal as unknown as MlNode),
     },

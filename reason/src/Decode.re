@@ -9,8 +9,6 @@ open Term;
 type jsObj;
 
 [@mel.send] external getString: (jsObj, string) => string = "get";
-/* Use Js.Dict-style accessors on the dynamic JS object. Unsafe casts
-   are fine here — the contract is enforced by ast.ts on the TS side. */
 
 external _coerce: 'a => jsObj = "%identity";
 external _untag: jsObj => Obj.t = "%identity";
@@ -25,38 +23,17 @@ external _untag: jsObj => Obj.t = "%identity";
 
 let getKind = (j: jsObj): string => _str(j, "kind");
 
-let getMeta = (j: jsObj): meta => {
-  let m = _obj(j, "meta");
-  {parens: _bool(m, "parens"), start: _int(m, "start"), end_: _int(m, "end"), ghost: None};
-};
-
-let getBindingMeta = (j: jsObj): meta => {
-  let m = _obj(j, "bindingMeta");
-  {parens: _bool(m, "parens"), start: _int(m, "start"), end_: _int(m, "end"), ghost: None};
-};
-
-let getDeclMeta = (j: jsObj): meta => {
-  let m = _obj(j, "declMeta");
-  {parens: _bool(m, "parens"), start: _int(m, "start"), end_: _int(m, "end"), ghost: None};
-};
-
-let getParamMeta = (j: jsObj): meta => {
-  let m = _obj(j, "paramMeta");
-  {parens: _bool(m, "parens"), start: _int(m, "start"), end_: _int(m, "end"), ghost: None};
-};
-
-let getNameMeta = (j: jsObj): meta => {
-  let m = _obj(j, "nameMeta");
-  {parens: _bool(m, "parens"), start: _int(m, "start"), end_: _int(m, "end"), ghost: None};
-};
-
-let decodeHoleKind = (s: string): holeKind =>
-  switch (s) {
-  | "User" => User
-  | "Synthesized" => Synthesized
-  | "Auto" => Auto
-  | _ => Synthesized
+let readMetaField = (j: jsObj, key: string): meta => {
+  let m = _obj(j, key);
+  {
+    parens: _bool(m, "parens"),
+    start: _int(m, "start"),
+    end_: _int(m, "end"),
+    ghost: None,
   };
+};
+
+let getMeta = (j: jsObj): meta => readMetaField(j, "meta");
 
 let decodeBinOp = (s: string): binOp =>
   switch (s) {
@@ -67,6 +44,11 @@ let decodeBinOp = (s: string): binOp =>
   | _ => Eq
   };
 
+let decodeStringMeta = (j: jsObj): stringMeta => {
+  string: _str(j, "string"),
+  meta: getMeta(j),
+};
+
 /* === OL === */
 
 let rec decodeOL = (j: jsObj): ol => {
@@ -75,44 +57,64 @@ let rec decodeOL = (j: jsObj): ol => {
   let kind = getKind(v);
   let value =
     switch (kind) {
-    | "OLIdentifier" => OLIdentifier(_str(v, "name"))
-    | "OLHole" => OLHole(decodeHoleKind(_str(v, "hk")))
+    | "OLHole" => OLHole
     | "OLAp" =>
-      let f = decodeOL(_obj(v, "f"));
+      let f = decodeStringMeta(_obj(v, "f"));
       let args = Array.map(decodeOL, _arr(v, "args")) |> Array.to_list;
       OLAp(f, args);
-    | _ => OLHole(Synthesized)
+    | _ => OLHole
     };
   {value, meta};
 };
 
-let decodeParam = (j: jsObj): param => {
-  paramName: _str(j, "paramName"),
-  paramType: decodeOL(_obj(j, "paramType")),
-  paramMeta: getParamMeta(j),
-  nameMeta: getNameMeta(j),
+let decodeDeclArg = (j: jsObj): declArg => {
+  declArgName: decodeStringMeta(_obj(j, "declArgName")),
+  declArgType: decodeOL(_obj(j, "declArgType")),
+  declArgMeta: readMetaField(j, "declArgMeta"),
 };
 
-let decodeDecl = (j: jsObj): decl => {
-  declName: _str(j, "declName"),
-  params: Array.map(decodeParam, _arr(j, "params")) |> Array.to_list,
+let decodeDeclLine = (j: jsObj): declLine => {
+  declName: decodeStringMeta(_obj(j, "declName")),
+  args: Array.map(decodeDeclArg, _arr(j, "args")) |> Array.to_list,
   retType: decodeOL(_obj(j, "retType")),
-  declMeta: getDeclMeta(j),
-  nameMeta: getNameMeta(j),
+  declMeta: readMetaField(j, "declMeta"),
+};
+
+let decodeTagLine = (j: jsObj): tagLine => {
+  tag: _str(j, "tag"),
+  target: _str(j, "target"),
+  lineMeta: readMetaField(j, "lineMeta"),
+};
+
+let decodeOLLine = (j: jsObj): olLine => {
+  let kind = getKind(j);
+  switch (kind) {
+  | "Tag" => Tag(decodeTagLine(j))
+  | _ => Decl(decodeDeclLine(j))
+  };
 };
 
 /* === ML types ===
    `mlToType` converts an ml expression (the raw annotation parsed as a
-   regular expression) into the structured `mlType` if recognized. */
+   regular expression) into the structured `mlType` if recognized. OL
+   term types are represented as `MOLTerm(ol)`; when an annotation slot
+   was previously the bare `MTerm`, we now stand in an OL hole. */
 
 let rec mlToType = (t: ml): option(mlType) =>
   switch (t.value) {
-  | Identifier("Term") => Some(MTerm)
   | Identifier("Bool") => Some(MBool)
   | Identifier("String") => Some(MString)
   | Identifier("Tag") => Some(MTag)
   | Identifier("Signature") =>
-    Some(MTuple([MTerm, MList(MTuple([MTerm, MTerm])), MTerm, MList(MTag)]))
+    let oh = mkOL(OLHole);
+    Some(
+      MTuple([
+        MOLTerm(oh),
+        MList(MTuple([MOLTerm(oh), MOLTerm(oh)])),
+        MOLTerm(oh),
+        MList(MTag),
+      ]),
+    );
   | Ap({value: Identifier("List"), _}, [arg]) =>
     switch (mlToType(arg)) {
     | Some(t) => Some(MList(t))
@@ -137,7 +139,7 @@ let rec mlToType = (t: ml): option(mlType) =>
             t =>
               switch (t) {
               | Some(v) => v
-              | None => MTerm
+              | None => MOLTerm(mkOL(OLHole))
               },
             types,
           ),
@@ -159,7 +161,6 @@ let rec decodePat = (j: jsObj): pat => {
     switch (kind) {
     | "PWildcard" => PWildcard
     | "PVar" => PVar(_str(v, "name"))
-    | "PHole" => PHole
     | "PString" => PString(_str(v, "value"))
     | "PList" =>
       PList(Array.map(decodePat, _arr(v, "items")) |> Array.to_list)
@@ -167,10 +168,10 @@ let rec decodePat = (j: jsObj): pat => {
       PCons(decodePat(_obj(v, "head")), decodePat(_obj(v, "tail")))
     | "PTuple" =>
       PTuple(Array.map(decodePat, _arr(v, "items")) |> Array.to_list)
-    | "PAp" =>
-      let head = decodePat(_obj(v, "head"));
+    | "POLAp" =>
+      let head = _str(v, "head");
       let args = Array.map(decodePat, _arr(v, "args")) |> Array.to_list;
-      PAp(head, args);
+      POLAp(head, args);
     | _ => PWildcard
     };
   {value, meta};
@@ -184,13 +185,13 @@ let rec decodeML = (j: jsObj): ml => {
   let kind = getKind(v);
   let value =
     switch (kind) {
-    | "Hole" => Hole(decodeHoleKind(_str(v, "hk")))
+    | "Hole" => Hole
+    | "Meta" => Meta(_int(v, "id"))
     | "Identifier" => Identifier(_str(v, "name"))
     | "StringLit" => StringLit(_str(v, "value"))
     | "TagLit" => TagLit(_str(v, "name"))
     | "Tuple" =>
       Tuple(Array.map(decodeML, _arr(v, "items")) |> Array.to_list)
-    | "Asc" => Asc(decodeML(_obj(v, "expr")), decodeML(_obj(v, "type")))
     | "BinOp" =>
       BinOp(
         decodeBinOp(_str(v, "op")),
@@ -223,101 +224,69 @@ let rec decodeML = (j: jsObj): ml => {
         decodeML(_obj(v, "else_")),
       )
     | "Let" =>
-      Let(decodeBinding(_obj(v, "binding")), decodeML(_obj(v, "body")))
-    | _ => Hole(Synthesized)
+      Let(decodeLetBinding(_obj(v, "binding")), decodeML(_obj(v, "body")))
+    | _ => Hole
     };
   {value, meta};
 }
 
-and decodeBinding = (j: jsObj): binding => {
-  let rawAnnotation =
-    switch (Js.Nullable.toOption(_objOpt(j, "rawAnnotation"))) {
-    | Some(o) => Some(decodeML(o))
-    | None => None
-    };
+and decodeLetBinding = (j: jsObj): letBinding => {
   let annotation =
-    switch (rawAnnotation) {
-    | Some(ml) => mlToType(ml)
+    switch (Js.Nullable.toOption(_objOpt(j, "rawAnnotation"))) {
+    | Some(o) => mlToType(decodeML(o))
     | None => None
     };
   {
     pat: decodePat(_obj(j, "pat")),
     annotation,
-    rawAnnotation,
-    rhs: decodeML(_obj(j, "rhs")),
-    bindingMeta: getBindingMeta(j),
+    definition: decodeML(_obj(j, "definition")),
+    bindingMeta: readMetaField(j, "bindingMeta"),
+  };
+};
+
+let decodeBinding = (j: jsObj): binding => {
+  let annotation =
+    switch (Js.Nullable.toOption(_objOpt(j, "rawAnnotation"))) {
+    | Some(o) => mlToType(decodeML(o))
+    | None => None
+    };
+  {
+    pat: _str(j, "pat"),
+    annotation,
+    definition: decodeML(_obj(j, "definition")),
+    bindingMeta: readMetaField(j, "bindingMeta"),
   };
 };
 
 let decodeMetaDef = (j: jsObj): metaDef => {
   let kind = getKind(j);
   switch (kind) {
-  | "NewtagDef" =>
-    let m = _obj(j, "defMeta");
-    let meta = {
-      parens: _bool(m, "parens"),
-      start: _int(m, "start"),
-      end_: _int(m, "end"),
-      ghost: None,
-    };
-    NewtagDef(_str(j, "tag"), meta);
-  | _ =>
-    let binding = decodeBinding(_obj(j, "binding"));
-    switch (kind) {
-    | "SchemaDef" => SchemaDef(binding)
-    | "CoerceDef" => CoerceDef(binding)
-    | _ => LetDef(binding)
-    };
+  | "NewtagDef" => NewtagDef(_str(j, "tag"), readMetaField(j, "defMeta"))
+  | "SchemaDef" => SchemaDef(decodeBinding(_obj(j, "binding")))
+  | "CoerceDef" => CoerceDef(decodeBinding(_obj(j, "binding")))
+  | _ => LetDef(decodeLetBinding(_obj(j, "binding")))
   };
-};
-
-let decodeTagLine = (j: jsObj): tagLine => {
-  let m = _obj(j, "lineMeta");
-  let meta = {
-    parens: _bool(m, "parens"),
-    start: _int(m, "start"),
-    end_: _int(m, "end"),
-    ghost: None,
-  };
-  {tag: _str(j, "tag"), target: _str(j, "target"), lineMeta: meta};
 };
 
 /* === Blocks === */
 
 let decodeBlock = (j: jsObj): block => {
   let kind = getKind(j);
-  let readMeta = (key: string): meta => {
-    let m = _obj(j, key);
-    {
-      parens: _bool(m, "parens"),
-      start: _int(m, "start"),
-      end_: _int(m, "end"),
-      ghost: None,
-    };
-  };
-  let readTagLines = (): list(tagLine) =>
-    switch (Js.Undefined.toOption(Obj.magic(Js.Dict.get(Obj.magic(j), "tagLines")))) {
-    | Some(arr) => Array.map(decodeTagLine, arr) |> Array.to_list
-    | None => []
-    };
   switch (kind) {
   | "Postulate" =>
-    Postulate(
-      readMeta("blockMeta"),
-      Array.map(decodeDecl, _arr(j, "decls")) |> Array.to_list,
-      readTagLines(),
-    )
+    Postulate({
+      postulateMeta: readMetaField(j, "postulateMeta"),
+      lines: Array.map(decodeOLLine, _arr(j, "lines")) |> Array.to_list,
+    })
   | "Construct" =>
-    Construct(
-      _str(j, "schema"),
-      readMeta("schemaMeta"),
-      readMeta("blockMeta"),
-      Array.map(decodeDecl, _arr(j, "decls")) |> Array.to_list,
-      readTagLines(),
-    )
+    Construct({
+      schema: _str(j, "schema"),
+      schemaMeta: readMetaField(j, "schemaMeta"),
+      lines: Array.map(decodeOLLine, _arr(j, "lines")) |> Array.to_list,
+    })
   | "Meta" =>
     Meta(Array.map(decodeMetaDef, _arr(j, "defs")) |> Array.to_list)
-  | _ => Postulate(defaultMeta, [], [])
+  | _ => Postulate({postulateMeta: defaultMeta, lines: []})
   };
 };
 
