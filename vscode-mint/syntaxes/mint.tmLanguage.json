@@ -5,29 +5,23 @@
     { "include": "#keywords" },
     { "include": "#operators" },
     { "include": "#strings" },
+    { "include": "#tags" },
     { "include": "#holes" },
     { "include": "#identifiers" }
   ],
   "repository": {
     "comments": {
-      "match": "--.*$",
-      "name": "comment.line.double-dash.mint"
+      "match": "//.*$",
+      "name": "comment.line.double-slash.mint"
     },
     "keywords": {
-      "match": "\\b(postulate|meta|construct|by|end|schema|let|in|fun|match|with|if|then|else|Sort|Ok|Error|foldl|fst|snd)\\b",
+      "match": "\\b(postulate|meta|construct|by|end)\\b",
       "name": "keyword.control.mint"
     },
     "operators": {
       "patterns": [
-        { "match": "=>", "name": "keyword.operator.mint" },
         { "match": "->", "name": "keyword.operator.mint" },
-        { "match": "==", "name": "keyword.operator.mint" },
-        { "match": "!=", "name": "keyword.operator.mint" },
-        { "match": "&&", "name": "keyword.operator.mint" },
-        { "match": "\\|\\|", "name": "keyword.operator.mint" },
-        { "match": "\\|", "name": "keyword.operator.mint" },
-        { "match": ":", "name": "keyword.operator.mint" },
-        { "match": "=", "name": "keyword.operator.mint" }
+        { "match": ":",  "name": "keyword.operator.mint" }
       ]
     },
     "strings": {
@@ -35,12 +29,16 @@
       "end": "\"",
       "name": "string.quoted.double.mint"
     },
+    "tags": {
+      "match": "#[a-zA-Z][a-zA-Z0-9_-]*",
+      "name": "entity.name.tag.mint"
+    },
     "holes": {
       "match": "\\?",
       "name": "constant.other.hole.mint"
     },
     "identifiers": {
-      "match": "\\b[a-zA-Z][a-zA-Z0-9_-]*\\b",
+      "match": "\\b[a-zA-Z_][a-zA-Z0-9_-]*\\b",
       "name": "variable.other.mint"
     }
   }

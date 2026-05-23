@@ -1,97 +1,58 @@
-make:
-	$(MAKE) reason
-	cd web && npm run dev
+.PHONY: build run test clean canonical canonical-init vscode-install vscode-uninstall
 
-.PHONY: reason clean grammar
-grammar:
-	cd web && npm run build-grammar
+build:
+	dune build
 
-reason:
-	cd reason && eval $$(opam env) && dune build @reason
+run: build
+	@if [ -z "$(FILE)" ]; then \
+	  echo "usage: make run FILE=examples/basic.mint"; exit 2; \
+	fi
+	./_build/default/src/mintc.bc.exe $(FILE)
+
+# Run every example in `examples/`, one after another. Quick smoke test.
+test: build
+	@for f in examples/*.mint; do \
+	  echo "============= $$f ============="; \
+	  ./_build/default/src/mintc.bc.exe $$f || true; \
+	  echo; \
+	done
 
 clean:
-	cd reason && eval $$(opam env) && dune clean
+	dune clean
 
-.PHONY: test
-test:
-	cp -r ./content ./web/public
-	$(MAKE) grammar
-	$(MAKE) reason
-	cd web && npx vite build 2>&1 | tee /tmp/vite-build.log && \
-		if grep -q 'is not exported by' /tmp/vite-build.log; then echo "BUILD ERROR: unresolved imports"; exit 1; fi
-	cd web && npx vitest run
+# === Canonical solver (vendor/Canonical) ============================
+# The kernel-bridge `Mint.canonical` is currently stubbed; once it's
+# wired in, it'll shell out to this binary.
 
-.PHONY: check try debug
-
-check:
-	$(MAKE) grammar
-	$(MAKE) reason
-	@node --no-warnings --experimental-strip-types cli/check.mjs $(FILE)
-
-.PHONY: try debug
-try:
-	$(MAKE) grammar
-	$(MAKE) reason
-	@node --no-warnings --experimental-strip-types --input-type=module -e "import { parseAndPrint } from './web/src/frontend/reason-bridge.ts'; console.log(parseAndPrint(process.argv[1]));" -- "$(EXPR)"
-
-# `parseAndDebug` is gone; the new architecture's debug equivalent is
-# the Lezer tree, which can be inspected via tests or the grammar build.
-debug:
-	@echo "make debug is currently unwired (parseAndDebug was removed in the parser swap). Inspect the Lezer tree via web/src/frontend/grammar/__tests__/diagnose.test.ts if needed."
-
-.PHONY: init vscode-init vscode-build vscode-smoke vscode-install vscode-uninstall
-init:
-	cd web && npm install
-
-vscode-init:
-	cd vscode-mint && npm install
-
-# Build the VS Code extension. Depends on the grammar and OCaml output
-# because esbuild bundles them into the extension binary.
-vscode-build:
-	$(MAKE) grammar
-	$(MAKE) reason
-	cd vscode-mint && npm run build
-
-# Smoke-test the bundled extension by loading it with a mocked vscode host
-# and verifying processCode flows through.
-vscode-smoke:
-	$(MAKE) vscode-build
-	cd vscode-mint && node --no-warnings --experimental-strip-types test-bundle.mjs
-
-# Install the extension permanently into VS Code by symlinking the
-# vscode-mint directory under ~/.vscode/extensions. Restart VS Code
-# (or reload the window) once after installing.
-VSCODE_EXT_DIR := $(HOME)/.vscode/extensions/mint-lang-0.1.0
-vscode-install:
-	$(MAKE) vscode-build
-	@if [ -L "$(VSCODE_EXT_DIR)" ] || [ -e "$(VSCODE_EXT_DIR)" ]; then \
-		rm -rf "$(VSCODE_EXT_DIR)"; \
-	fi
-	ln -s "$(PWD)/vscode-mint" "$(VSCODE_EXT_DIR)"
-	@echo "Installed: $(VSCODE_EXT_DIR) -> $(PWD)/vscode-mint"
-	@echo "Reload VS Code (Cmd-Shift-P → Developer: Reload Window) to activate."
-
-vscode-uninstall:
-	@if [ -L "$(VSCODE_EXT_DIR)" ] || [ -e "$(VSCODE_EXT_DIR)" ]; then \
-		rm -rf "$(VSCODE_EXT_DIR)"; \
-		echo "Removed: $(VSCODE_EXT_DIR)"; \
-	else \
-		echo "Not installed: $(VSCODE_EXT_DIR)"; \
-	fi
-
-# Build the Canonical solver from the vendor/Canonical submodule. Produces
-# vendor/Canonical/target/release/canonical-compat — the CLI entrypoint
-# that loads a JSON IR problem and emits an inhabitant. Skips the Lean
-# cdylib (we don't link against the Lean tactic here).
-.PHONY: canonical canonical-init
 canonical-init:
 	git submodule update --init --recursive vendor/Canonical
 
 CANONICAL_BIN := vendor/Canonical/target/release/canonical-compat
 canonical:
 	@if [ ! -d vendor/Canonical/.git ] && [ ! -f vendor/Canonical/.git ]; then \
-		echo "vendor/Canonical not initialized; run 'make canonical-init'"; exit 1; \
+	  echo "vendor/Canonical not initialized; run 'make canonical-init'"; exit 1; \
 	fi
 	cd vendor/Canonical && cargo build --release --bin canonical-compat
 	@echo "Built: $(CANONICAL_BIN)"
+
+# === VS Code extension ==============================================
+# Install by symlinking vscode-mint/ into ~/.vscode/extensions. After
+# install, reload VS Code (Cmd-Shift-P → Developer: Reload Window).
+# The extension shells out to mintc, so `make build` first.
+
+VSCODE_EXT_DIR := $(HOME)/.vscode/extensions/mint-lang-0.2.0
+vscode-install: build
+	@if [ -L "$(VSCODE_EXT_DIR)" ] || [ -e "$(VSCODE_EXT_DIR)" ]; then \
+	  rm -rf "$(VSCODE_EXT_DIR)"; \
+	fi
+	ln -s "$(PWD)/vscode-mint" "$(VSCODE_EXT_DIR)"
+	@echo "Installed: $(VSCODE_EXT_DIR) -> $(PWD)/vscode-mint"
+	@echo "Reload VS Code (Cmd-Shift-P -> Developer: Reload Window) to activate."
+
+vscode-uninstall:
+	@if [ -L "$(VSCODE_EXT_DIR)" ] || [ -e "$(VSCODE_EXT_DIR)" ]; then \
+	  rm -rf "$(VSCODE_EXT_DIR)"; \
+	  echo "Removed: $(VSCODE_EXT_DIR)"; \
+	else \
+	  echo "Not installed: $(VSCODE_EXT_DIR)"; \
+	fi

@@ -1,0 +1,4 @@
+(executable
+ (name mintc)
+ (modes byte_complete)
+ (libraries compiler-libs.toplevel unix))

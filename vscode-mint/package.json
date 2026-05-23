@@ -1,9 +1,9 @@
 {
   "name": "mint-lang",
   "displayName": "Mint",
-  "description": "Mint proof assistant language support: highlighting and live diagnostics",
-  "version": "0.1.0",
-  "main": "./dist/extension.js",
+  "description": "Mint proof assistant: syntax + live diagnostics via mintc",
+  "version": "0.2.0",
+  "main": "./extension.js",
   "engines": { "vscode": "^1.80.0" },
   "categories": ["Programming Languages"],
   "activationEvents": ["onLanguage:mint"],
@@ -19,36 +19,32 @@
       "scopeName": "source.mint",
       "path": "./syntaxes/mint.tmLanguage.json"
     }],
+    "configuration": {
+      "title": "Mint",
+      "properties": {
+        "mint.mintcPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to the mintc binary. If empty, the extension looks for _build/default/src/mintc.bc.exe in the workspace root."
+        },
+        "mint.runOn": {
+          "type": "string",
+          "enum": ["save", "change"],
+          "default": "save",
+          "description": "Trigger re-elaboration on file save (default) or on every keystroke."
+        }
+      }
+    },
     "configurationDefaults": {
       "editor.tokenColorCustomizations": {
         "textMateRules": [
           { "scope": "variable.other.mint",       "settings": { "foreground": "#FFFFFF" } },
           { "scope": "constant.other.hole.mint",  "settings": { "foreground": "#E261C0" } },
           { "scope": "keyword.control.mint",      "settings": { "foreground": "#28DCE5" } },
-          { "scope": "keyword.operator.mint",     "settings": { "foreground": "#28DCE5" } }
+          { "scope": "keyword.operator.mint",     "settings": { "foreground": "#28DCE5" } },
+          { "scope": "entity.name.tag.mint",      "settings": { "foreground": "#FFD75F" } }
         ]
-      },
-      "workbench.colorCustomizations": {
-        "[mint]": {
-          "editor.rangeHighlightBackground": "#80808033",
-          "editor.rangeHighlightBorder": "#00000000",
-          "editor.symbolHighlightBackground": "#80808033",
-          "editor.symbolHighlightBorder": "#00000000",
-          "editor.wordHighlightBackground": "#80808033",
-          "editor.wordHighlightBorder": "#00000000",
-          "editor.wordHighlightStrongBackground": "#80808033",
-          "editor.wordHighlightStrongBorder": "#00000000"
-        }
       }
     }
-  },
-  "scripts": {
-    "build": "node esbuild.config.mjs"
-  },
-  "devDependencies": {
-    "@types/node": "^20.0.0",
-    "@types/vscode": "^1.80.0",
-    "esbuild": "^0.20.0",
-    "typescript": "^5.0.0"
   }
 }
