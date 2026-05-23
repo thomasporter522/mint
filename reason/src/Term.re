@@ -170,3 +170,19 @@ let rec embedOL = (t: ol): ml => {
     };
   {value, meta: t.meta};
 };
+
+
+// let rec eqType = (a: mlType, b: mlType): bool =>
+//   switch (a, b) {
+//   | (MOLTerm(ol1), MOLTerm(ol2))
+//   | (MBool, MBool)
+//   | (MString, MString)
+//   | (MTag, MTag) => true
+//   | (MList(a), MList(b)) => eqType(a, b)
+//   | (MResult(a), MResult(b)) => eqType(a, b)
+//   | (MTuple(as_), MTuple(bs)) =>
+//     List.length(as_) == List.length(bs)
+//     && List.for_all2(eqType, as_, bs)
+//   | (MArrow(a1, a2), MArrow(b1, b2)) => eqType(a1, b1) && eqType(a2, b2)
+//   | _ => false
+//   };
