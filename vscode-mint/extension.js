@@ -65,7 +65,7 @@ function activate(context) {
           if (!range.contains(h.position)) continue
           const label = h.kind === 'coerce' ? '°' : '…'
           const hint = new vscode.InlayHint(h.position, label)
-          hint.tooltip = new vscode.MarkdownString(`\`${h.tooltip}\``)
+          hint.tooltip = h.tooltip
           hint.paddingLeft = true
           out.push(hint)
         }

@@ -26,25 +26,22 @@ let rec string_of_term t =
   | _ -> "<extension>"
 ;;
 
-(* A schema: given a list of declared signatures, return witnesses
-   matching their position. The schema also checks that every decl
-   has the expected return type (`Tag`). *)
+(* A schema: given a list of declared signatures, return Suc^i Zero
+   for the i-th decl. The kernel verifies each witness against the
+   decl's declared return type — so this schema is well-formed only
+   when invoked on a construct block whose decls all expect Nat. *)
 let enum_schema (_outer : signature list) (sigs : signature list)
     : (term list, string) result =
-  let all_tag = List.for_all (fun s -> s.ret = Tag) sigs in
-  if not all_tag then
-    Error "enum: every decl must have return type Tag"
-  else
-    let rec build n =
-      if n = 0 then Zero
-      else Suc (build (n - 1))
-    in
-    Ok (List.mapi (fun i _ -> build i) sigs)
+  let rec build n =
+    if n = 0 then Zero
+    else Suc (build (n - 1))
+  in
+  Ok (List.mapi (fun i _ -> build i) sigs)
 ;;
 end
 
 construct by enum_schema
-Foo : Tag
-Bar : Tag
-Baz : Tag
+Foo : Nat
+Bar : Nat
+Baz : Nat
 end

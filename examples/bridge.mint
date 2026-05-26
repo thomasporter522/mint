@@ -1,7 +1,8 @@
 // example-bridge.mint — exercises the Mint kernel-bridge module from
 // meta code. The schema inspects each signature, asks Mint to make
 // some witnesses include holes, and falls back to `Mint.canonical`
-// for any signature it can't handle.
+// for any signature it can't handle. The hole on `B` is intentional;
+// the kernel reports it as "Witness contains unsolved metavariables".
 
 postulate
 Sort : Sort
@@ -40,7 +41,7 @@ let mixed_schema (_outer : signature list) (sigs : signature list)
 end
 
 construct by mixed_schema
-A : Tag
-B : Tag
-C : Tag
+A : Nat
+B : Nat
+C : Nat
 end

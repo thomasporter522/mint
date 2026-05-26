@@ -8,6 +8,7 @@ type token =
   | TLParen
   | TRParen
   | TColon
+  | TComma
   | THole         (* `?` *)
 
 type lexed = { token: token; start: int; end_: int }
@@ -34,6 +35,7 @@ let tokenize ~(src : string) ~(line_start : int) ~(len : int) : lexed list =
     | '(' -> push TLParen !pos (!pos + 1); incr pos
     | ')' -> push TRParen !pos (!pos + 1); incr pos
     | ':' -> push TColon !pos (!pos + 1); incr pos
+    | ',' -> push TComma !pos (!pos + 1); incr pos
     | '?' -> push THole !pos (!pos + 1); incr pos
     | _ when is_ident_start c ->
       let start = !pos in

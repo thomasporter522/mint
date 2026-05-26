@@ -18,5 +18,5 @@ U : Sort
 Nat : U
 Zero : Nat
 eq (T : U) (a : T) (b : T) : U
-example : eq Zero Zero
+example : eq Zero
 end

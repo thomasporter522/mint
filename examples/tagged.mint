@@ -29,8 +29,8 @@ let tagged_schema (_outer : signature list) (sigs : signature list)
 end
 
 construct by tagged_schema
-Foo : Tag
-Bar : Tag
-Baz : Tag
+Foo : Nat
+Bar : Nat
+Baz : Nat
 #double Bar
 end

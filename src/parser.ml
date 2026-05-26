@@ -16,6 +16,10 @@ let starts_with prefix s =
   let lp = String.length prefix in
   String.length s >= lp && String.sub s 0 lp = prefix
 
+(* Comment prefixes accepted in OL block contexts. Mint's surface uses
+   `--`; the slice's earlier examples use `//`. Accept both. *)
+let is_comment_line s = starts_with "//" s || starts_with "--" s
+
 let strip_prefix prefix s =
   let lp = String.length prefix in
   trim (String.sub s lp (String.length s - lp))
@@ -41,7 +45,12 @@ let expect_token (s : ts) (kind : Lexer.token) (msg : string) : Lexer.lexed =
   | Some t -> raise (Parse_error (msg, t.start))
   | None -> raise (Parse_error (msg ^ " (got EOF)", -1))
 
-(* parse_ol_atom: identifier | "?" | "(" ol_term ")" *)
+(* parse_ol_atom: identifier | "?" | "(" ol_term ")"
+
+   The Mint surface uses pure juxtaposition for application — `eq A A`
+   not `Eq(A, A)` — and identifier-followed-by-`(` is two atoms (the
+   bare identifier and the parenthesised term being applied to it),
+   NOT a function-call form. Whitespace between is irrelevant. *)
 let rec parse_ol_atom (s : ts) : ol option =
   match peek s with
   | Some { token = TIdent name; start; end_ } ->
@@ -244,12 +253,56 @@ let parse_source ~(src : string) : program =
 
   let push_block b = acc := b :: !acc in
 
+  (* Close whatever content block we're in, treating `block_end` as the
+     end-of-block position. Used both for the explicit `end` keyword and
+     for implicit close when a new block keyword appears. *)
+  let close_content_block block_end =
+    let finalize_pending lines pending =
+      if pending = [] then lines
+      else
+        let decl = parse_decl_line pending (span_meta pending) in
+        Decl decl :: lines
+    in
+    match !state with
+    | InPostulate r ->
+      let lines = finalize_pending r.lines r.pending in
+      push_block (Postulate {
+        postulate_meta = { default_meta with start = r.start; end_ = block_end };
+        postulate_lines = List.rev lines;
+      });
+      state := Outside
+    | InConstruct r ->
+      let lines = finalize_pending r.lines r.pending in
+      push_block (Construct {
+        schema = r.schema;
+        schema_meta = { default_meta with start = r.schema_start; end_ = r.schema_end };
+        construct_lines = List.rev lines;
+      });
+      state := Outside
+    | _ -> ()
+  in
+
   iter_lines 0 (fun ~line_start ~line_end ~line ->
     let t = trim line in
     let line_meta = { default_meta with start = line_start; end_ = line_end } in
     let outside_meta = match !state with InMeta _ -> false | _ -> true in
-    if outside_meta && (t = "" || starts_with "//" t) then ()
-    else
+    if outside_meta && (t = "" || is_comment_line t) then ()
+    else begin
+      (* Main doesn't use an explicit `end` keyword — a new block keyword
+         implicitly closes the previous block. Detect that case and
+         finalize whatever postulate/construct block we're in. (Inside
+         a meta block, the source string is opaque; only literal `end`
+         on its own line terminates.) *)
+      let is_new_block_kw =
+        starts_with "postulate" t
+        || starts_with "meta" t
+        || starts_with "construct by " t
+      in
+      let in_content =
+        match !state with InPostulate _ | InConstruct _ -> true | _ -> false
+      in
+      if in_content && is_new_block_kw then
+        close_content_block line_start;
       match !state with
       | Outside ->
         if starts_with "postulate" t then
@@ -391,11 +444,16 @@ let parse_source ~(src : string) : program =
             }
           end
         end
+    end
   );
 
+  (* EOF: implicitly close whatever content block was still open. Meta
+     blocks must be closed explicitly with `end` — otherwise their
+     opaque source could grow indefinitely past where the user meant. *)
   (match !state with
    | Outside -> ()
-   | _ -> raise (Parse_error ("unterminated block (missing `end`)", n)));
+   | InPostulate _ | InConstruct _ -> close_content_block n
+   | InMeta _ -> raise (Parse_error ("unterminated meta block (missing `end`)", n)));
 
   List.rev !acc
 

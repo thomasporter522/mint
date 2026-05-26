@@ -34,7 +34,7 @@ let enum_schema = (_outer: list(signature), sigs: list(signature))
 end
 
 construct by enum_schema
-Foo : Tag
-Bar : Tag
-Baz : Tag
+Foo : Nat
+Bar : Nat
+Baz : Nat
 end

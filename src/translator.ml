@@ -23,7 +23,14 @@ let prelude = {ocaml|
 type term = ..
 
 module Mint = struct
-  type term += MintHole | MintMeta of int
+  (* `Param` represents a reference to a decl param from inside a
+     signature's `ret` or `params` field — e.g. for
+       `ap-I (x : D) : eq D D (ap I x) x`
+     the `ret` contains two references to the param `x`. Since `x`
+     isn't bound as an OCaml value at the call site, we emit
+     `Param "x"` instead; the kernel decodes it back to the OL
+     identifier `x` when the witness is read. *)
+  type term += MintHole | MintMeta of int | Param of string
 
   type signature = {
     name: string;
@@ -42,12 +49,30 @@ module Mint = struct
   let meta_id (t : term) : int option =
     match t with MintMeta n -> Some n | _ -> None
 
+  let param (s : string) : term = Param s
+  let is_param (t : term) : bool =
+    match t with Param _ -> true | _ -> false
+  let param_name (t : term) : string option =
+    match t with Param s -> Some s | _ -> None
+
   let canonical (_ctx : signature list) (_goal : term)
       : (term, string) result =
     Error "canonical solver not yet wired in this build"
+
 end
 ;;
 open Mint
+;;
+(* Witness transport. The synthesized construct phrase stores each
+   schema's returned witnesses in `__mint_last_witnesses`; the kernel
+   reads them with `Toploop.getvalue` and walks each one via
+   `Obj.Extension_constructor` introspection to recover OL terms for
+   the witness-check pass (mirrors main's runConstructSchema, with the
+   `Eval.runSchema` source replaced by Toploop). The companion ref
+   carries the matching decl names so the kernel can pair them up. *)
+let __mint_last_witnesses : term list ref = ref []
+;;
+let __mint_last_witness_names : string list ref = ref []
 ;;
 |ocaml}
 
@@ -62,24 +87,62 @@ open Mint
 (* Mint identifiers can be lowercase or hyphenated (e.g., `eq`,
    `cong-ap`); OCaml constructors must start with an uppercase letter
    and can't contain `-`. We mangle: capitalize the first letter,
-   replace hyphens with underscores. Inside meta blocks the user
-   references the MANGLED name (e.g. `Eq`, `Cong_ap`); the kernel
-   tracks the original name for the schema's signature's `.name`
-   field so user-facing diagnostics retain the source spelling. *)
-let mangle_constructor (s : string) : string =
-  let s = String.map (fun c -> if c = '-' then '_' else c) s in
-  String.capitalize_ascii s
+   replace hyphens with underscores. Schema (and meta-let) names are
+   identifiers, not constructors, so they keep their case but still
+   need hyphens replaced. *)
+let mangle_identifier (s : string) : string =
+  String.map (fun c -> if c = '-' then '_' else c) s
 
-let rec ol_to_ocaml_expr (t : ol) : string =
+(* Mint identifiers carry meaningful case (`Unit` ≠ `unit`) but OCaml
+   constructors must start uppercase, so naive capitalisation collides.
+   We track which mangled names have been claimed and append `_2`,
+   `_3`, … on later collisions. First-come wins — typically the
+   postulate decl (processed before its construct decl), so a schema
+   referencing `Unit` keeps pointing at the postulate's constructor.
+
+   `mangled_of_source` is the forward map (source → claimed mangled
+   name); the reverse is kept in `mintc`'s `constructor_info` for the
+   witness round-trip. *)
+let mangled_of_source : (string, string) Hashtbl.t = Hashtbl.create 32
+let claimed_mangled  : (string, unit)   Hashtbl.t = Hashtbl.create 32
+
+let mangle_constructor (s : string) : string =
+  match Hashtbl.find_opt mangled_of_source s with
+  | Some m -> m
+  | None ->
+    let base = String.capitalize_ascii (mangle_identifier s) in
+    let rec pick candidate n =
+      if Hashtbl.mem claimed_mangled candidate
+      then pick (base ^ "_" ^ string_of_int n) (n + 1)
+      else candidate
+    in
+    let final = pick base 2 in
+    Hashtbl.add mangled_of_source s final;
+    Hashtbl.add claimed_mangled final ();
+    final
+
+module StringSet = Set.Make(String)
+
+(* `Foo (a, b, c)` not `Foo (a) (b) (c)`: OCaml constructors with
+   multiple args take a tuple, not curried application.
+
+   `param_set` collects the names that should be emitted as
+   `Mint.param "x"` rather than as a global constructor. The
+   signature builder for each decl passes its own param names so
+   references to them resolve through the kernel's witness decoder
+   instead of failing as unbound OCaml identifiers. *)
+let rec ol_to_ocaml_expr (param_set : StringSet.t) (t : ol) : string =
   match t.value with
   | OLHole -> "(Mint.hole ())"
   | OLMeta n -> Printf.sprintf "(Mint.meta %d)" n
+  | OLAp (f, []) when StringSet.mem f.string param_set ->
+    Printf.sprintf "(Mint.param %S)" f.string
   | OLAp (f, []) -> mangle_constructor f.string
   | OLAp (f, args) ->
-    let arg_strs =
-      List.map (fun a -> "(" ^ ol_to_ocaml_expr a ^ ")") args
-    in
-    mangle_constructor f.string ^ " " ^ String.concat " " arg_strs
+    let arg_strs = List.map (ol_to_ocaml_expr param_set) args in
+    Printf.sprintf "%s (%s)"
+      (mangle_constructor f.string)
+      (String.concat ", " arg_strs)
 
 (* === Postulate / construct constructor declaration =================== *)
 
@@ -109,13 +172,18 @@ let tags_of_lines (lines : ol_line list) : tag_line list =
    the real (elaborated) OL types via `ol_to_ocaml_expr`. Tag lines
    attached to a target are looked up by name. *)
 let signature_expr ~(all_tags : tag_line list) (d : decl_line) : string =
+  let param_set =
+    List.fold_left (fun acc (a : decl_arg) ->
+      StringSet.add a.decl_arg_name.string acc
+    ) StringSet.empty d.args
+  in
   let params_src =
     if d.args = [] then "[]"
     else
       let pairs = List.map (fun (a : decl_arg) ->
         Printf.sprintf "(%S, %s)"
           a.decl_arg_name.string
-          (ol_to_ocaml_expr a.decl_arg_type)
+          (ol_to_ocaml_expr param_set a.decl_arg_type)
       ) d.args in
       "[ " ^ String.concat "; " pairs ^ " ]"
   in
@@ -134,7 +202,7 @@ let signature_expr ~(all_tags : tag_line list) (d : decl_line) : string =
     "{ name = %S; params = %s; ret = %s; tags = %s }"
     d.decl_name.string
     params_src
-    (ol_to_ocaml_expr d.ret_type)
+    (ol_to_ocaml_expr param_set d.ret_type)
     tags_src
 
 let construct_phrase
@@ -148,6 +216,12 @@ let construct_phrase
     "[ " ^ String.concat "; " (List.map (signature_expr ~all_tags:tags) decls)
     ^ " ]"
   in
+  let decl_names =
+    "[ "
+    ^ String.concat "; "
+        (List.map (fun (d : decl_line) -> Printf.sprintf "%S" d.decl_name.string) decls)
+    ^ " ]"
+  in
   let header =
     Printf.sprintf "[construct by %s] dispatching %d signature(s)"
       schema n
@@ -155,18 +229,18 @@ let construct_phrase
   let call =
     Printf.sprintf {ocaml|
 let () =
+  __mint_last_witnesses := [];
+  __mint_last_witness_names := %s;
   print_endline %S;
   match %s [] %s with
   | Ok witnesses ->
-    Printf.printf "  schema returned %%d witness(es):\n" (List.length witnesses);
-    List.iter (fun w ->
-      Printf.printf "    - %%s\n" (string_of_term w)
-    ) witnesses
+    __mint_last_witnesses := witnesses;
+    Printf.printf "  schema returned %%d witness(es)\n" (List.length witnesses)
   | Error msg ->
     Printf.printf "  schema returned error: %%s\n" msg
 ;;
 |ocaml}
-      header schema sig_list
+      decl_names header (mangle_identifier schema) sig_list
   in
   type_ext ^ call
 

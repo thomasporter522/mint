@@ -115,6 +115,14 @@ let rec zonk_and_forget (sols : ol IntMap.t) (t : ol) : ol =
     { t' with value = OLAp (f, List.map (zonk_and_forget sols) args) }
   | _ -> t'
 
+(* True if a term contains any hole-shaped subterm (user hole, synthesised
+   hole, or unresolved meta). Used by per-decl completeness: a decl is
+   not "type-complete" if its elaborated signature still has holes. *)
+let rec ol_has_holes (t : ol) : bool =
+  match t.value with
+  | OLHole | OLMeta _ -> true
+  | OLAp (_, args) -> List.exists ol_has_holes args
+
 (* === Context lookup ============================================== *)
 
 type lookup_result =
@@ -125,6 +133,46 @@ let lookup_ctx (ctx : context) (name : string) : lookup_result =
   match StringMap.find_opt name ctx with
   | None -> NotFound
   | Some (OLBinding ft) -> FoundOL ft
+
+(* Collect names of OL identifiers in `t` that resolve to OL bindings
+   in `outer_ctx`. Local-only references (e.g. to a decl's own params)
+   are filtered out — they aren't dependencies for completeness. *)
+let ol_collect_refs (t : ol) (outer_ctx : context) : string list =
+  let rec go acc (t : ol) =
+    match t.value with
+    | OLAp (f, args) ->
+      let acc =
+        match StringMap.find_opt f.string outer_ctx with
+        | Some (OLBinding _) -> f.string :: acc
+        | None -> acc
+      in
+      List.fold_left go acc args
+    | OLHole | OLMeta _ -> acc
+  in
+  go [] t
+
+(* Per-program completeness tracking. Each top-level decl is marked
+   `true` once it elaborates without holes / errors AND each of its
+   external refs (resolved against the outer context) is itself
+   marked complete. Reset at program start; consulted by
+   `all_refs_complete` and by the IDE's block-completeness ✓. *)
+module StringSet = Set.Make(String)
+let completeness_ref : (string, bool) Hashtbl.t = Hashtbl.create 32
+let reset_completeness () = Hashtbl.reset completeness_ref
+
+(* True iff every name in `refs` is marked complete. Names not yet
+   registered are treated as incomplete — forward references inside a
+   block are deferred until block-finalization, see `finalize_block`. *)
+let all_refs_complete (refs : string list) : bool =
+  List.for_all (fun name ->
+    match Hashtbl.find_opt completeness_ref name with
+    | Some true -> true
+    | _ -> false
+  ) refs
+
+(* Single-character marker for the coercion-subject slot in
+   `extract_diagnostics`. Matches main's `boxChar` (U+25A1, "□"). *)
+let box_char = "\xE2\x96\xA1"
 
 (* === Substitution: resolve named params in later param types ===== *)
 
@@ -138,6 +186,38 @@ let rec resolve (env : env) (t : ol) : ol =
      | Some sub, [] -> sub
      | _ -> { t with value = OLAp (f, List.map (resolve env) args) })
   | _ -> t
+
+(* Witness substitution. Maps each name to (param_names, witness_body).
+   For parameterless decls, param_names is `[]`. For a parameterised
+   decl `(f (x:A))` with witness `w`, resolving `(f arg)` substitutes
+   `x := arg` inside `w`. Used by `run_construct_schema` so each
+   witness sees its block-peer witnesses simultaneously (mutual
+   recursion across the block). *)
+type witness_env = (string list * ol) StringMap.t
+let empty_witness_env : witness_env = StringMap.empty
+
+let rec resolve_with_params (wenv : witness_env) (t : ol) : ol =
+  if StringMap.is_empty wenv then t
+  else
+    match t.value with
+    | OLAp (f, []) ->
+      (match StringMap.find_opt f.string wenv with
+       | Some ([], witness) -> witness
+       | _ -> t)
+    | OLAp (f, args) ->
+      (match StringMap.find_opt f.string wenv with
+       | Some (param_names, witness)
+         when List.length param_names = List.length args ->
+         let resolved_args = List.map (resolve_with_params wenv) args in
+         let param_env =
+           List.fold_left2 (fun acc p arg -> StringMap.add p arg acc)
+             empty_env param_names resolved_args
+         in
+         resolve param_env witness
+       | _ ->
+         { t with value =
+             OLAp (f, List.map (resolve_with_params wenv) args) })
+    | _ -> t
 
 (* === Type computation ============================================
    `compute_type` returns the OL type of a term in the current state.
@@ -263,48 +343,128 @@ let merge_info (a : static_info) (b : static_info) : static_info = {
   bindings = StringMap.union (fun _ _ v -> Some v) a.bindings b.bindings;
 }
 
-(* Walk an elaborated OL term; for every OLAp, collapse the leading
-   run of ghost-marked args into a single inlay hint anchored at the
-   head's end. Trailing or mid-spine ghosts (currently never produced
-   by the elaborator, but possible in principle) would need a
-   different anchor strategy; we ignore them for now. *)
-let rec extract_hints (sols : ol IntMap.t) (t : ol) : inlay_hint list =
-  match t.value with
-  | OLAp (f, args) ->
-    let recursive = List.concat_map (extract_hints sols) args in
-    let ghost_args =
-      let rec take_leading acc = function
-        | [] -> List.rev acc
-        | (a : ol) :: rest when is_ghost a.meta -> take_leading (a :: acc) rest
-        | _ :: _ -> List.rev acc
-      in
-      take_leading [] args
-    in
-    let new_hints =
-      if ghost_args = [] then []
-      else
-        let anchor = f.meta.end_ in
-        let by_kind kind =
-          List.filter_map (fun (g : ol) ->
-            match g.meta.ghost with
-            | Some k when k = kind -> Some g
-            | _ -> None
-          ) ghost_args
-        in
-        let mk kind subs =
-          if subs = [] then []
-          else
-            let tooltip =
-              subs
-              |> List.map (fun g -> Print.print_ol (follow sols g))
-              |> String.concat ", "
-            in
-            [{ hint_offset = anchor; hint_kind = kind; hint_tooltip = tooltip }]
-        in
-        mk Implicit (by_kind Implicit) @ mk Coerce (by_kind Coerce)
-    in
-    recursive @ new_hints
-  | _ -> []
+(* Walk an already-zonked elaborated term and emit both inlay hints
+   AND "not fully solved" warnings, parameterised by a `strip`
+   function (typically `strip_implicits`). Each ghost subtree carries
+   its kind directly (Implicit / Coerce); there is no side table.
+
+   • Maximal LEADING runs of Implicit-ghost args inside an Ap collapse
+     to one `…` hint anchored at the head's end; if any ghost in the
+     run is still unsolved we additionally emit a warning at the head.
+   • A Coerce-ghost subtree contains exactly one non-ghost descendant
+     (the user's coerced subject); we render `°` at the subject with
+     the wrap (subject replaced by `□`) as the hint. *)
+let extract_diagnostics
+    (strip : ol -> ol)
+    (sols : ol IntMap.t)
+    (root : ol)
+    : inlay_hint list * Error.t list =
+  let hints = ref [] in
+  let warns = ref [] in
+  let rec contains_unsolved (t : ol) : bool =
+    let t = follow sols t in
+    match t.value with
+    | OLMeta _ -> true
+    | OLAp (_, args) -> List.exists contains_unsolved args
+    | _ -> false
+  in
+  let rec find_subject (t : ol) : ol option =
+    if not (is_ghost t.meta) then Some t
+    else match t.value with
+      | OLAp (_, args) ->
+        List.fold_left (fun acc a ->
+          match acc with
+          | Some _ -> acc
+          | None -> find_subject a
+        ) None args
+      | _ -> None
+  in
+  let box_ol : ol = {
+    value = OLAp ({ string = box_char; meta = default_meta }, []);
+    meta = default_meta;
+  } in
+  let rec substitute_box subj_start subj_end (t : ol) : ol =
+    if t.meta.start = subj_start
+       && t.meta.end_ = subj_end
+       && not (is_ghost t.meta)
+    then box_ol
+    else match t.value with
+      | OLAp (f, args) ->
+        { t with value =
+            OLAp (f, List.map (substitute_box subj_start subj_end) args) }
+      | _ -> t
+  in
+  let render_args subs =
+    subs
+    |> List.map (fun g -> Print.print_ol (strip (zonk sols g)))
+    |> String.concat " "
+  in
+  let rec walk (t : ol) : unit =
+    match t.meta.ghost with
+    | Some Coerce ->
+      (match find_subject t with
+       | None -> ()
+       | Some subj ->
+         let tooltip_term =
+           substitute_box subj.meta.start subj.meta.end_ t
+         in
+         let tooltip = Print.print_ol (strip (zonk sols tooltip_term)) in
+         hints := !hints @ [{
+           hint_offset = subj.meta.start;
+           hint_kind = Coerce;
+           hint_tooltip = tooltip;
+         }];
+         if contains_unsolved t then
+           warns := !warns @ [Error.warn
+             "Coercion not fully solved" subj.meta.start subj.meta.end_];
+         walk subj)
+    | _ ->
+      (match t.value with
+       | OLAp (f, args) ->
+         let rec split_leading acc = function
+           | (a : ol) :: rest when a.meta.ghost = Some Implicit ->
+             split_leading (a :: acc) rest
+           | xs -> (List.rev acc, xs)
+         in
+         let (lead, rest) = split_leading [] args in
+         if lead <> [] then begin
+           hints := !hints @ [{
+             hint_offset = f.meta.end_;
+             hint_kind = Implicit;
+             hint_tooltip = render_args lead;
+           }];
+           if List.exists contains_unsolved lead then
+             warns := !warns @ [Error.warn
+               "Implicit arguments not fully solved"
+               f.meta.start f.meta.end_]
+         end;
+         List.iter walk rest
+       | _ -> ())
+  in
+  walk root;
+  (!hints, !warns)
+
+(* Resolve each hole's goal through the strip-and-zonk pipeline so
+   per-decl meta IDs don't leak into hole_info, and so the goal is
+   rendered in its compactest form. *)
+let resolve_hole_goals
+    (strip : ol -> ol)
+    (sols : ol IntMap.t)
+    (holes : hole_info list)
+    : hole_info list =
+  List.map (fun h -> { h with goal = strip (zonk sols h.goal) }) holes
+
+(* Shadowing diagnostic. Returns a warning if `name` already exists in
+   `ctx` with a different source position. *)
+let shadow_check (name : string) (name_meta : meta) (ctx : context)
+    : Error.t list =
+  match StringMap.find_opt name ctx with
+  | None -> []
+  | Some (OLBinding _) ->
+    (* For the slice we don't carry def-site positions, so any
+       reoccurrence is a shadow. Pre-binding the decl's own name for
+       self-reference fires this; the caller filters that case. *)
+    [Error.warn "Shadows existing binding" name_meta.start name_meta.end_]
 
 (* === OL term elaboration ========================================= *)
 
@@ -433,6 +593,68 @@ let rec check_ol_term
        } in
        (info', final_state'))
 
+(* Compact rendering of an elaborated term for inlay hints / hole
+   goals. For each OLAp, try successively stripping leading args and
+   re-elaborating the result; if the elaborator can re-derive an
+   equal term, keep the stripped form. The `□` (box) character marks
+   the coerce-subject slot; treated as a wildcard during the equality
+   check. *)
+and strip_implicits (sols : ol IntMap.t) (ctx : context) (t : ol) : ol =
+  let rec equal_for_strip (a : ol) (b : ol) : bool =
+    match a.value, b.value with
+    | OLAp ({ string = s; _ }, []), _ when s = box_char -> true
+    | _, OLAp ({ string = s; _ }, []) when s = box_char -> true
+    | OLMeta _, OLMeta _ -> true
+    | OLHole, OLHole -> true
+    | OLAp (f1, as1), OLAp (f2, as2) ->
+      f1.string = f2.string
+      && List.length as1 = List.length as2
+      && List.for_all2 equal_for_strip as1 as2
+    | _ -> false
+  in
+  let rec replace_box_with_hole (t : ol) : ol =
+    match t.value with
+    | OLAp ({ string = s; _ }, []) when s = box_char ->
+      { t with value = OLHole }
+    | OLAp (f, args) ->
+      { t with value = OLAp (f, List.map replace_box_with_hole args) }
+    | _ -> t
+  in
+  let rec strip (t : ol) : ol =
+    match t.value with
+    | OLAp (f, args) ->
+      let target = zonk sols t in
+      let n = List.length args in
+      let try_strip (k : int) : ol list option =
+        let kept = List.filteri (fun i _ -> i >= k) args in
+        let stripped : ol = { t with value = OLAp (f, kept) } in
+        let strip_check = replace_box_with_hole stripped in
+        let (info, state) =
+          check_ol_term empty_elab_state ctx None strip_check
+        in
+        if info.errors <> [] then None
+        else
+          match info.elaborated with
+          | None -> None
+          | Some elab ->
+            let elab_zonked = zonk state.sols elab in
+            if equal_for_strip target elab_zonked then Some kept
+            else None
+      in
+      let rec find_max_strip k current_kept =
+        if k > n then current_kept
+        else
+          match try_strip k with
+          | Some kept -> find_max_strip (k + 1) kept
+          | None -> current_kept
+      in
+      let stripped_args = find_max_strip 1 args in
+      let recursed = List.map strip stripped_args in
+      { t with value = OLAp (f, recursed) }
+    | _ -> t
+  in
+  strip t
+
 (* === Decl / line / block walks =================================== *)
 
 (* Elaborate a declaration line. Each arg's type is checked in a context
@@ -458,6 +680,9 @@ let check_decl_line (ctx : context) (d : decl_line)
     ) d.args
   in
   let preliminary_ft : full_type = (preliminary_params, d.ret_type) in
+  let self_shadow_warns =
+    shadow_check d.decl_name.string d.decl_name.meta ctx
+  in
   let ctx_with_self =
     StringMap.add d.decl_name.string (OLBinding preliminary_ft) ctx
   in
@@ -466,6 +691,10 @@ let check_decl_line (ctx : context) (d : decl_line)
       let (info, st') = check_ol_term acc_st acc_ctx None a.decl_arg_type in
       let elaborated_ty = match info.elaborated with Some e -> e | None -> a.decl_arg_type in
       let name = a.decl_arg_name.string in
+      let param_shadow_warns =
+        shadow_check name a.decl_arg_name.meta acc_ctx
+      in
+      let info = { info with errors = info.errors @ param_shadow_warns } in
       let binding_ty : full_type = ([], elaborated_ty) in
       let ctx' = StringMap.add name (OLBinding binding_ty) acc_ctx in
       (merge_info acc_info info, st', ctx', acc_params @ [(Some name, elaborated_ty)])
@@ -475,14 +704,17 @@ let check_decl_line (ctx : context) (d : decl_line)
     check_ol_term state_after_args ctx_with_args None d.ret_type in
   let elab_ret = match ret_info.elaborated with Some e -> e | None -> d.ret_type in
   let sols = state_after_ret.sols in
-  (* Inlay-hint extraction runs against the pre-zonk elaborated terms,
-     so ghost markers + per-decl meta IDs are still in scope and can
-     be resolved against `sols`. *)
-  let hints =
-    let walked =
-      List.concat_map (fun (_, ty) -> extract_hints sols ty) param_spec
-    in
-    walked @ extract_hints sols elab_ret
+  let strip = strip_implicits sols ctx_with_args in
+  (* Hint + warning extraction runs against the pre-zonk elaborated
+     terms so ghost markers + per-decl meta IDs are still in scope.
+     `strip` compacts each tooltip by stripping leading args the
+     elaborator can re-infer. *)
+  let (hints, warns) =
+    let pairs = List.map snd param_spec @ [elab_ret] in
+    List.fold_left (fun (hs, ws) t ->
+      let (h, w) = extract_diagnostics strip sols t in
+      (hs @ h, ws @ w)
+    ) ([], []) pairs
   in
   (* Build the external binding: zonk every elaborated piece through the
      local solutions; replace surviving metas with OLHole. *)
@@ -492,14 +724,31 @@ let check_decl_line (ctx : context) (d : decl_line)
   let external_ret = zonk_and_forget sols elab_ret in
   let external_ft : full_type = (external_params, external_ret) in
   let ctx' = StringMap.add d.decl_name.string (OLBinding external_ft) ctx in
-  (* Resolve hole goals through the same zonk so per-decl meta IDs don't
-     leak into hole_info either. *)
   let resolved_holes =
-    List.map (fun h -> { h with goal = zonk_and_forget sols h.goal })
-      (arg_info.holes @ ret_info.holes)
+    resolve_hole_goals strip sols (arg_info.holes @ ret_info.holes)
   in
+  (* Per-decl completeness: no holes, no real errors, all external
+     refs themselves complete. Marked tentatively here; finalised at
+     block level (where forward refs within the same block are
+     re-resolved against the freshly-marked peers). *)
+  let local_errs = arg_info.errors @ ret_info.errors in
+  let type_has_holes =
+    ol_has_holes external_ret
+    || List.exists (fun (_, ty) -> ol_has_holes ty) external_params
+  in
+  let type_refs =
+    List.concat (
+      List.map (fun (_, ty) -> ol_collect_refs ty ctx) external_params)
+    @ ol_collect_refs external_ret ctx
+  in
+  let local_complete =
+    not type_has_holes
+    && not (Error.has_real local_errs)
+    && all_refs_complete type_refs
+  in
+  Hashtbl.replace completeness_ref d.decl_name.string local_complete;
   let info = {
-    errors = arg_info.errors @ ret_info.errors;
+    errors = self_shadow_warns @ local_errs @ warns;
     holes = resolved_holes;
     inlay_hints = hints;
     elaborated = None;
@@ -529,6 +778,7 @@ let check_block (ctx : context) (b : block) : static_info * context =
   | MetaBlock _ -> (empty_info, ctx)
 
 let check_program (prog : program) : static_info =
+  reset_completeness ();
   let (info, _final_ctx) =
     List.fold_left (fun (acc_info, acc_ctx) b ->
       let (info, ctx') = check_block acc_ctx b in
