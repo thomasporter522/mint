@@ -667,12 +667,20 @@ and strip_implicits (sols : ol IntMap.t) (ctx : context) (t : ol) : ol =
    solutions and any unsolved meta is replaced by `OLHole` (which acts
    as a wildcard under unification), so per-decl meta IDs never leak.
 
-   Self-reference: the name being defined is pre-bound (using its un-
-   elaborated written types) before its own arg/ret types are checked.
-   That lets the bootstrap pattern `Sort : Sort` elaborate — the second
-   `Sort` resolves to the pre-binding. *)
-let check_decl_line (ctx : context) (d : decl_line)
-    : static_info * context =
+   Two contexts come in (see `check_block`):
+   • `elab_ctx` — the WHOLE block is in scope. Earlier decls appear as
+     their elaborated bindings; this decl itself and later decls appear
+     as their preliminary (un-elaborated, as-written) bindings. Type
+     resolution (arg / ret elaboration) reads this, so a decl may refer
+     to any peer in its block, including itself (the bootstrap pattern
+     `Sort : Sort`) and forward peers.
+   • `outer_ctx` — base context plus only the ELABORATED earlier decls
+     (no self, no forward peers). This matches the left-to-right context
+     the old code carried, and is used for shadow warnings + the
+     completeness-ref dependency walk, so neither self nor a forward
+     peer is mistaken for a shadow or an external dependency. *)
+let check_decl_line ~(elab_ctx : context) ~(outer_ctx : context)
+    (d : decl_line) : static_info * full_type =
   let state = empty_elab_state in
   let preliminary_params =
     List.map (fun (a : decl_arg) ->
@@ -681,24 +689,30 @@ let check_decl_line (ctx : context) (d : decl_line)
   in
   let preliminary_ft : full_type = (preliminary_params, d.ret_type) in
   let self_shadow_warns =
-    shadow_check d.decl_name.string d.decl_name.meta ctx
+    shadow_check d.decl_name.string d.decl_name.meta outer_ctx
   in
-  let ctx_with_self =
-    StringMap.add d.decl_name.string (OLBinding preliminary_ft) ctx
+  (* Shadow checks for params run against a prefix-only context (outer +
+     self + prior args), NOT `elab_ctx`, so a param sharing a name with a
+     forward sibling decl isn't spuriously flagged. *)
+  let shadow_base =
+    StringMap.add d.decl_name.string (OLBinding preliminary_ft) outer_ctx
   in
-  let (arg_info, state_after_args, ctx_with_args, param_spec) =
-    List.fold_left (fun (acc_info, acc_st, acc_ctx, acc_params) (a : decl_arg) ->
+  let (arg_info, state_after_args, ctx_with_args, _shadow_with_args, param_spec) =
+    List.fold_left
+      (fun (acc_info, acc_st, acc_ctx, acc_shadow, acc_params) (a : decl_arg) ->
       let (info, st') = check_ol_term acc_st acc_ctx None a.decl_arg_type in
       let elaborated_ty = match info.elaborated with Some e -> e | None -> a.decl_arg_type in
       let name = a.decl_arg_name.string in
       let param_shadow_warns =
-        shadow_check name a.decl_arg_name.meta acc_ctx
+        shadow_check name a.decl_arg_name.meta acc_shadow
       in
       let info = { info with errors = info.errors @ param_shadow_warns } in
       let binding_ty : full_type = ([], elaborated_ty) in
       let ctx' = StringMap.add name (OLBinding binding_ty) acc_ctx in
-      (merge_info acc_info info, st', ctx', acc_params @ [(Some name, elaborated_ty)])
-    ) (empty_info, state, ctx_with_self, []) d.args
+      let shadow' = StringMap.add name (OLBinding binding_ty) acc_shadow in
+      (merge_info acc_info info, st', ctx', shadow',
+       acc_params @ [(Some name, elaborated_ty)])
+    ) (empty_info, state, elab_ctx, shadow_base, []) d.args
   in
   let (ret_info, state_after_ret) =
     check_ol_term state_after_args ctx_with_args None d.ret_type in
@@ -723,14 +737,13 @@ let check_decl_line (ctx : context) (d : decl_line)
   in
   let external_ret = zonk_and_forget sols elab_ret in
   let external_ft : full_type = (external_params, external_ret) in
-  let ctx' = StringMap.add d.decl_name.string (OLBinding external_ft) ctx in
   let resolved_holes =
     resolve_hole_goals strip sols (arg_info.holes @ ret_info.holes)
   in
   (* Per-decl completeness: no holes, no real errors, all external
-     refs themselves complete. Marked tentatively here; finalised at
-     block level (where forward refs within the same block are
-     re-resolved against the freshly-marked peers). *)
+     refs themselves complete. Refs are collected against `outer_ctx`
+     (no self, no forward peers) so a self- or forward-reference isn't
+     counted as an external dependency. Marked tentatively here. *)
   let local_errs = arg_info.errors @ ret_info.errors in
   let type_has_holes =
     ol_has_holes external_ret
@@ -738,8 +751,8 @@ let check_decl_line (ctx : context) (d : decl_line)
   in
   let type_refs =
     List.concat (
-      List.map (fun (_, ty) -> ol_collect_refs ty ctx) external_params)
-    @ ol_collect_refs external_ret ctx
+      List.map (fun (_, ty) -> ol_collect_refs ty outer_ctx) external_params)
+    @ ol_collect_refs external_ret outer_ctx
   in
   let local_complete =
     not type_has_holes
@@ -754,28 +767,62 @@ let check_decl_line (ctx : context) (d : decl_line)
     elaborated = None;
     bindings = StringMap.singleton d.decl_name.string (OLBinding external_ft);
   } in
-  (info, ctx')
+  (info, external_ft)
 
-let check_ol_line (ctx : context) (l : ol_line) : static_info * context =
-  match l with
-  | Decl d -> check_decl_line ctx d
-  | Tag _ -> (empty_info, ctx)
+(* Check a whole block with circular (mutual) declaration dependence.
 
+   The entire block is in scope while checking each declaration: we seed
+   a context with every decl's PRELIMINARY (as-written) binding, then walk
+   the decls in order, replacing each one's preliminary binding with its
+   elaborated binding as we go. So declaration [i] is checked against the
+   elaborated forms of [0..i-1] and the preliminary forms of [i..end]
+   (its own included, for self-reference).
+
+   `outer_ctx` tracks only the base context plus the ELABORATED earlier
+   decls — the left-to-right context the old code carried — and is handed
+   to `check_decl_line` for shadow / completeness checks. Its final value
+   (base + all elaborated decls) is what we return for the next block. *)
 let check_block (ctx : context) (b : block) : static_info * context =
+  let lines = match b with
+    | Postulate pb -> pb.postulate_lines
+    | Construct cb -> cb.construct_lines
+    | MetaBlock _ -> []
+  in
   match b with
-  | Postulate pb ->
-    List.fold_left (fun (info, ctx') line ->
-      let (li, ctx'') = check_ol_line ctx' line in
-      (merge_info info li, ctx'')
-    ) (empty_info, ctx) pb.postulate_lines
-
-  | Construct cb ->
-    List.fold_left (fun (info, ctx') line ->
-      let (li, ctx'') = check_ol_line ctx' line in
-      (merge_info info li, ctx'')
-    ) (empty_info, ctx) cb.construct_lines
-
   | MetaBlock _ -> (empty_info, ctx)
+  | Postulate _ | Construct _ ->
+    let decls =
+      List.filter_map (function Decl d -> Some d | Tag _ -> None) lines
+    in
+    let prelim_of (d : decl_line) : full_type =
+      let params =
+        List.map (fun (a : decl_arg) ->
+          (Some a.decl_arg_name.string, a.decl_arg_type)
+        ) d.args
+      in
+      (params, d.ret_type)
+    in
+    (* Whole block seeded as preliminary bindings on top of the base. *)
+    let block_ctx0 =
+      List.fold_left (fun acc (d : decl_line) ->
+        StringMap.add d.decl_name.string (OLBinding (prelim_of d)) acc
+      ) ctx decls
+    in
+    let (info, _elab_ctx, outer_ctx) =
+      List.fold_left (fun (acc_info, elab_ctx, outer_ctx) line ->
+        match line with
+        | Tag _ -> (acc_info, elab_ctx, outer_ctx)
+        | Decl d ->
+          let (li, elab_ft) = check_decl_line ~elab_ctx ~outer_ctx d in
+          let name = d.decl_name.string in
+          (* Swap this decl's preliminary binding for its elaborated one
+             in both contexts before moving to the next decl. *)
+          let elab_ctx' = StringMap.add name (OLBinding elab_ft) elab_ctx in
+          let outer_ctx' = StringMap.add name (OLBinding elab_ft) outer_ctx in
+          (merge_info acc_info li, elab_ctx', outer_ctx')
+      ) (empty_info, block_ctx0, ctx) lines
+    in
+    (info, outer_ctx)
 
 let check_program (prog : program) : static_info =
   reset_completeness ();
