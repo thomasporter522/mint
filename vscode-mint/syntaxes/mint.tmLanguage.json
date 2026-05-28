@@ -11,8 +11,8 @@
   ],
   "repository": {
     "comments": {
-      "match": "//.*$",
-      "name": "comment.line.double-slash.mint"
+      "match": "(//|--).*$",
+      "name": "comment.line.mint"
     },
     "keywords": {
       "match": "\\b(postulate|meta|construct|by|end)\\b",

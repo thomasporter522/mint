@@ -503,7 +503,14 @@ let rec check_ol_term
         (match unify state ctx e inferred with
          | Some s -> ([], s)
          | None ->
-           ([Error.mark "Type mismatch on metavariable" t.meta.start t.meta.end_], state))
+           let msg =
+             "Inconsistency (expected "
+             ^ Print.print_ol (zonk state.sols e)
+             ^ ", found "
+             ^ Print.print_ol (zonk state.sols inferred)
+             ^ ")"
+           in
+           ([Error.mark msg t.meta.start t.meta.end_], state))
     in
     ({ empty_info with errors = errs; elaborated = Some t }, state')
 
@@ -580,11 +587,14 @@ let rec check_ol_term
            (match unify final_state ctx e inferred with
             | Some s -> ([], s)
             | None ->
-              let err = Error.mark
-                ("Type mismatch on " ^ f.string)
-                t.meta.start t.meta.end_
+              let msg =
+                "Inconsistency (expected "
+                ^ Print.print_ol (zonk final_state.sols e)
+                ^ ", found "
+                ^ Print.print_ol (zonk final_state.sols inferred)
+                ^ ")"
               in
-              ([err], final_state))
+              ([Error.mark msg t.meta.start t.meta.end_], final_state))
        in
        let info' = {
          info with
